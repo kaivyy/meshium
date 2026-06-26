@@ -211,6 +211,15 @@ func (c *Client) Download(remotePath string, dst io.Writer) error {
 	return err
 }
 
+// IsAlive checks whether the SSH connection is still responsive.
+func (c *Client) IsAlive() bool {
+	if c == nil || c.conn == nil {
+		return false
+	}
+	_, _, err := c.conn.SendRequest("keepalive@openssh.com", true, nil)
+	return err == nil
+}
+
 // Close closes the SSH connection.
 func (c *Client) Close() error {
 	if c == nil || c.conn == nil {
