@@ -20,6 +20,9 @@ func NewService(repo Repo) *Service {
 
 // IsSetup returns true if a master password has been set.
 func (s *Service) IsSetup() (bool, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+
 	return s.repo.HasMasterPassword()
 }
 

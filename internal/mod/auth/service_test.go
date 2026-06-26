@@ -49,6 +49,22 @@ func TestSetupCreatesMasterPassword(t *testing.T) {
 	}
 }
 
+func TestSetupRejectsSecondCall(t *testing.T) {
+	d := setupTestDB(t)
+	defer d.Close()
+
+	repo := NewRepo(d)
+	svc := NewService(repo)
+
+	if err := svc.Setup("first-password"); err != nil {
+		t.Fatalf("first Setup failed: %v", err)
+	}
+
+	if err := svc.Setup("second-password"); err == nil {
+		t.Fatal("second Setup should fail once master password is already set")
+	}
+}
+
 func TestUnlockWithCorrectPassword(t *testing.T) {
 	d := setupTestDB(t)
 	defer d.Close()
@@ -111,11 +127,24 @@ func TestLockClearsKey(t *testing.T) {
 	repo := NewRepo(d)
 	svc := NewService(repo)
 
-	svc.Setup("my-password")
+	if err := svc.Setup("my-password"); err != nil {
+		t.Fatalf("Setup failed: %v", err)
+	}
+
+	key := svc.aesKey
+	if len(key) != 32 {
+		t.Fatalf("expected 32-byte AES key before Lock(), got %d", len(key))
+	}
+
 	svc.Lock()
 
-	key := svc.GetAESKey()
-	if key != nil {
+	for i, b := range key {
+		if b != 0 {
+			t.Fatalf("AES key byte %d was not wiped: got %d", i, b)
+		}
+	}
+
+	if got := svc.GetAESKey(); got != nil {
 		t.Error("AES key should be nil after Lock()")
 	}
 }
