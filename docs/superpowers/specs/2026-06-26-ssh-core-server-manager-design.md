@@ -224,17 +224,23 @@ func (c *SSHClient) Close() error
 
 ### Authentication Flow
 
+Auth priority (tried in order):
+1. App SSH key (if installed on server via "Install Public Key" flow)
+2. Server's custom SSH key (if user provided one for this server)
+3. Password (if no key works)
+
 ```
 Connect(serverID):
 1. Load server credentials from DB (decrypt with master password)
-2. If server has SSH key → use key auth
-3. Else if server has password → use password auth
-   └── After connect: offer to install app public key
+2. Try app SSH key → if auth fails, try server's custom SSH key → if auth fails, try password
+3. If password auth succeeds → offer to install app public key
 4. SSH client config:
    - HostKeyCallback: known_hosts verification
    - Timeout: 10s connect, 30s command
    - Ciphers: aes256-gcm@openssh.com, chacha20-poly1305@openssh.com
 ```
+
+The `ssh_key` field in the `servers` table stores a user-provided custom key (not the app key). The app key is stored globally in `app_config` and tried first for all servers.
 
 ### Host Key Verification
 
@@ -292,6 +298,7 @@ Server create request includes credentials in plaintext (encrypted before storag
 | Public IP | `curl -s ifconfig.me` (with timeout) |
 | Private IP | `hostname -I \| awk '{print $1}'` |
 | Timezone | `timedatectl \| grep "Time zone"` |
+| Provider | `curl -s --max-time 2 http://169.254.169.254/latest/meta-data/instance-id \|\| echo "unknown"` (cloud metadata; returns "unknown" for non-cloud servers) |
 
 ### WebSocket Streaming
 
