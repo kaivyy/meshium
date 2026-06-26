@@ -1,10 +1,10 @@
 module meshium
 
-go 1.25.0
+go 1.24.4
 
 require (
 	golang.org/x/crypto v0.48.0
-	modernc.org/sqlite v1.53.0
+	modernc.org/sqlite v1.40.1
 )
 
 require (
@@ -13,8 +13,9 @@ require (
 	github.com/mattn/go-isatty v0.0.20 // indirect
 	github.com/ncruces/go-strftime v1.0.0 // indirect
 	github.com/remyoudompheng/bigfft v0.0.0-20230129092748-24d4a6f8daec // indirect
-	golang.org/x/sys v0.44.0 // indirect
-	modernc.org/libc v1.73.4 // indirect
+	golang.org/x/exp v0.0.0-20250620022241-b7579e27df2b // indirect
+	golang.org/x/sys v0.41.0 // indirect
+	modernc.org/libc v1.66.10 // indirect
 	modernc.org/mathutil v1.7.1 // indirect
 	modernc.org/memory v1.11.0 // indirect
 )

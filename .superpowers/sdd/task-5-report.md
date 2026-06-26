@@ -9,7 +9,7 @@
     - `server_info`
     - `known_hosts`
 - Added `internal/db/db_test.go` to verify migrations create all required tables.
-- Added SQLite dependency management through `go.mod` / `go.sum`.
+- Added SQLite dependency management through `go.mod` / `go.sum`, using a Go 1.24-compatible `modernc.org/sqlite` release.
 
 ## TDD evidence
 ### RED
@@ -46,11 +46,11 @@ Result:
 - `internal/db/db_test.go` — added migration test
 - `internal/db/db.go` — added SQLite open helper
 - `internal/db/migrations.go` — added schema creation migrations
-- `go.mod` — added SQLite driver dependency
+- `go.mod` — added SQLite driver dependency and kept the module on Go 1.24.4
 - `go.sum` — added dependency checksums
 
 ## Self-review findings
 - The implementation is intentionally small and matches the task brief closely.
 - I added a small compatibility improvement for `:memory:` databases by using a shared-cache in-memory DSN and limiting the DB pool to one connection, which keeps the test database stable across queries.
-- `go.mod` was updated to `go 1.25.0` because the current `modernc.org/sqlite` release selected by Go requires that toolchain version.
+- I selected `modernc.org/sqlite v1.40.1` so the project could stay on `go 1.24.4` while still using a pure-Go SQLite driver.
 - No failing tests remain.
