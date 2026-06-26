@@ -70,13 +70,13 @@ func connect(cfg ServerConfig, hostKeyCallback ssh.HostKeyCallback) (*Client, er
 func (c *Client) Exec(cmd string) (string, string, int, error) {
 	c.lastUsed = time.Now()
 
+	ctx, cancel := context.WithTimeout(context.Background(), commandTimeout)
+	defer cancel()
+
 	session, err := c.conn.NewSession()
 	if err != nil {
 		return "", "", -1, err
 	}
-
-	ctx, cancel := context.WithTimeout(context.Background(), commandTimeout)
-	defer cancel()
 
 	var closeOnce sync.Once
 	closeSession := func() {
@@ -119,13 +119,13 @@ func (c *Client) Exec(cmd string) (string, string, int, error) {
 func (c *Client) ExecStream(cmd string, onOutput func(line string)) error {
 	c.lastUsed = time.Now()
 
+	ctx, cancel := context.WithTimeout(context.Background(), commandTimeout)
+	defer cancel()
+
 	session, err := c.conn.NewSession()
 	if err != nil {
 		return err
 	}
-
-	ctx, cancel := context.WithTimeout(context.Background(), commandTimeout)
-	defer cancel()
 
 	var closeOnce sync.Once
 	closeSession := func() {
