@@ -24,11 +24,17 @@ type Pool struct {
 type poolEntry struct {
 	client    *Client
 	createdAt time.Time
-	lastUsed  time.Time
 }
 
 // NewPool constructs a new SSH connection pool.
 func NewPool(cfg PoolConfig) *Pool {
+	if cfg.MaxIdle == 0 {
+		cfg.MaxIdle = 10 * time.Minute
+	}
+	if cfg.MaxLifetime == 0 {
+		cfg.MaxLifetime = 30 * time.Minute
+	}
+
 	return &Pool{
 		connections: make(map[int]*poolEntry),
 		config:      cfg,
@@ -44,8 +50,7 @@ func (p *Pool) Get(serverID int, cfg ServerConfig, hostKeyCallback func(hostname
 	now := time.Now()
 	if entry, ok := p.connections[serverID]; ok {
 		if p.isEntryValid(entry, now) {
-			entry.lastUsed = now
-			entry.client.lastUsed = now
+			entry.client.touch()
 			return entry.client, nil
 		}
 
@@ -62,7 +67,6 @@ func (p *Pool) Get(serverID int, cfg ServerConfig, hostKeyCallback func(hostname
 	p.connections[serverID] = &poolEntry{
 		client:    client,
 		createdAt: now,
-		lastUsed:  now,
 	}
 
 	return client, nil
@@ -114,7 +118,7 @@ func (p *Pool) isEntryValid(entry *poolEntry, now time.Time) bool {
 	if p.config.MaxLifetime > 0 && now.Sub(entry.createdAt) > p.config.MaxLifetime {
 		return false
 	}
-	if p.config.MaxIdle > 0 && now.Sub(entry.client.lastUsed) > p.config.MaxIdle {
+	if p.config.MaxIdle > 0 && now.Sub(entry.client.LastUsed()) > p.config.MaxIdle {
 		return false
 	}
 	return true

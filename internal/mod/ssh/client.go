@@ -18,7 +18,29 @@ type Client struct {
 	serverID  int
 	conn      *ssh.Client
 	createdAt time.Time
+	mu        sync.Mutex
 	lastUsed  time.Time
+}
+
+func (c *Client) touch() {
+	if c == nil {
+		return
+	}
+
+	c.mu.Lock()
+	c.lastUsed = time.Now()
+	c.mu.Unlock()
+}
+
+// LastUsed returns the last time the client was used.
+func (c *Client) LastUsed() time.Time {
+	if c == nil {
+		return time.Time{}
+	}
+
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return c.lastUsed
 }
 
 const commandTimeout = 30 * time.Second
@@ -68,7 +90,7 @@ func connect(cfg ServerConfig, hostKeyCallback ssh.HostKeyCallback) (*Client, er
 
 // Exec runs a command and returns stdout, stderr, and exit code.
 func (c *Client) Exec(cmd string) (string, string, int, error) {
-	c.lastUsed = time.Now()
+	c.touch()
 
 	ctx, cancel := context.WithTimeout(context.Background(), commandTimeout)
 	defer cancel()
@@ -117,7 +139,7 @@ func (c *Client) Exec(cmd string) (string, string, int, error) {
 
 // ExecStream runs a command and calls onOutput for each stdout line.
 func (c *Client) ExecStream(cmd string, onOutput func(line string)) error {
-	c.lastUsed = time.Now()
+	c.touch()
 
 	ctx, cancel := context.WithTimeout(context.Background(), commandTimeout)
 	defer cancel()
@@ -173,7 +195,7 @@ func (c *Client) ExecStream(cmd string, onOutput func(line string)) error {
 
 // Upload uploads a file via SFTP.
 func (c *Client) Upload(src io.Reader, remotePath string) error {
-	c.lastUsed = time.Now()
+	c.touch()
 
 	sftpClient, err := sftp.NewClient(c.conn)
 	if err != nil {
@@ -193,7 +215,7 @@ func (c *Client) Upload(src io.Reader, remotePath string) error {
 
 // Download downloads a file via SFTP.
 func (c *Client) Download(remotePath string, dst io.Writer) error {
-	c.lastUsed = time.Now()
+	c.touch()
 
 	sftpClient, err := sftp.NewClient(c.conn)
 	if err != nil {

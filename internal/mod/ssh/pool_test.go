@@ -5,6 +5,7 @@ import (
 	"crypto/rsa"
 	"fmt"
 	"net"
+	"sync"
 	"testing"
 	"time"
 
@@ -205,4 +206,34 @@ func TestPoolExpiresIdleConnections(t *testing.T) {
 	if first == second {
 		t.Fatal("expected expired idle connection to be replaced")
 	}
+}
+
+func TestNewPoolAppliesDefaultExpiryLimits(t *testing.T) {
+	pool := NewPool(PoolConfig{})
+
+	if got, want := pool.config.MaxIdle, 10*time.Minute; got != want {
+		t.Fatalf("expected default MaxIdle %v, got %v", want, got)
+	}
+	if got, want := pool.config.MaxLifetime, 30*time.Minute; got != want {
+		t.Fatalf("expected default MaxLifetime %v, got %v", want, got)
+	}
+}
+
+func TestClientLastUsedConcurrentAccess(t *testing.T) {
+	var c Client
+	const goroutines = 16
+	const iterations = 1000
+
+	var wg sync.WaitGroup
+	wg.Add(goroutines)
+	for range goroutines {
+		go func() {
+			defer wg.Done()
+			for range iterations {
+				c.touch()
+				_ = c.LastUsed()
+			}
+		}()
+	}
+	wg.Wait()
 }
