@@ -3,8 +3,10 @@ package ssh
 import (
 	"bufio"
 	"bytes"
+	"context"
 	"fmt"
 	"io"
+	"sync"
 	"time"
 
 	"github.com/pkg/sftp"
@@ -18,6 +20,8 @@ type Client struct {
 	createdAt time.Time
 	lastUsed  time.Time
 }
+
+const commandTimeout = 30 * time.Second
 
 // connect establishes an SSH connection.
 func connect(cfg ServerConfig, hostKeyCallback ssh.HostKeyCallback) (*Client, error) {
@@ -70,13 +74,36 @@ func (c *Client) Exec(cmd string) (string, string, int, error) {
 	if err != nil {
 		return "", "", -1, err
 	}
-	defer session.Close()
+
+	ctx, cancel := context.WithTimeout(context.Background(), commandTimeout)
+	defer cancel()
+
+	var closeOnce sync.Once
+	closeSession := func() {
+		closeOnce.Do(func() {
+			_ = session.Close()
+		})
+	}
+	defer closeSession()
+
+	done := make(chan struct{})
+	defer close(done)
+	go func() {
+		select {
+		case <-ctx.Done():
+			closeSession()
+		case <-done:
+		}
+	}()
 
 	var stdout, stderr bytes.Buffer
 	session.Stdout = &stdout
 	session.Stderr = &stderr
 
 	err = session.Run(cmd)
+	if ctx.Err() != nil {
+		return stdout.String(), stderr.String(), -1, ctx.Err()
+	}
 	if err == nil {
 		return stdout.String(), stderr.String(), 0, nil
 	}
@@ -96,7 +123,27 @@ func (c *Client) ExecStream(cmd string, onOutput func(line string)) error {
 	if err != nil {
 		return err
 	}
-	defer session.Close()
+
+	ctx, cancel := context.WithTimeout(context.Background(), commandTimeout)
+	defer cancel()
+
+	var closeOnce sync.Once
+	closeSession := func() {
+		closeOnce.Do(func() {
+			_ = session.Close()
+		})
+	}
+	defer closeSession()
+
+	done := make(chan struct{})
+	defer close(done)
+	go func() {
+		select {
+		case <-ctx.Done():
+			closeSession()
+		case <-done:
+		}
+	}()
 
 	stdout, err := session.StdoutPipe()
 	if err != nil {
@@ -104,12 +151,18 @@ func (c *Client) ExecStream(cmd string, onOutput func(line string)) error {
 	}
 
 	if err := session.Start(cmd); err != nil {
+		if ctx.Err() != nil {
+			return ctx.Err()
+		}
 		return err
 	}
 
 	scanner := bufio.NewScanner(stdout)
 	for scanner.Scan() {
 		onOutput(scanner.Text())
+	}
+	if ctx.Err() != nil {
+		return ctx.Err()
 	}
 	if err := scanner.Err(); err != nil {
 		return err
