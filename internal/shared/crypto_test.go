@@ -2,6 +2,7 @@ package shared
 
 import (
 	"bytes"
+	"strings"
 	"testing"
 )
 
@@ -36,11 +37,27 @@ func TestEncryptProducesDifferentCiphertext(t *testing.T) {
 	}
 }
 
+func TestEncryptDecryptRejectInvalidKeyLengths(t *testing.T) {
+	shortKey := []byte("0123456789abcdef")
+
+	if _, err := Encrypt(shortKey, []byte("plaintext")); err == nil {
+		t.Fatal("Encrypt should reject keys that are not 32 bytes")
+	}
+
+	if _, err := Decrypt(shortKey, []byte("ciphertext")); err == nil {
+		t.Fatal("Decrypt should reject keys that are not 32 bytes")
+	}
+}
+
 func TestHashAndVerifyPassword(t *testing.T) {
 	password := "my-master-password"
 	hash, err := HashPassword(password)
 	if err != nil {
 		t.Fatalf("HashPassword failed: %v", err)
+	}
+
+	if !strings.HasPrefix(hash, "$2a$14$") {
+		t.Fatalf("expected bcrypt hash with cost 14, got %q", hash)
 	}
 
 	if !VerifyPassword(password, hash) {

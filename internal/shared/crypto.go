@@ -15,6 +15,10 @@ import (
 // Encrypt encrypts plaintext using AES-256-GCM with the given key.
 // Returns nonce prepended to ciphertext.
 func Encrypt(key, plaintext []byte) ([]byte, error) {
+	if len(key) != 32 {
+		return nil, errors.New("key must be 32 bytes")
+	}
+
 	block, err := aes.NewCipher(key)
 	if err != nil {
 		return nil, err
@@ -36,6 +40,10 @@ func Encrypt(key, plaintext []byte) ([]byte, error) {
 
 // Decrypt decrypts ciphertext (nonce-prepended) using AES-256-GCM.
 func Decrypt(key, ciphertext []byte) ([]byte, error) {
+	if len(key) != 32 {
+		return nil, errors.New("key must be 32 bytes")
+	}
+
 	block, err := aes.NewCipher(key)
 	if err != nil {
 		return nil, err
@@ -70,6 +78,7 @@ func VerifyPassword(password, hash string) bool {
 }
 
 // DeriveKey derives a 32-byte AES key from a password and salt using PBKDF2.
+// Callers are responsible for zeroing the returned key once they are done with it.
 func DeriveKey(password string, salt []byte) []byte {
 	return pbkdf2.Key([]byte(password), salt, 600000, 32, sha256.New)
 }
