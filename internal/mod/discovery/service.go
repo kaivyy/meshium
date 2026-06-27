@@ -282,10 +282,6 @@ func (s *Service) RunConnectionTest(ctx context.Context, serverID int, onStep St
 		applyResultToSystemInfo(&info, result)
 	}
 
-	if ctx.Err() != nil {
-		return ctx.Err()
-	}
-
 	rawData, err := json.Marshal(info)
 	if err != nil {
 		return err
