@@ -9,6 +9,7 @@ import (
 	"meshium/internal/db"
 	"meshium/internal/mod/auth"
 	"meshium/internal/mod/discovery"
+	"meshium/internal/mod/migration"
 	"meshium/internal/mod/server"
 	"meshium/internal/mod/ssh"
 	"meshium/internal/shared"
@@ -50,6 +51,16 @@ func main() {
 	discoverySvc := discovery.NewService(discovery.NewPoolAdapter(sshPool), serverRepo, authSvc, knownHosts)
 	discoveryHandler := discovery.NewHandler(discoverySvc)
 
+	// Migration engine
+	migrationRepo := migration.NewRepo(database)
+	migrationRegistry := migration.NewCategoryRegistry()
+	poolAdapter := &migration.PoolAdapter{Inner: discovery.NewPoolAdapter(sshPool)}
+	migrationPlanner := migration.NewPlanner(migrationRegistry, migrationRepo, serverRepo, poolAdapter, authSvc, knownHosts)
+	migrationExecutor := migration.NewExecutor(migrationRegistry, migrationRepo, serverRepo, poolAdapter, authSvc, knownHosts)
+	migrationRollback := migration.NewRollbackManager(migrationRegistry, migrationRepo, serverRepo, poolAdapter, authSvc, knownHosts)
+	migrationRunner := migration.NewCompositeRunner(migrationPlanner, migrationExecutor, migrationRollback)
+	migrationHandler := migration.NewHandler(migrationRunner, migrationRepo)
+
 	mux := http.NewServeMux()
 	mux.HandleFunc("/api/health", func(w http.ResponseWriter, r *http.Request) {
 		shared.WriteJSON(w, http.StatusOK, map[string]string{"status": "ok"})
@@ -57,6 +68,7 @@ func main() {
 	authHandler.RegisterRoutes(mux)
 	serverHandler.RegisterRoutes(mux)
 	discoveryHandler.RegisterRoutes(mux)
+	migrationHandler.RegisterRoutes(mux)
 	mux.Handle("/", staticHandler())
 
 	addr := ":" + cfg.ServerPort
