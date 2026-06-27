@@ -78,12 +78,7 @@ func (s *Service) Setup(password string) error {
 		return err
 	}
 
-	if err := s.repo.SetMasterPassword(hash); err != nil {
-		return err
-	}
-
-	if err := s.repo.SetSSHKeyPair(string(encryptedPrivateKey), string(publicSSH)); err != nil {
-		_ = s.repo.SetMasterPassword("")
+	if err := s.repo.SetupAll(hash, string(encryptedPrivateKey), string(publicSSH)); err != nil {
 		return err
 	}
 

@@ -2,7 +2,6 @@ package auth
 
 import (
 	"database/sql"
-	"errors"
 	"strings"
 	"testing"
 
@@ -19,18 +18,6 @@ func setupTestDB(t *testing.T) *sql.DB {
 		t.Fatalf("Migrate failed: %v", err)
 	}
 	return d
-}
-
-type setupFailureRepo struct {
-	Repo
-	failSSHKeyPair bool
-}
-
-func (r *setupFailureRepo) SetSSHKeyPair(encryptedPrivateKey, publicKey string) error {
-	if r.failSSHKeyPair {
-		return errors.New("forced ssh key storage failure")
-	}
-	return r.Repo.SetSSHKeyPair(encryptedPrivateKey, publicKey)
 }
 
 func TestSetupCreatesMasterPassword(t *testing.T) {
@@ -164,15 +151,36 @@ func TestLockClearsKey(t *testing.T) {
 	}
 }
 
-func TestSetupDoesNotPersistMasterPasswordOnSSHKeyFailure(t *testing.T) {
+func TestSetupIsAtomicOnSSHKeyFailure(t *testing.T) {
 	d := setupTestDB(t)
 	defer d.Close()
 
-	repo := &setupFailureRepo{Repo: NewRepo(d), failSSHKeyPair: true}
+	repo := NewRepo(d)
 	svc := NewService(repo)
 
+	if _, err := d.Exec(`
+		CREATE TRIGGER reject_ssh_key_public_insert
+		BEFORE INSERT ON app_config
+		WHEN NEW.key = 'ssh_key_public'
+		BEGIN
+			SELECT RAISE(ABORT, 'reject ssh public key write');
+		END;
+	`); err != nil {
+		t.Fatalf("create insert trigger failed: %v", err)
+	}
+	if _, err := d.Exec(`
+		CREATE TRIGGER reject_ssh_key_public_update
+		BEFORE UPDATE ON app_config
+		WHEN NEW.key = 'ssh_key_public'
+		BEGIN
+			SELECT RAISE(ABORT, 'reject ssh public key write');
+		END;
+	`); err != nil {
+		t.Fatalf("create update trigger failed: %v", err)
+	}
+
 	if err := svc.Setup("my-password"); err == nil {
-		t.Fatal("Setup should fail when SSH key storage fails")
+		t.Fatal("Setup should fail when SSH key storage is rejected")
 	}
 
 	setup, err := repo.HasMasterPassword()
@@ -180,24 +188,27 @@ func TestSetupDoesNotPersistMasterPasswordOnSSHKeyFailure(t *testing.T) {
 		t.Fatalf("HasMasterPassword failed: %v", err)
 	}
 	if setup {
-		t.Fatal("master password should not be persisted after setup failure")
+		t.Fatal("master password should not be persisted after failed setup")
+	}
+
+	encrypted, err := repo.GetEncryptedSSHKey()
+	if err != nil {
+		t.Fatalf("GetEncryptedSSHKey failed: %v", err)
+	}
+	if encrypted != "" {
+		t.Fatal("encrypted SSH key should not be persisted after failed setup")
+	}
+
+	public, err := repo.GetSSHPublicKey()
+	if err != nil {
+		t.Fatalf("GetSSHPublicKey failed: %v", err)
+	}
+	if public != "" {
+		t.Fatal("public SSH key should not be persisted after failed setup")
 	}
 
 	if !svc.IsLocked() {
 		t.Fatal("service should remain locked after failed setup")
-	}
-
-	repo.failSSHKeyPair = false
-	if err := svc.Setup("my-password"); err != nil {
-		t.Fatalf("retry Setup failed: %v", err)
-	}
-
-	setup, err = repo.HasMasterPassword()
-	if err != nil {
-		t.Fatalf("HasMasterPassword failed: %v", err)
-	}
-	if !setup {
-		t.Fatal("master password should be persisted after successful retry")
 	}
 }
 
