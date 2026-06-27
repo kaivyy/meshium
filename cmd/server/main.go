@@ -57,6 +57,7 @@ func main() {
 	authHandler.RegisterRoutes(mux)
 	serverHandler.RegisterRoutes(mux)
 	discoveryHandler.RegisterRoutes(mux)
+	mux.Handle("/", staticHandler())
 
 	addr := ":" + cfg.ServerPort
 	fmt.Printf("Meshium server starting on %s\n", addr)

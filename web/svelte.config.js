@@ -5,8 +5,8 @@ const config = {
   preprocess: vitePreprocess(),
   kit: {
     adapter: adapter({
-      pages: 'build',
-      assets: 'build',
+      pages: '../cmd/server/web/build',
+      assets: '../cmd/server/web/build',
       fallback: 'index.html'
     })
   }
