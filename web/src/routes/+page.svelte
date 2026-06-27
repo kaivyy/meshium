@@ -22,13 +22,16 @@
 <div class="min-h-screen bg-slate-50">
   <header class="flex items-center justify-between border-b border-slate-200 bg-white px-6 py-4">
     <h1 class="text-xl font-bold tracking-tight text-slate-900">Meshium</h1>
-    <button
-      type="button"
-      on:click={() => lock()}
-      class="text-sm font-medium text-slate-600 transition hover:text-slate-900"
-    >
-      Lock
-    </button>
+    <div class="flex items-center gap-4">
+      <a href="/settings" class="text-sm font-medium text-slate-600 transition hover:text-slate-900">Settings</a>
+      <button
+        type="button"
+        on:click={() => lock()}
+        class="text-sm font-medium text-slate-600 transition hover:text-slate-900"
+      >
+        Lock
+      </button>
+    </div>
   </header>
 
   <main class="mx-auto w-full max-w-7xl p-6">
@@ -145,10 +148,16 @@
                       <Server size={16} />
                     </div>
                     <div>
-                      <div class="font-medium text-slate-900">{server.name}</div>
+                      <a href={`/servers/${server.id}`} class="font-medium text-slate-900 transition hover:text-blue-600">
+                        {server.name}
+                      </a>
                       {#if server.description}
                         <div class="mt-1 max-w-md text-sm text-slate-500">{server.description}</div>
                       {/if}
+                      <div class="mt-2 flex flex-wrap gap-3 text-xs font-medium">
+                        <a href={`/servers/${server.id}`} class="text-blue-600 transition hover:text-blue-700">View</a>
+                        <a href={`/servers/${server.id}/edit`} class="text-slate-500 transition hover:text-slate-900">Edit</a>
+                      </div>
                     </div>
                   </div>
                 </td>
