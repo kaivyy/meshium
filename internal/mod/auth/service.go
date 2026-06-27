@@ -4,6 +4,7 @@ import (
 	"errors"
 	"sync"
 
+	"meshium/internal/mod/ssh"
 	"meshium/internal/shared"
 )
 
@@ -72,7 +73,66 @@ func (s *Service) Setup(password string) error {
 	s.aesKey = shared.DeriveKey(password, salt)
 	s.locked = false
 
+	// Generate SSH key pair
+	if err := s.EnsureSSHKey(); err != nil {
+		return err
+	}
+
 	return nil
+}
+
+// GetSSHPublicKey returns the app's SSH public key.
+func (s *Service) GetSSHPublicKey() (string, error) {
+	return s.repo.GetSSHPublicKey()
+}
+
+// RegenerateSSHKey generates a new SSH key pair, encrypts the private key,
+// and stores both keys in app_config.
+func (s *Service) RegenerateSSHKey() (string, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	if s.locked {
+		return "", errors.New("app is locked")
+	}
+
+	return s.generateAndStoreSSHKeyPair()
+}
+
+// EnsureSSHKey generates a key pair if one doesn't exist yet.
+// Called during Setup.
+func (s *Service) EnsureSSHKey() error {
+	existing, err := s.repo.GetSSHPublicKey()
+	if err != nil {
+		return err
+	}
+	if existing != "" {
+		return nil
+	}
+
+	_, err = s.generateAndStoreSSHKeyPair()
+	return err
+}
+
+func (s *Service) generateAndStoreSSHKeyPair() (string, error) {
+	privatePEM, publicSSH, err := ssh.GenerateKeyPair()
+	if err != nil {
+		return "", err
+	}
+
+	encrypted, err := shared.Encrypt(s.aesKey, privatePEM)
+	if err != nil {
+		return "", err
+	}
+
+	if err := s.repo.SetEncryptedSSHKey(string(encrypted)); err != nil {
+		return "", err
+	}
+	if err := s.repo.SetSSHPublicKey(string(publicSSH)); err != nil {
+		return "", err
+	}
+
+	return string(publicSSH), nil
 }
 
 // Unlock verifies the master password and loads the AES key into memory.

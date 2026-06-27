@@ -94,3 +94,61 @@ func TestUnlockLockEndpoints(t *testing.T) {
 		t.Errorf("expected 200, got %d", w.Code)
 	}
 }
+
+func TestSSHKeyEndpoints(t *testing.T) {
+	d := setupTestDB(t)
+	defer d.Close()
+
+	repo := NewRepo(d)
+	svc := NewService(repo)
+	h := NewHandler(svc)
+
+	if err := svc.Setup("test-password"); err != nil {
+		t.Fatalf("Setup failed: %v", err)
+	}
+
+	mux := http.NewServeMux()
+	h.RegisterRoutes(mux)
+
+	req := httptest.NewRequest(http.MethodGet, "/api/ssh-key/public", nil)
+	w := httptest.NewRecorder()
+	mux.ServeHTTP(w, req)
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d", w.Code)
+	}
+
+	var publicResp SSHKeyResponse
+	if err := json.NewDecoder(w.Body).Decode(&publicResp); err != nil {
+		t.Fatalf("decode failed: %v", err)
+	}
+	storedPublic, err := repo.GetSSHPublicKey()
+	if err != nil {
+		t.Fatalf("GetSSHPublicKey failed: %v", err)
+	}
+	if publicResp.PublicKey != storedPublic {
+		t.Fatalf("expected public key %q, got %q", storedPublic, publicResp.PublicKey)
+	}
+
+	req = httptest.NewRequest(http.MethodPost, "/api/ssh-key/regenerate", nil)
+	w = httptest.NewRecorder()
+	mux.ServeHTTP(w, req)
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d", w.Code)
+	}
+
+	var regenerated SSHKeyResponse
+	if err := json.NewDecoder(w.Body).Decode(&regenerated); err != nil {
+		t.Fatalf("decode failed: %v", err)
+	}
+	if regenerated.PublicKey == publicResp.PublicKey {
+		t.Fatal("expected regenerated SSH key to change")
+	}
+
+	storedPublic, err = repo.GetSSHPublicKey()
+	if err != nil {
+		t.Fatalf("GetSSHPublicKey failed: %v", err)
+	}
+	if storedPublic != regenerated.PublicKey {
+		t.Fatalf("expected stored public key to match regenerated key")
+	}
+}

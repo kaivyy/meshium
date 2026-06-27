@@ -20,6 +20,8 @@ func (h *Handler) RegisterRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("/api/auth/unlock", h.handleUnlock)
 	mux.HandleFunc("/api/auth/lock", h.handleLock)
 	mux.HandleFunc("/api/auth/status", h.handleStatus)
+	mux.HandleFunc("/api/ssh-key/public", h.handleSSHKeyPublic)
+	mux.HandleFunc("/api/ssh-key/regenerate", h.handleSSHKeyRegenerate)
 }
 
 func (h *Handler) handleSetup(w http.ResponseWriter, r *http.Request) {
@@ -102,4 +104,34 @@ func (h *Handler) handleStatus(w http.ResponseWriter, r *http.Request) {
 		Setup:  setup,
 		Locked: h.svc.IsLocked(),
 	})
+}
+
+func (h *Handler) handleSSHKeyPublic(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		shared.WriteError(w, http.StatusMethodNotAllowed, "method not allowed", "METHOD_NOT_ALLOWED")
+		return
+	}
+
+	key, err := h.svc.GetSSHPublicKey()
+	if err != nil {
+		shared.WriteError(w, http.StatusInternalServerError, "internal error", "INTERNAL")
+		return
+	}
+
+	shared.WriteJSON(w, http.StatusOK, SSHKeyResponse{PublicKey: key})
+}
+
+func (h *Handler) handleSSHKeyRegenerate(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		shared.WriteError(w, http.StatusMethodNotAllowed, "method not allowed", "METHOD_NOT_ALLOWED")
+		return
+	}
+
+	key, err := h.svc.RegenerateSSHKey()
+	if err != nil {
+		shared.WriteError(w, http.StatusInternalServerError, "failed to regenerate key", "INTERNAL")
+		return
+	}
+
+	shared.WriteJSON(w, http.StatusOK, SSHKeyResponse{PublicKey: key})
 }
