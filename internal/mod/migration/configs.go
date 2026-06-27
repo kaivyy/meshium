@@ -7,6 +7,49 @@ import (
 	"strings"
 )
 
+// configExclusions is a list of file paths and directory prefixes that must
+// never be overwritten during config migration. These are OS-critical files
+// that would break the target server if replaced.
+var configExclusions = []string{
+	"/etc/fstab",
+	"/etc/hostname",
+	"/etc/machine-id",
+	"/etc/hosts",
+	"/etc/shadow",
+	"/etc/passwd",
+	"/etc/group",
+	"/etc/subuid",
+	"/etc/subgid",
+	"/etc/resolv.conf",
+	"/etc/network/",
+	"/etc/netplan/",
+	"/etc/sysconfig/network-scripts/",
+	"/etc/udev/",
+	"/etc/crypttab",
+	"/etc/mdadm.conf",
+	"/etc/dracut.conf",
+	"/etc/kernel/",
+	"/etc/grub.d/",
+	"/etc/default/grub",
+}
+
+// isExcluded returns true if the given path matches any exclusion entry.
+// Matches both exact file paths and directory prefixes (ending with /).
+func isExcluded(path string) bool {
+	for _, excl := range configExclusions {
+		if strings.HasSuffix(excl, "/") {
+			if strings.HasPrefix(path, excl) {
+				return true
+			}
+		} else {
+			if path == excl {
+				return true
+			}
+		}
+	}
+	return false
+}
+
 // ConfigsData holds collected config files from the source server.
 type ConfigsData struct {
 	Files map[string][]byte `json:"files"` // path -> content
@@ -47,6 +90,11 @@ func (c *ConfigsCollector) Collect(ssh SSHExecuter) (CategoryData, error) {
 				continue
 			}
 
+			// Skip OS-critical files
+			if isExcluded(file) {
+				continue
+			}
+
 			// Download the file content
 			buf := new(bytes.Buffer)
 			if err := ssh.Download(file, buf); err != nil {
@@ -82,6 +130,10 @@ func (a *ConfigsApplier) Backup(ssh SSHExecuter) (BackupData, error) {
 		if file == "" {
 			continue
 		}
+		// Skip OS-critical files — they should never be overwritten
+		if isExcluded(file) {
+			continue
+		}
 		buf := new(bytes.Buffer)
 		if err := ssh.Download(file, buf); err != nil {
 			continue
@@ -110,6 +162,17 @@ func (a *ConfigsApplier) Apply(ssh SSHExecuter, data CategoryData, onProgress St
 
 	count := 0
 	for path, content := range cd.Files {
+		// Safety net: skip OS-critical files even if they somehow got into the data
+		if isExcluded(path) {
+			if onProgress != nil {
+				onProgress(WSMessage{
+					Step:   "configs:apply",
+					Status: "warning",
+					Value:  fmt.Sprintf("Skipping excluded file: %s", path),
+				})
+			}
+			continue
+		}
 		if err := ssh.Upload(bytes.NewReader(content), path); err != nil {
 			if onProgress != nil {
 				onProgress(WSMessage{

@@ -19,6 +19,7 @@ type Server struct {
 	Icon        string   `json:"icon"`
 	Color       string   `json:"color"`
 	Favorite    bool     `json:"favorite"`
+	BastionID   int      `json:"bastionId"`     // 0 = direct, >0 = use server with this ID as bastion/jump host
 	CreatedAt   string   `json:"createdAt"`
 	UpdatedAt   string   `json:"updatedAt"`
 }
@@ -38,6 +39,7 @@ type CreateRequest struct {
 	Region      string   `json:"region"`
 	Icon        string   `json:"icon"`
 	Color       string   `json:"color"`
+	BastionID   int      `json:"bastionId"`
 }
 
 // UpdateRequest is the DTO for updating a server.
@@ -55,6 +57,7 @@ type UpdateRequest struct {
 	Region      *string   `json:"region,omitempty"`
 	Icon        *string   `json:"icon,omitempty"`
 	Color       *string   `json:"color,omitempty"`
+	BastionID   *int      `json:"bastionId,omitempty"`
 }
 
 // ServerResponse is the API response shape for servers.
@@ -73,6 +76,7 @@ type ServerResponse struct {
 	Icon        string   `json:"icon"`
 	Color       string   `json:"color"`
 	Favorite    bool     `json:"favorite"`
+	BastionID   int      `json:"bastionId"`
 	CreatedAt   string   `json:"createdAt"`
 	UpdatedAt   string   `json:"updatedAt"`
 }
@@ -117,6 +121,7 @@ func (s Server) Response() ServerResponse {
 		Icon:        s.Icon,
 		Color:       s.Color,
 		Favorite:    s.Favorite,
+		BastionID:   s.BastionID,
 		CreatedAt:   s.CreatedAt,
 		UpdatedAt:   s.UpdatedAt,
 	}

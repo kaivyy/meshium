@@ -231,6 +231,31 @@ func (s *Service) RunConnectionTest(ctx context.Context, serverID int, onStep St
 		sshConfig.PrivateKey = []byte(sshKey)
 	}
 
+	// Resolve bastion if configured
+	if srv.BastionID > 0 {
+		bastion, err := s.repo.GetByID(srv.BastionID)
+		if err == nil {
+			bPassword, _ := decryptCredential(aesKey, bastion.Password)
+			bSSHKey, _ := decryptCredential(aesKey, bastion.SSHKey)
+			bPassphrase, _ := decryptCredential(aesKey, bastion.Passphrase)
+			bPort := bastion.Port
+			if bPort == 0 {
+				bPort = 22
+			}
+			bastionCfg := &modssh.BastionConfig{
+				Host:       bastion.Host,
+				Port:       bPort,
+				Username:   bastion.Username,
+				Password:   bPassword,
+				Passphrase: bPassphrase,
+			}
+			if bSSHKey != "" {
+				bastionCfg.PrivateKey = []byte(bSSHKey)
+			}
+			sshConfig.Bastion = bastionCfg
+		}
+	}
+
 	start := time.Now()
 	hostKeyCallback := s.hosts.MakeHostKeyCallback()
 	client, err := s.pool.Get(serverID, sshConfig, hostKeyCallback)

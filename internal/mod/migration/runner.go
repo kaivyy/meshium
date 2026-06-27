@@ -28,3 +28,19 @@ func (r *CompositeRunner) Execute(ctx context.Context, migrationID int, onProgre
 func (r *CompositeRunner) Rollback(ctx context.Context, migrationID int, onProgress StepCallback) error {
 	return r.rollback.Rollback(ctx, migrationID, onProgress)
 }
+
+// PreFlight delegates to the Executor.
+func (r *CompositeRunner) PreFlight(ctx context.Context, migrationID int, onProgress StepCallback) (*PreFlightResult, error) {
+	return r.executor.PreFlight(ctx, migrationID, onProgress)
+}
+
+// DryRun delegates to the Executor.
+func (r *CompositeRunner) DryRun(ctx context.Context, migrationID int, onProgress StepCallback) (*DryRunResult, error) {
+	return r.executor.DryRun(ctx, migrationID, onProgress)
+}
+
+// Diff delegates to the DiffService.
+func (r *CompositeRunner) Diff(ctx context.Context, sourceID, targetID int, categories []string, onProgress StepCallback) (*DiffResult, error) {
+	ds := NewDiffService(r.executor.registry, r.executor.srvRepo, r.executor.pool, r.executor.authSvc, r.executor.hosts)
+	return ds.Diff(ctx, sourceID, targetID, categories, onProgress)
+}

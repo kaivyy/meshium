@@ -74,24 +74,23 @@
   }
 </script>
 
-<div class="min-h-screen bg-slate-50">
-  <header class="border-b border-slate-200 bg-white px-6 py-4">
-    <a href="/" class="inline-flex items-center gap-2 text-sm text-slate-600 transition hover:text-slate-900">
-      <ArrowLeft size={16} /> Back to Servers
-    </a>
-    <h1 class="mt-2 text-xl font-bold tracking-tight text-slate-900">Add Server</h1>
-  </header>
+<div class="p-4 sm:p-6">
+  <a href="/" class="inline-flex items-center gap-2 text-sm text-slate-600 transition hover:text-slate-900">
+    <ArrowLeft size={16} /> Back to Servers
+  </a>
+  <h1 class="mt-2 text-xl font-bold tracking-tight text-slate-900">Add Server</h1>
 
-  <main class="mx-auto w-full max-w-3xl p-6">
+  <div class="mt-4 max-w-3xl mx-auto">
     {#if error}
       <div class="mb-4 rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">{error}</div>
     {/if}
 
-    <form class="space-y-5 rounded-2xl border border-slate-200 bg-white p-6 shadow-sm" on:submit|preventDefault={handleSubmit}>
+    <form class="space-y-5 rounded-2xl border border-slate-200 bg-white p-4 sm:p-6 shadow-sm" on:submit|preventDefault={handleSubmit}>
       <div class="grid gap-5 md:grid-cols-2">
         <div class="md:col-span-2">
-          <label class="mb-1 block text-sm font-medium text-slate-700">Name *</label>
+          <label for="name" class="mb-1 block text-sm font-medium text-slate-700">Name *</label>
           <input
+            id="name"
             bind:value={name}
             class="w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-slate-900 shadow-sm outline-none transition focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20"
             placeholder="Web Server 01"
@@ -99,8 +98,9 @@
         </div>
 
         <div class="md:col-span-2">
-          <label class="mb-1 block text-sm font-medium text-slate-700">Notes</label>
+          <label for="description" class="mb-1 block text-sm font-medium text-slate-700">Notes</label>
           <textarea
+            id="description"
             bind:value={description}
             rows="4"
             class="w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-slate-900 shadow-sm outline-none transition focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20"
@@ -109,8 +109,9 @@
         </div>
 
         <div class="md:col-span-1">
-          <label class="mb-1 block text-sm font-medium text-slate-700">Host / IP *</label>
+          <label for="host" class="mb-1 block text-sm font-medium text-slate-700">Host / IP *</label>
           <input
+            id="host"
             bind:value={host}
             class="w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-slate-900 shadow-sm outline-none transition focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20"
             placeholder="192.168.1.100"
@@ -118,8 +119,9 @@
         </div>
 
         <div>
-          <label class="mb-1 block text-sm font-medium text-slate-700">Port</label>
+          <label for="port" class="mb-1 block text-sm font-medium text-slate-700">Port</label>
           <input
+            id="port"
             type="number"
             bind:value={port}
             class="w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-slate-900 shadow-sm outline-none transition focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20"
@@ -128,8 +130,9 @@
         </div>
 
         <div class="md:col-span-2">
-          <label class="mb-1 block text-sm font-medium text-slate-700">Username *</label>
+          <label for="username" class="mb-1 block text-sm font-medium text-slate-700">Username *</label>
           <input
+            id="username"
             bind:value={username}
             class="w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-slate-900 shadow-sm outline-none transition focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20"
             placeholder="root"
@@ -137,7 +140,7 @@
         </div>
 
         <div class="md:col-span-2">
-          <label class="mb-2 block text-sm font-medium text-slate-700">Authentication</label>
+          <span class="mb-2 block text-sm font-medium text-slate-700">Authentication</span>
           <div class="flex flex-wrap gap-4">
             <label class="inline-flex items-center gap-2 text-sm text-slate-700">
               <input type="radio" bind:group={authMethod} value="password" />
@@ -152,8 +155,9 @@
 
         {#if authMethod === 'password'}
           <div class="md:col-span-2">
-            <label class="mb-1 block text-sm font-medium text-slate-700">Password</label>
+            <label for="password" class="mb-1 block text-sm font-medium text-slate-700">Password</label>
             <input
+              id="password"
               type="password"
               bind:value={password}
               class="w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-slate-900 shadow-sm outline-none transition focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20"
@@ -162,8 +166,9 @@
           </div>
         {:else}
           <div class="md:col-span-2">
-            <label class="mb-1 block text-sm font-medium text-slate-700">SSH Key</label>
+            <label for="sshKey" class="mb-1 block text-sm font-medium text-slate-700">SSH Key</label>
             <textarea
+              id="sshKey"
               bind:value={sshKey}
               rows="6"
               class="w-full rounded-lg border border-slate-300 bg-white px-3 py-2 font-mono text-sm text-slate-900 shadow-sm outline-none transition focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20"
@@ -172,8 +177,9 @@
           </div>
 
           <div class="md:col-span-2">
-            <label class="mb-1 block text-sm font-medium text-slate-700">Passphrase</label>
+            <label for="passphrase" class="mb-1 block text-sm font-medium text-slate-700">Passphrase</label>
             <input
+              id="passphrase"
               type="password"
               bind:value={passphrase}
               class="w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-slate-900 shadow-sm outline-none transition focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20"
@@ -183,8 +189,9 @@
         {/if}
 
         <div class="md:col-span-2">
-          <label class="mb-1 block text-sm font-medium text-slate-700">Tags</label>
+          <label for="tags" class="mb-1 block text-sm font-medium text-slate-700">Tags</label>
           <input
+            id="tags"
             bind:value={tags}
             class="w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-slate-900 shadow-sm outline-none transition focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20"
             placeholder="web, nginx, production"
@@ -192,8 +199,9 @@
         </div>
 
         <div>
-          <label class="mb-1 block text-sm font-medium text-slate-700">Environment</label>
+          <label for="environment" class="mb-1 block text-sm font-medium text-slate-700">Environment</label>
           <select
+            id="environment"
             bind:value={environment}
             class="w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-slate-900 shadow-sm outline-none transition focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20"
           >
@@ -205,8 +213,9 @@
         </div>
 
         <div>
-          <label class="mb-1 block text-sm font-medium text-slate-700">Region</label>
+          <label for="region" class="mb-1 block text-sm font-medium text-slate-700">Region</label>
           <select
+            id="region"
             bind:value={region}
             class="w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-slate-900 shadow-sm outline-none transition focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20"
           >
@@ -218,8 +227,8 @@
         </div>
 
         <div>
-          <label class="mb-1 block text-sm font-medium text-slate-700">Color</label>
-          <input type="color" bind:value={color} class="h-10 w-16 rounded border border-slate-300 bg-white" />
+          <label for="color" class="mb-1 block text-sm font-medium text-slate-700">Color</label>
+          <input id="color" type="color" bind:value={color} class="h-10 w-16 rounded border border-slate-300 bg-white" />
         </div>
       </div>
 
@@ -234,5 +243,5 @@
         <a href="/" class="text-sm font-medium text-slate-600 transition hover:text-slate-900">Cancel</a>
       </div>
     </form>
-  </main>
+  </div>
 </div>

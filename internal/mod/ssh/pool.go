@@ -8,17 +8,20 @@ import (
 	"golang.org/x/crypto/ssh"
 )
 
-// PoolConfig controls connection expiry behavior for the SSH connection pool.
+// PoolConfig controls connection expiry and concurrency behavior for the SSH connection pool.
 type PoolConfig struct {
-	MaxIdle     time.Duration
-	MaxLifetime time.Duration
+	MaxIdle       time.Duration
+	MaxLifetime   time.Duration
+	MaxConcurrent int
 }
 
 // Pool manages SSH connections per server.
 type Pool struct {
 	mu          sync.RWMutex
 	connections map[int]*poolEntry
+	pending     map[int]chan struct{}
 	config      PoolConfig
+	semaphore   chan struct{}
 }
 
 type poolEntry struct {
@@ -34,10 +37,15 @@ func NewPool(cfg PoolConfig) *Pool {
 	if cfg.MaxLifetime == 0 {
 		cfg.MaxLifetime = 30 * time.Minute
 	}
+	if cfg.MaxConcurrent <= 0 {
+		cfg.MaxConcurrent = 10
+	}
 
 	return &Pool{
 		connections: make(map[int]*poolEntry),
+		pending:     make(map[int]chan struct{}),
 		config:      cfg,
+		semaphore:   make(chan struct{}, cfg.MaxConcurrent),
 	}
 }
 
@@ -45,17 +53,25 @@ func NewPool(cfg PoolConfig) *Pool {
 // otherwise it establishes a new SSH connection.
 func (p *Pool) Get(serverID int, cfg ServerConfig, hostKeyCallback func(hostname string, remote net.Addr, key ssh.PublicKey) error) (*Client, error) {
 	p.mu.Lock()
-	defer p.mu.Unlock()
-
-	now := time.Now()
 	if entry, ok := p.connections[serverID]; ok {
+		now := time.Now()
 		if p.isEntryValid(entry, now) {
 			entry.client.touch()
-			return entry.client, nil
+			client := entry.client
+			p.mu.Unlock()
+			return client, nil
 		}
 
 		_ = entry.client.Close()
 		delete(p.connections, serverID)
+	}
+	p.mu.Unlock()
+
+	if p.semaphore != nil {
+		p.semaphore <- struct{}{}
+		defer func() {
+			<-p.semaphore
+		}()
 	}
 
 	client, err := connect(cfg, hostKeyCallback)
@@ -63,7 +79,20 @@ func (p *Pool) Get(serverID int, cfg ServerConfig, hostKeyCallback func(hostname
 		return nil, err
 	}
 
-	now = time.Now()
+	now := time.Now()
+	p.mu.Lock()
+	defer p.mu.Unlock()
+
+	if entry, ok := p.connections[serverID]; ok {
+		if p.isEntryValid(entry, now) {
+			_ = client.Close()
+			entry.client.touch()
+			return entry.client, nil
+		}
+
+		_ = entry.client.Close()
+	}
+
 	p.connections[serverID] = &poolEntry{
 		client:    client,
 		createdAt: now,
@@ -86,6 +115,33 @@ func (p *Pool) Close(serverID int) error {
 	}
 
 	return entry.client.Close()
+}
+
+// CloseIdle closes all connections that have been idle longer than MaxIdle.
+func (p *Pool) CloseIdle() {
+	if p.config.MaxIdle <= 0 {
+		return
+	}
+
+	now := time.Now()
+	var stale []*poolEntry
+
+	p.mu.Lock()
+	for serverID, entry := range p.connections {
+		if entry == nil || entry.client == nil {
+			delete(p.connections, serverID)
+			continue
+		}
+		if now.Sub(entry.client.LastUsed()) > p.config.MaxIdle {
+			stale = append(stale, entry)
+			delete(p.connections, serverID)
+		}
+	}
+	p.mu.Unlock()
+
+	for _, entry := range stale {
+		_ = entry.client.Close()
+	}
 }
 
 // CloseAll closes every pooled connection and clears the pool.

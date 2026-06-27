@@ -4,7 +4,7 @@
   import { api } from '$lib/api/client';
   import { wsPlan, type WSMessage, type PlanRequest } from '$lib/api/migrations';
   import type { Server } from '$lib/stores/servers';
-  import { ArrowLeft, ArrowRight, Check, Package, FileCode, Settings, Users, Loader } from 'lucide-svelte';
+  import { ArrowLeft, ArrowRight, Check, Package, FileCode, Settings, Users, Loader, Container } from 'lucide-svelte';
 
   let step = 1;
   let servers: Server[] = [];
@@ -21,6 +21,7 @@
     { id: 'configs', label: 'Config Files', icon: FileCode, desc: 'Configuration files from /etc/ and custom paths' },
     { id: 'services', label: 'Services', icon: Settings, desc: 'Systemd enabled services' },
     { id: 'users', label: 'Users & Security', icon: Users, desc: 'Users, groups, cron jobs, firewall rules' },
+    { id: 'docker', label: 'Docker', icon: Container, desc: 'Running containers, compose files, volumes, images' },
   ];
 
   onMount(async () => {
@@ -91,7 +92,7 @@
   }
 </script>
 
-<div class="p-6 max-w-3xl mx-auto">
+<div class="p-4 sm:p-6 max-w-3xl mx-auto">
   <div class="flex items-center gap-2 mb-6">
     <a href="/migrations" class="text-sm text-slate-600 hover:text-slate-900 flex items-center gap-1">
       <ArrowLeft size={16} /> Back to Migrations
@@ -105,7 +106,7 @@
   <div class="flex items-center mb-8">
     {#each [1, 2, 3, 4] as s}
       <div class="flex items-center {s < 4 ? 'flex-1' : ''}">
-        <div class="w-8 h-8 rounded-full flex items-center justify-center text-sm font-medium
+        <div class="w-8 h-8 rounded-full flex items-center justify-center text-sm font-medium shrink-0
           {s < step ? 'bg-green-500 text-white' : s === step ? 'bg-blue-600 text-white' : 'bg-slate-200 text-slate-500'}">
           {#if s < step}
             <Check size={16} />
@@ -133,12 +134,12 @@
               {sourceServerId === s.id ? 'border-blue-500 bg-blue-50' : 'border-slate-200 hover:border-slate-300'}"
           >
             <div class="flex items-center justify-between">
-              <div>
-                <p class="font-medium text-slate-900">{s.name}</p>
-                <p class="text-sm text-slate-500">{s.host}:{s.port} · {s.username}</p>
+              <div class="min-w-0">
+                <p class="font-medium text-slate-900 truncate">{s.name}</p>
+                <p class="text-sm text-slate-500 truncate">{s.host}:{s.port} · {s.username}</p>
               </div>
               {#if sourceServerId === s.id}
-                <Check class="text-blue-600" size={20} />
+                <Check class="text-blue-600 shrink-0" size={20} />
               {/if}
             </div>
           </button>
@@ -159,12 +160,12 @@
               {targetServerId === s.id ? 'border-blue-500 bg-blue-50' : 'border-slate-200 hover:border-slate-300'}"
           >
             <div class="flex items-center justify-between">
-              <div>
-                <p class="font-medium text-slate-900">{s.name}</p>
-                <p class="text-sm text-slate-500">{s.host}:{s.port} · {s.username}</p>
+              <div class="min-w-0">
+                <p class="font-medium text-slate-900 truncate">{s.name}</p>
+                <p class="text-sm text-slate-500 truncate">{s.host}:{s.port} · {s.username}</p>
               </div>
               {#if targetServerId === s.id}
-                <Check class="text-blue-600" size={20} />
+                <Check class="text-blue-600 shrink-0" size={20} />
               {/if}
             </div>
           </button>
@@ -177,7 +178,7 @@
     <div class="space-y-4">
       <h2 class="text-lg font-semibold text-slate-900">Choose Categories to Migrate</h2>
       <p class="text-sm text-slate-500">Select what to migrate from source to target.</p>
-      <div class="grid grid-cols-2 gap-3">
+      <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
         {#each categories as cat}
           <button
             on:click={() => toggleCategory(cat.id)}
@@ -185,7 +186,7 @@
               {selectedCategories.includes(cat.id) ? 'border-blue-500 bg-blue-50' : 'border-slate-200 hover:border-slate-300'}"
           >
             <div class="flex items-start gap-3">
-              <cat.icon size={20} class="text-slate-600 mt-0.5" />
+              <cat.icon size={20} class="text-slate-600 mt-0.5 shrink-0" />
               <div>
                 <p class="font-medium text-slate-900">{cat.label}</p>
                 <p class="text-xs text-slate-500 mt-1">{cat.desc}</p>
@@ -217,11 +218,11 @@
       <div class="bg-white rounded-lg border border-slate-200 p-4 space-y-3">
         <div>
           <p class="text-sm text-slate-500">Source</p>
-          <p class="font-medium text-slate-900">{getServerName(sourceServerId)}</p>
+          <p class="font-medium text-slate-900 break-words">{getServerName(sourceServerId)}</p>
         </div>
         <div>
           <p class="text-sm text-slate-500">Target</p>
-          <p class="font-medium text-slate-900">{getServerName(targetServerId)}</p>
+          <p class="font-medium text-slate-900 break-words">{getServerName(targetServerId)}</p>
         </div>
         <div>
           <p class="text-sm text-slate-500">Categories</p>
@@ -234,7 +235,7 @@
         {#if configPaths}
           <div>
             <p class="text-sm text-slate-500">Config Paths</p>
-            <p class="font-mono text-xs text-slate-700">{configPaths}</p>
+            <p class="font-mono text-xs text-slate-700 break-all">{configPaths}</p>
           </div>
         {/if}
       </div>
@@ -243,7 +244,7 @@
         <div class="bg-slate-900 text-slate-100 rounded-lg p-4 max-h-60 overflow-auto">
           <div class="space-y-1">
             {#each planMessages as msg}
-              <div class="text-xs font-mono">
+              <div class="text-xs font-mono break-all">
                 <span class={msg.status === 'error' ? 'text-red-400' : msg.status === 'success' || msg.status === 'complete' ? 'text-green-400' : 'text-slate-400'}>
                   [{msg.status}]
                 </span>

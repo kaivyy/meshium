@@ -7,8 +7,6 @@ import (
 	"time"
 
 	"meshium/internal/mod/server"
-	modssh "meshium/internal/mod/ssh"
-	"meshium/internal/shared"
 
 	xssh "golang.org/x/crypto/ssh"
 )
@@ -41,6 +39,21 @@ func NewExecutor(
 		hosts:    hosts,
 	}
 }
+
+// Registry returns the category registry.
+func (e *Executor) Registry() *CategoryRegistry { return e.registry }
+
+// SrvRepo returns the server repo.
+func (e *Executor) SrvRepo() server.Repo { return e.srvRepo }
+
+// Pool returns the connection pool.
+func (e *Executor) Pool() ConnectionPool { return e.pool }
+
+// AuthSvc returns the AES key provider.
+func (e *Executor) AuthSvc() AESKeyProvider { return e.authSvc }
+
+// Hosts returns the host key store.
+func (e *Executor) Hosts() HostKeyStore { return e.hosts }
 
 // Execute applies a migration plan to the target server.
 // It runs backups for each category, then applies collected data.
@@ -218,29 +231,7 @@ func (e *Executor) Execute(ctx context.Context, migrationID int, onProgress Step
 
 // getSSHClient obtains an SSH connection for the given server.
 func (e *Executor) getSSHClient(serverID int, srv *server.Server) (SSHExecuter, error) {
-	aesKey := e.authSvc.GetAESKey()
-	if aesKey == nil {
-		return nil, fmt.Errorf("app is locked")
-	}
-
-	password, _ := shared.Decrypt(aesKey, []byte(srv.Password))
-	sshKey, _ := shared.Decrypt(aesKey, []byte(srv.SSHKey))
-	passphrase, _ := shared.Decrypt(aesKey, []byte(srv.Passphrase))
-
-	sshConfig := modssh.ServerConfig{
-		ID:         srv.ID,
-		Host:       srv.Host,
-		Port:       srv.Port,
-		Username:   srv.Username,
-		Password:   string(password),
-		Passphrase: string(passphrase),
-	}
-	if len(sshKey) > 0 {
-		sshConfig.PrivateKey = sshKey
-	}
-
-	hostKeyCallback := e.hosts.MakeHostKeyCallback()
-	return e.pool.Get(serverID, sshConfig, hostKeyCallback)
+	return getSSHClientForServer(serverID, srv, e.srvRepo, e.pool, e.authSvc, e.hosts)
 }
 
 var _ xssh.HostKeyCallback

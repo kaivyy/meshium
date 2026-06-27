@@ -35,7 +35,7 @@
   }
 </script>
 
-<div class="p-6 max-w-4xl mx-auto">
+<div class="p-4 sm:p-6 max-w-4xl mx-auto">
   <div class="flex items-center justify-between mb-6">
     <h1 class="text-xl font-bold text-slate-900">Migrations</h1>
     <a
@@ -60,7 +60,7 @@
           href="/migrations/{m.id}"
           class="block p-4 bg-white rounded-lg border border-slate-200 hover:border-slate-300 transition-colors"
         >
-          <div class="flex items-center justify-between">
+          <div class="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
             <div class="flex items-center gap-3">
               <div class="flex items-center gap-2">
                 <span class="text-sm font-medium text-slate-900">Server #{m.sourceServerId}</span>

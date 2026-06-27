@@ -21,6 +21,8 @@
   let environment = '';
   let region = '';
   let color = '#3b82f6';
+  let bastionId = 0;
+  let availableServers: Server[] = [];
   let error = '';
   let loading = false;
   let loadingServer = true;
@@ -29,7 +31,7 @@
 
   onMount(async () => {
     try {
-      server = await api.get<Server>(`/servers/${serverId}`);
+      server = await api.get(`/servers/${serverId}`) as Server;
       name = server.name;
       description = server.description || '';
       host = server.host;
@@ -39,8 +41,18 @@
       environment = server.environment || '';
       region = server.region || '';
       color = server.color || '#3b82f6';
+      bastionId = (server as any).bastionId || 0;
       authMethod = server.authMethod === 'key' ? 'key' : 'password';
       initialAuthMethod = authMethod;
+
+      // Load available servers for bastion selection
+      try {
+        availableServers = await api.get('/servers') as Server[];
+        // Filter out the current server from bastion options
+        availableServers = availableServers.filter(s => s.id !== serverId);
+      } catch {
+        // ignore
+      }
     } catch {
       error = 'Failed to load server';
     } finally {
@@ -55,7 +67,6 @@
       error = 'Name, host, and username are required';
       return;
     }
-
 
     loading = true;
 
@@ -74,7 +85,8 @@
           : [],
         environment,
         region,
-        color
+        color,
+        bastionId: bastionId
       };
 
       if (authMethod === 'password') {
@@ -107,15 +119,13 @@
   }
 </script>
 
-<div class="min-h-screen bg-slate-50">
-  <header class="border-b border-slate-200 bg-white px-6 py-4">
-    <a href={`/servers/${serverId}`} class="inline-flex items-center gap-2 text-sm text-slate-600 transition hover:text-slate-900">
-      <ArrowLeft size={16} /> Back to Server
-    </a>
-    <h1 class="mt-2 text-xl font-bold tracking-tight text-slate-900">Edit Server</h1>
-  </header>
+<div class="p-4 sm:p-6">
+  <a href={`/servers/${serverId}`} class="inline-flex items-center gap-2 text-sm text-slate-600 transition hover:text-slate-900">
+    <ArrowLeft size={16} /> Back to Server
+  </a>
+  <h1 class="mt-2 text-xl font-bold tracking-tight text-slate-900">Edit Server</h1>
 
-  <main class="mx-auto w-full max-w-3xl p-6">
+  <div class="mt-4 max-w-3xl mx-auto">
     {#if loadingServer}
       <div class="rounded-lg border border-dashed border-slate-300 bg-white px-4 py-8 text-center text-slate-500">
         Loading server...
@@ -126,19 +136,21 @@
       {/if}
 
       {#if server}
-        <form class="space-y-5 rounded-2xl border border-slate-200 bg-white p-6 shadow-sm" on:submit|preventDefault={handleSubmit}>
+        <form class="space-y-5 rounded-2xl border border-slate-200 bg-white p-4 sm:p-6 shadow-sm" on:submit|preventDefault={handleSubmit}>
           <div class="grid gap-5 md:grid-cols-2">
             <div class="md:col-span-2">
-              <label class="mb-1 block text-sm font-medium text-slate-700">Name *</label>
+              <label for="name" class="mb-1 block text-sm font-medium text-slate-700">Name *</label>
               <input
+                id="name"
                 bind:value={name}
                 class="w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-slate-900 shadow-sm outline-none transition focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20"
               />
             </div>
 
             <div class="md:col-span-2">
-              <label class="mb-1 block text-sm font-medium text-slate-700">Notes</label>
+              <label for="description" class="mb-1 block text-sm font-medium text-slate-700">Notes</label>
               <textarea
+                id="description"
                 bind:value={description}
                 rows="4"
                 class="w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-slate-900 shadow-sm outline-none transition focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20"
@@ -146,16 +158,18 @@
             </div>
 
             <div class="md:col-span-1">
-              <label class="mb-1 block text-sm font-medium text-slate-700">Host / IP *</label>
+              <label for="host" class="mb-1 block text-sm font-medium text-slate-700">Host / IP *</label>
               <input
+                id="host"
                 bind:value={host}
                 class="w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-slate-900 shadow-sm outline-none transition focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20"
               />
             </div>
 
             <div>
-              <label class="mb-1 block text-sm font-medium text-slate-700">Port</label>
+              <label for="port" class="mb-1 block text-sm font-medium text-slate-700">Port</label>
               <input
+                id="port"
                 type="number"
                 bind:value={port}
                 class="w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-slate-900 shadow-sm outline-none transition focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20"
@@ -164,15 +178,16 @@
             </div>
 
             <div class="md:col-span-2">
-              <label class="mb-1 block text-sm font-medium text-slate-700">Username *</label>
+              <label for="username" class="mb-1 block text-sm font-medium text-slate-700">Username *</label>
               <input
+                id="username"
                 bind:value={username}
                 class="w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-slate-900 shadow-sm outline-none transition focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20"
               />
             </div>
 
             <div class="md:col-span-2">
-              <label class="mb-2 block text-sm font-medium text-slate-700">Authentication</label>
+              <span class="mb-2 block text-sm font-medium text-slate-700">Authentication</span>
               <div class="flex flex-wrap gap-4">
                 <label class="inline-flex items-center gap-2 text-sm text-slate-700">
                   <input type="radio" bind:group={authMethod} value="password" />
@@ -187,8 +202,9 @@
 
             {#if authMethod === 'password'}
               <div class="md:col-span-2">
-                <label class="mb-1 block text-sm font-medium text-slate-700">New Password</label>
+                <label for="password" class="mb-1 block text-sm font-medium text-slate-700">New Password</label>
                 <input
+                  id="password"
                   type="password"
                   bind:value={password}
                   class="w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-slate-900 shadow-sm outline-none transition focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20"
@@ -197,8 +213,9 @@
               </div>
             {:else}
               <div class="md:col-span-2">
-                <label class="mb-1 block text-sm font-medium text-slate-700">SSH Key</label>
+                <label for="sshKey" class="mb-1 block text-sm font-medium text-slate-700">SSH Key</label>
                 <textarea
+                  id="sshKey"
                   bind:value={sshKey}
                   rows="6"
                   class="w-full rounded-lg border border-slate-300 bg-white px-3 py-2 font-mono text-sm text-slate-900 shadow-sm outline-none transition focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20"
@@ -207,8 +224,9 @@
               </div>
 
               <div class="md:col-span-2">
-                <label class="mb-1 block text-sm font-medium text-slate-700">Passphrase</label>
+                <label for="passphrase" class="mb-1 block text-sm font-medium text-slate-700">Passphrase</label>
                 <input
+                  id="passphrase"
                   type="password"
                   bind:value={passphrase}
                   class="w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-slate-900 shadow-sm outline-none transition focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20"
@@ -218,8 +236,9 @@
             {/if}
 
             <div class="md:col-span-2">
-              <label class="mb-1 block text-sm font-medium text-slate-700">Tags</label>
+              <label for="tags" class="mb-1 block text-sm font-medium text-slate-700">Tags</label>
               <input
+                id="tags"
                 bind:value={tags}
                 class="w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-slate-900 shadow-sm outline-none transition focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20"
                 placeholder="web, nginx, production"
@@ -227,8 +246,9 @@
             </div>
 
             <div>
-              <label class="mb-1 block text-sm font-medium text-slate-700">Environment</label>
+              <label for="environment" class="mb-1 block text-sm font-medium text-slate-700">Environment</label>
               <select
+                id="environment"
                 bind:value={environment}
                 class="w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-slate-900 shadow-sm outline-none transition focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20"
               >
@@ -240,8 +260,9 @@
             </div>
 
             <div>
-              <label class="mb-1 block text-sm font-medium text-slate-700">Region</label>
+              <label for="region" class="mb-1 block text-sm font-medium text-slate-700">Region</label>
               <select
+                id="region"
                 bind:value={region}
                 class="w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-slate-900 shadow-sm outline-none transition focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20"
               >
@@ -252,9 +273,24 @@
               </select>
             </div>
 
+            <div class="md:col-span-2">
+              <label for="bastion" class="mb-1 block text-sm font-medium text-slate-700">Bastion / Jump Host</label>
+              <select
+                id="bastion"
+                bind:value={bastionId}
+                class="w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-slate-900 shadow-sm outline-none transition focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20"
+              >
+                <option value={0}>None (Direct Connection)</option>
+                {#each availableServers as srv}
+                  <option value={srv.id}>{srv.name} ({srv.host}:{srv.port})</option>
+                {/each}
+              </select>
+              <p class="mt-1 text-xs text-slate-500">Route SSH connections through this server as a jump host</p>
+            </div>
+
             <div>
-              <label class="mb-1 block text-sm font-medium text-slate-700">Color</label>
-              <input type="color" bind:value={color} class="h-10 w-16 rounded border border-slate-300 bg-white" />
+              <label for="color" class="mb-1 block text-sm font-medium text-slate-700">Color</label>
+              <input id="color" type="color" bind:value={color} class="h-10 w-16 rounded border border-slate-300 bg-white" />
             </div>
           </div>
 
@@ -271,5 +307,5 @@
         </form>
       {/if}
     {/if}
-  </main>
+  </div>
 </div>

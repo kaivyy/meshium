@@ -25,6 +25,7 @@ func Migrate(db *sql.DB) error {
 			icon        TEXT,
 			color       TEXT,
 			favorite    INTEGER DEFAULT 0,
+			bastion_id  INTEGER DEFAULT 0,
 			created_at  DATETIME DEFAULT CURRENT_TIMESTAMP,
 			updated_at  DATETIME DEFAULT CURRENT_TIMESTAMP
 		);`,
@@ -102,6 +103,16 @@ func Migrate(db *sql.DB) error {
 		if _, err := tx.Exec(statement); err != nil {
 			return err
 		}
+	}
+
+	// Add bastion_id column if it doesn't exist (for existing databases)
+	alterStatements := []string{
+		`ALTER TABLE servers ADD COLUMN bastion_id INTEGER DEFAULT 0`,
+	}
+
+	for _, stmt := range alterStatements {
+		// Ignore errors since the column may already exist
+		tx.Exec(stmt)
 	}
 
 	return tx.Commit()

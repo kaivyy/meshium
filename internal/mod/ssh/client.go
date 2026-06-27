@@ -46,6 +46,7 @@ func (c *Client) LastUsed() time.Time {
 const commandTimeout = 30 * time.Second
 
 // connect establishes an SSH connection.
+// If a bastion config is provided, the connection is tunneled through the bastion.
 func connect(cfg ServerConfig, hostKeyCallback ssh.HostKeyCallback) (*Client, error) {
 	sshConfig := &ssh.ClientConfig{
 		User:            cfg.Username,
@@ -75,7 +76,39 @@ func connect(cfg ServerConfig, hostKeyCallback ssh.HostKeyCallback) (*Client, er
 	}
 	sshConfig.Auth = authMethods
 
-	conn, err := ssh.Dial("tcp", fmt.Sprintf("%s:%d", cfg.Host, cfg.Port), sshConfig)
+	targetAddr := fmt.Sprintf("%s:%d", cfg.Host, cfg.Port)
+
+	// If bastion is configured, tunnel through it
+	if cfg.Bastion != nil {
+		bastionClient, err := dialBastion(cfg.Bastion)
+		if err != nil {
+			return nil, fmt.Errorf("bastion connection failed: %w", err)
+		}
+		defer bastionClient.Close()
+
+		// Dial the target through the bastion
+		conn, err := bastionClient.Dial("tcp", targetAddr)
+		if err != nil {
+			return nil, fmt.Errorf("bastion dial target failed: %w", err)
+		}
+
+		// Establish SSH over the tunneled connection
+		ncc, chans, reqs, err := ssh.NewClientConn(conn, targetAddr, sshConfig)
+		if err != nil {
+			conn.Close()
+			return nil, fmt.Errorf("target SSH through bastion failed: %w", err)
+		}
+
+		now := time.Now()
+		return &Client{
+			conn:      ssh.NewClient(ncc, chans, reqs),
+			createdAt: now,
+			lastUsed:  now,
+		}, nil
+	}
+
+	// Direct connection (no bastion)
+	conn, err := ssh.Dial("tcp", targetAddr, sshConfig)
 	if err != nil {
 		return nil, err
 	}
@@ -86,6 +119,37 @@ func connect(cfg ServerConfig, hostKeyCallback ssh.HostKeyCallback) (*Client, er
 		createdAt: now,
 		lastUsed:  now,
 	}, nil
+}
+
+// dialBastion establishes a connection to the bastion/jump host.
+func dialBastion(b *BastionConfig) (*ssh.Client, error) {
+	bastionConfig := &ssh.ClientConfig{
+		User:            b.Username,
+		HostKeyCallback: ssh.InsecureIgnoreHostKey(), // bastion keys are verified separately
+		Timeout:         10 * time.Second,
+	}
+
+	var authMethods []ssh.AuthMethod
+	if b.PrivateKey != nil {
+		var signer ssh.Signer
+		var err error
+		if b.Passphrase != "" {
+			signer, err = ssh.ParsePrivateKeyWithPassphrase(b.PrivateKey, []byte(b.Passphrase))
+		} else {
+			signer, err = ssh.ParsePrivateKey(b.PrivateKey)
+		}
+		if err != nil {
+			return nil, fmt.Errorf("parse bastion private key: %w", err)
+		}
+		authMethods = append(authMethods, ssh.PublicKeys(signer))
+	}
+	if b.Password != "" {
+		authMethods = append(authMethods, ssh.Password(b.Password))
+	}
+	bastionConfig.Auth = authMethods
+
+	bastionAddr := fmt.Sprintf("%s:%d", b.Host, b.Port)
+	return ssh.Dial("tcp", bastionAddr, bastionConfig)
 }
 
 // Exec runs a command and returns stdout, stderr, and exit code.

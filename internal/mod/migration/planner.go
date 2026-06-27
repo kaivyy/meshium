@@ -6,8 +6,6 @@ import (
 	"fmt"
 
 	"meshium/internal/mod/server"
-	modssh "meshium/internal/mod/ssh"
-	"meshium/internal/shared"
 
 	xssh "golang.org/x/crypto/ssh"
 )
@@ -148,29 +146,7 @@ func (p *Planner) Plan(ctx context.Context, req PlanRequest, onProgress StepCall
 
 // getSSHClient obtains an SSH connection for the given server.
 func (p *Planner) getSSHClient(serverID int, srv *server.Server) (SSHExecuter, error) {
-	aesKey := p.authSvc.GetAESKey()
-	if aesKey == nil {
-		return nil, fmt.Errorf("app is locked")
-	}
-
-	password, _ := shared.Decrypt(aesKey, []byte(srv.Password))
-	sshKey, _ := shared.Decrypt(aesKey, []byte(srv.SSHKey))
-	passphrase, _ := shared.Decrypt(aesKey, []byte(srv.Passphrase))
-
-	sshConfig := modssh.ServerConfig{
-		ID:         srv.ID,
-		Host:       srv.Host,
-		Port:       srv.Port,
-		Username:   srv.Username,
-		Password:   string(password),
-		Passphrase: string(passphrase),
-	}
-	if len(sshKey) > 0 {
-		sshConfig.PrivateKey = sshKey
-	}
-
-	hostKeyCallback := p.hosts.MakeHostKeyCallback()
-	return p.pool.Get(serverID, sshConfig, hostKeyCallback)
+	return getSSHClientForServer(serverID, srv, p.srvRepo, p.pool, p.authSvc, p.hosts)
 }
 
 func sendError(onStep StepCallback, step, message string) {

@@ -208,6 +208,36 @@ func TestPoolExpiresIdleConnections(t *testing.T) {
 	}
 }
 
+func TestPoolCloseIdleRemovesExpiredConnections(t *testing.T) {
+	addr := startPoolTestSSHServer(t)
+	host, portStr, err := net.SplitHostPort(addr)
+	if err != nil {
+		t.Fatalf("SplitHostPort failed: %v", err)
+	}
+	var port int
+	if _, err := fmt.Sscanf(portStr, "%d", &port); err != nil {
+		t.Fatalf("parse port failed: %v", err)
+	}
+
+	pool := NewPool(PoolConfig{
+		MaxIdle:     5 * time.Millisecond,
+		MaxLifetime: time.Minute,
+	})
+	defer pool.CloseAll()
+
+	cfg := ServerConfig{Host: host, Port: port, Username: "test"}
+	if _, err := pool.Get(1, cfg, ssh.InsecureIgnoreHostKey()); err != nil {
+		t.Fatalf("Get failed: %v", err)
+	}
+
+	time.Sleep(20 * time.Millisecond)
+	pool.CloseIdle()
+
+	if got := pool.Count(); got != 0 {
+		t.Fatalf("expected count 0 after CloseIdle, got %d", got)
+	}
+}
+
 func TestNewPoolAppliesDefaultExpiryLimits(t *testing.T) {
 	pool := NewPool(PoolConfig{})
 
@@ -216,6 +246,9 @@ func TestNewPoolAppliesDefaultExpiryLimits(t *testing.T) {
 	}
 	if got, want := pool.config.MaxLifetime, 30*time.Minute; got != want {
 		t.Fatalf("expected default MaxLifetime %v, got %v", want, got)
+	}
+	if got, want := pool.config.MaxConcurrent, 10; got != want {
+		t.Fatalf("expected default MaxConcurrent %d, got %d", want, got)
 	}
 }
 

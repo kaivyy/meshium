@@ -15,6 +15,7 @@ export interface Server {
   icon: string;
   color: string;
   favorite: boolean;
+  bastionId?: number;
   createdAt: string;
   updatedAt: string;
 }

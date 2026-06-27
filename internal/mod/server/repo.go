@@ -34,11 +34,11 @@ func NewRepo(db *sql.DB) Repo {
 
 func (r *sqliteRepo) Create(s Server) (int, error) {
 	res, err := r.db.Exec(
-		`INSERT INTO servers (name, description, host, port, username, password, ssh_key, passphrase, tags, environment, region, icon, color, favorite)
-		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		`INSERT INTO servers (name, description, host, port, username, password, ssh_key, passphrase, tags, environment, region, icon, color, favorite, bastion_id)
+		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 		s.Name, s.Description, s.Host, s.Port, s.Username,
 		s.Password, s.SSHKey, s.Passphrase,
-		tagsToJSON(s.Tags), s.Environment, s.Region, s.Icon, s.Color, boolToInt(s.Favorite),
+		tagsToJSON(s.Tags), s.Environment, s.Region, s.Icon, s.Color, boolToInt(s.Favorite), s.BastionID,
 	)
 	if err != nil {
 		return 0, err
@@ -52,9 +52,9 @@ func (r *sqliteRepo) GetByID(id int) (*Server, error) {
 	var tagsJSON string
 	var favorite int
 	err := r.db.QueryRow(
-		`SELECT id, name, description, host, port, username, password, ssh_key, passphrase, COALESCE(tags, '[]'), environment, region, icon, color, COALESCE(favorite, 0), created_at, updated_at
+		`SELECT id, name, description, host, port, username, password, ssh_key, passphrase, COALESCE(tags, '[]'), environment, region, icon, color, COALESCE(favorite, 0), COALESCE(bastion_id, 0), created_at, updated_at
 		 FROM servers WHERE id = ?`, id,
-	).Scan(&s.ID, &s.Name, &s.Description, &s.Host, &s.Port, &s.Username, &s.Password, &s.SSHKey, &s.Passphrase, &tagsJSON, &s.Environment, &s.Region, &s.Icon, &s.Color, &favorite, &s.CreatedAt, &s.UpdatedAt)
+	).Scan(&s.ID, &s.Name, &s.Description, &s.Host, &s.Port, &s.Username, &s.Password, &s.SSHKey, &s.Passphrase, &tagsJSON, &s.Environment, &s.Region, &s.Icon, &s.Color, &favorite, &s.BastionID, &s.CreatedAt, &s.UpdatedAt)
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, errors.New("server not found")
 	}
@@ -67,7 +67,7 @@ func (r *sqliteRepo) GetByID(id int) (*Server, error) {
 }
 
 func (r *sqliteRepo) List(filter ListFilter) ([]Server, error) {
-	query := `SELECT id, name, description, host, port, username, COALESCE(tags, '[]'), environment, region, icon, color, COALESCE(favorite, 0), created_at, updated_at FROM servers WHERE 1=1`
+	query := `SELECT id, name, description, host, port, username, COALESCE(tags, '[]'), environment, region, icon, color, COALESCE(favorite, 0), COALESCE(bastion_id, 0), created_at, updated_at FROM servers WHERE 1=1`
 	args := []interface{}{}
 	queryText := normalizeFilterQuery(filter.Query)
 
@@ -102,7 +102,7 @@ func (r *sqliteRepo) List(filter ListFilter) ([]Server, error) {
 		var s Server
 		var tagsJSON string
 		var favorite int
-		if err := rows.Scan(&s.ID, &s.Name, &s.Description, &s.Host, &s.Port, &s.Username, &tagsJSON, &s.Environment, &s.Region, &s.Icon, &s.Color, &favorite, &s.CreatedAt, &s.UpdatedAt); err != nil {
+		if err := rows.Scan(&s.ID, &s.Name, &s.Description, &s.Host, &s.Port, &s.Username, &tagsJSON, &s.Environment, &s.Region, &s.Icon, &s.Color, &favorite, &s.BastionID, &s.CreatedAt, &s.UpdatedAt); err != nil {
 			return nil, err
 		}
 		s.Tags = tagsFromJSON(tagsJSON)
@@ -114,9 +114,9 @@ func (r *sqliteRepo) List(filter ListFilter) ([]Server, error) {
 
 func (r *sqliteRepo) Update(id int, s Server) error {
 	_, err := r.db.Exec(
-		`UPDATE servers SET name = ?, description = ?, host = ?, port = ?, username = ?, password = ?, ssh_key = ?, passphrase = ?, tags = ?, environment = ?, region = ?, icon = ?, color = ?, updated_at = CURRENT_TIMESTAMP
+		`UPDATE servers SET name = ?, description = ?, host = ?, port = ?, username = ?, password = ?, ssh_key = ?, passphrase = ?, tags = ?, environment = ?, region = ?, icon = ?, color = ?, bastion_id = ?, updated_at = CURRENT_TIMESTAMP
 		 WHERE id = ?`,
-		s.Name, s.Description, s.Host, s.Port, s.Username, s.Password, s.SSHKey, s.Passphrase, tagsToJSON(s.Tags), s.Environment, s.Region, s.Icon, s.Color, id,
+		s.Name, s.Description, s.Host, s.Port, s.Username, s.Password, s.SSHKey, s.Passphrase, tagsToJSON(s.Tags), s.Environment, s.Region, s.Icon, s.Color, s.BastionID, id,
 	)
 	return err
 }

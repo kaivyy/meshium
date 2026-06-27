@@ -7,8 +7,6 @@ import (
 	"time"
 
 	"meshium/internal/mod/server"
-	modssh "meshium/internal/mod/ssh"
-	"meshium/internal/shared"
 
 	xssh "golang.org/x/crypto/ssh"
 )
@@ -151,29 +149,7 @@ func (rm *RollbackManager) Rollback(ctx context.Context, migrationID int, onProg
 
 // getSSHClient obtains an SSH connection for the given server.
 func (rm *RollbackManager) getSSHClient(serverID int, srv *server.Server) (SSHExecuter, error) {
-	aesKey := rm.authSvc.GetAESKey()
-	if aesKey == nil {
-		return nil, fmt.Errorf("app is locked")
-	}
-
-	password, _ := shared.Decrypt(aesKey, []byte(srv.Password))
-	sshKey, _ := shared.Decrypt(aesKey, []byte(srv.SSHKey))
-	passphrase, _ := shared.Decrypt(aesKey, []byte(srv.Passphrase))
-
-	sshConfig := modssh.ServerConfig{
-		ID:         srv.ID,
-		Host:       srv.Host,
-		Port:       srv.Port,
-		Username:   srv.Username,
-		Password:   string(password),
-		Passphrase: string(passphrase),
-	}
-	if len(sshKey) > 0 {
-		sshConfig.PrivateKey = sshKey
-	}
-
-	hostKeyCallback := rm.hosts.MakeHostKeyCallback()
-	return rm.pool.Get(serverID, sshConfig, hostKeyCallback)
+	return getSSHClientForServer(serverID, srv, rm.srvRepo, rm.pool, rm.authSvc, rm.hosts)
 }
 
 var _ xssh.HostKeyCallback

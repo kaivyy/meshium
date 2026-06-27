@@ -61,7 +61,7 @@ func (r *sqliteRepo) GetMigration(id int) (*Migration, error) {
 		return nil, err
 	}
 	json.Unmarshal([]byte(categoriesJSON), &m.Categories)
-	_ = planJSON
+	m.Plan = planJSON
 	if completedAt.Valid {
 		m.CompletedAt = completedAt.String
 	}

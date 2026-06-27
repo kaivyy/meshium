@@ -1,8 +1,8 @@
 <script lang="ts">
   import { onMount, onDestroy } from 'svelte';
   import { page } from '$app/stores';
-  import { migrationApi, wsExecute, wsRollback, type WSMessage, type MigrationPlan, type MigrationStep } from '$lib/api/migrations';
-  import { ArrowLeft, Play, Undo2, Trash2 } from 'lucide-svelte';
+  import { migrationApi, wsExecute, wsRollback, wsDryRun, type WSMessage, type MigrationPlan, type MigrationStep, type DryRunResult } from '$lib/api/migrations';
+  import { ArrowLeft, Play, Undo2, Trash2, Eye, Download } from 'lucide-svelte';
 
   const migrationId = parseInt($page.params.id);
   let plan: MigrationPlan | null = null;
@@ -10,6 +10,8 @@
   let loading = true;
   let executing = false;
   let rollingBack = false;
+  let dryRunning = false;
+  let dryRunResult: DryRunResult | null = null;
   let progressMessages: WSMessage[] = [];
   let ws: WebSocket | null = null;
 
@@ -64,6 +66,35 @@
     );
   }
 
+  function startDryRun() {
+    dryRunning = true;
+    dryRunResult = null;
+    progressMessages = [];
+
+    ws = wsDryRun(
+      migrationId,
+      (msg: WSMessage) => {
+        progressMessages = [...progressMessages, msg];
+        if (msg.step === 'dryrun' && (msg.status === 'complete' || msg.status === 'error')) {
+          dryRunning = false;
+        }
+      },
+      () => {
+        dryRunning = false;
+        fetchDryRunResult();
+      },
+      () => { dryRunning = false; }
+    );
+  }
+
+  async function fetchDryRunResult() {
+    try {
+      dryRunResult = await migrationApi.dryRun(migrationId);
+    } catch {
+      // ignore
+    }
+  }
+
   async function refreshPlan() {
     try {
       plan = await migrationApi.get(migrationId);
@@ -79,6 +110,10 @@
     window.location.href = '/migrations';
   }
 
+  function exportMigration() {
+    window.open(`/api/migrations/${migrationId}/export`, '_blank');
+  }
+
   function statusColor(status: string): string {
     switch (status) {
       case 'completed': case 'success': return 'text-green-600';
@@ -91,7 +126,7 @@
   }
 </script>
 
-<div class="p-6">
+<div class="p-4 sm:p-6">
   <a href="/migrations" class="text-sm text-slate-600 hover:text-slate-900 flex items-center gap-1 mb-4">
     <ArrowLeft size={16} /> Back to Migrations
   </a>
@@ -101,15 +136,22 @@
   {:else if !plan}
     <p class="text-red-500">Migration not found</p>
   {:else}
-    <div class="flex items-center justify-between mb-6">
+    <div class="flex flex-col gap-4 mb-6 lg:flex-row lg:items-center lg:justify-between">
       <div>
         <h1 class="text-xl font-bold text-slate-900">Migration #{plan.id}</h1>
         <p class="text-sm text-slate-500">
           Source: Server #{plan.sourceServerId} → Target: Server #{plan.targetServerId}
         </p>
       </div>
-      <div class="flex items-center gap-2">
+      <div class="flex flex-wrap items-center gap-2">
         {#if plan.status === 'planned'}
+          <button
+            on:click={startDryRun}
+            disabled={dryRunning}
+            class="flex items-center gap-1 px-4 py-2 bg-purple-600 text-white rounded-lg hover:bg-purple-700 disabled:opacity-50 text-sm font-medium"
+          >
+            <Eye size={16} /> {dryRunning ? 'Analyzing...' : 'Dry Run'}
+          </button>
           <button
             on:click={startExecution}
             disabled={executing}
@@ -127,6 +169,12 @@
             <Undo2 size={16} /> {rollingBack ? 'Rolling back...' : 'Rollback'}
           </button>
         {/if}
+        <button
+          on:click={exportMigration}
+          class="flex items-center gap-1 px-4 py-2 text-slate-600 border border-slate-200 rounded-lg hover:bg-slate-50 text-sm font-medium"
+        >
+          <Download size={16} /> Export
+        </button>
         <button
           on:click={deleteMigration}
           class="flex items-center gap-1 px-4 py-2 text-red-600 border border-red-200 rounded-lg hover:bg-red-50 text-sm font-medium"
@@ -158,14 +206,51 @@
       </div>
     </div>
 
+    <!-- Dry Run Results -->
+    {#if dryRunResult}
+      <div class="mb-6 bg-purple-50 border border-purple-200 rounded-lg p-4">
+        <h2 class="text-sm font-semibold mb-3 text-purple-900">Dry Run Results</h2>
+        <div class="grid grid-cols-3 gap-4 mb-4">
+          <div class="text-center">
+            <div class="text-2xl font-bold text-green-600">{dryRunResult.summary.addCount}</div>
+            <div class="text-xs text-slate-500">Additions</div>
+          </div>
+          <div class="text-center">
+            <div class="text-2xl font-bold text-yellow-600">{dryRunResult.summary.modifyCount}</div>
+            <div class="text-xs text-slate-500">Modifications</div>
+          </div>
+          <div class="text-center">
+            <div class="text-2xl font-bold text-red-600">{dryRunResult.summary.removeCount}</div>
+            <div class="text-xs text-slate-500">Removals</div>
+          </div>
+        </div>
+        {#each dryRunResult.categories as cat}
+          <div class="mb-3">
+            <h3 class="text-xs font-semibold text-purple-700 mb-1">{cat.category}</h3>
+            {#each cat.changes as change}
+              <div class="text-xs flex items-center gap-2 py-1">
+                <span class="px-1.5 py-0.5 rounded text-white
+                  {change.type === 'add' ? 'bg-green-500' :
+                   change.type === 'modify' ? 'bg-yellow-500' :
+                   'bg-red-500'}">
+                  {change.type}
+                </span>
+                <span class="text-slate-600 break-all">{change.detail}</span>
+              </div>
+            {/each}
+          </div>
+        {/each}
+      </div>
+    {/if}
+
     <!-- Steps -->
     {#if steps.length > 0}
       <div class="mb-6">
         <h2 class="text-sm font-semibold mb-2 text-slate-900">Steps</h2>
         <div class="space-y-2">
           {#each steps as step}
-            <div class="flex items-center gap-2 text-sm">
-              <span class="w-2 h-2 rounded-full
+            <div class="flex flex-wrap items-center gap-2 text-sm">
+              <span class="w-2 h-2 rounded-full shrink-0
                 {step.status === 'completed' ? 'bg-green-500' :
                  step.status === 'failed' ? 'bg-red-500' :
                  step.status === 'running' ? 'bg-blue-500' :
@@ -174,7 +259,7 @@
               <span class="font-mono text-slate-700">{step.category}:{step.action}</span>
               <span class={statusColor(step.status)}>{step.status}</span>
               {#if step.error}
-                <span class="text-red-500">→ {step.error}</span>
+                <span class="text-red-500 break-all">→ {step.error}</span>
               {/if}
             </div>
           {/each}
@@ -188,7 +273,7 @@
         <h3 class="text-xs font-semibold mb-2 text-slate-400">Live Progress</h3>
         <div class="space-y-1">
           {#each progressMessages as msg}
-            <div class="text-xs font-mono">
+            <div class="text-xs font-mono break-all">
               <span class={msg.status === 'error' ? 'text-red-400' : msg.status === 'success' || msg.status === 'complete' ? 'text-green-400' : 'text-blue-400'}>
                 [{msg.status}]
               </span>

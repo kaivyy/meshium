@@ -20,7 +20,7 @@
 
   onMount(async () => {
     try {
-      server = await api.get<Server>(`/servers/${serverId}`);
+      server = await api.get(`/servers/${serverId}`) as Server;
       await loadInfo();
     } catch {
       // handled in template
@@ -38,7 +38,7 @@
     loadingInfo = true;
 
     try {
-      info = await api.get<ServerInfo>(`/servers/${serverId}/info`);
+      info = await api.get(`/servers/${serverId}/info`) as ServerInfo;
     } catch {
       info = null;
     } finally {
@@ -96,51 +96,49 @@
   }
 </script>
 
-<div class="min-h-screen bg-slate-50">
-  <header class="border-b border-slate-200 bg-white px-6 py-4">
-    <a href="/" class="mb-3 inline-flex items-center gap-2 text-sm text-slate-600 transition hover:text-slate-900">
-      <ArrowLeft size={16} /> Back to Servers
-    </a>
+<div class="p-4 sm:p-6">
+  <a href="/" class="mb-3 inline-flex items-center gap-2 text-sm text-slate-600 transition hover:text-slate-900">
+    <ArrowLeft size={16} /> Back to Servers
+  </a>
 
-    {#if server}
-      <div class="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
-        <div>
-          <div class="flex items-center gap-3">
-            <h1 class="text-xl font-bold tracking-tight text-slate-900">{server.name}</h1>
-            <span class="rounded-full bg-slate-100 px-2.5 py-1 text-xs font-medium text-slate-600">
-              {server.environment || 'no environment'}
-            </span>
-          </div>
-          <p class="mt-1 text-sm text-slate-500">
-            {server.host}:{server.port} · {server.username}
-          </p>
-          {#if server.description}
-            <p class="mt-2 max-w-3xl text-sm text-slate-600">{server.description}</p>
-          {/if}
+  {#if server}
+    <div class="mb-6 flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
+      <div>
+        <div class="flex items-center gap-3">
+          <h1 class="text-xl font-bold tracking-tight text-slate-900">{server.name}</h1>
+          <span class="rounded-full bg-slate-100 px-2.5 py-1 text-xs font-medium text-slate-600">
+            {server.environment || 'no environment'}
+          </span>
         </div>
-
-        <div class="flex flex-wrap items-center gap-3">
-          <a
-            href={`/servers/${server.id}/edit`}
-            class="inline-flex items-center justify-center rounded-lg border border-slate-300 bg-white px-4 py-2 text-sm font-medium text-slate-700 transition hover:bg-slate-50"
-          >
-            Edit Server
-          </a>
-          <button
-            type="button"
-            on:click={handleConnect}
-            disabled={connecting}
-            class="inline-flex items-center justify-center gap-2 rounded-lg bg-blue-600 px-4 py-2 text-sm font-medium text-white transition hover:bg-blue-700 disabled:cursor-not-allowed disabled:opacity-50"
-          >
-            <Play size={18} />
-            {connecting ? 'Connecting...' : 'Test Connection'}
-          </button>
-        </div>
+        <p class="mt-1 text-sm text-slate-500">
+          {server.host}:{server.port} · {server.username}
+        </p>
+        {#if server.description}
+          <p class="mt-2 max-w-3xl text-sm text-slate-600">{server.description}</p>
+        {/if}
       </div>
-    {/if}
-  </header>
 
-  <main class="mx-auto w-full max-w-6xl p-6">
+      <div class="flex flex-wrap items-center gap-3">
+        <a
+          href={`/servers/${server.id}/edit`}
+          class="inline-flex items-center justify-center rounded-lg border border-slate-300 bg-white px-4 py-2 text-sm font-medium text-slate-700 transition hover:bg-slate-50"
+        >
+          Edit Server
+        </a>
+        <button
+          type="button"
+          on:click={handleConnect}
+          disabled={connecting}
+          class="inline-flex items-center justify-center gap-2 rounded-lg bg-blue-600 px-4 py-2 text-sm font-medium text-white transition hover:bg-blue-700 disabled:cursor-not-allowed disabled:opacity-50"
+        >
+          <Play size={18} />
+          {connecting ? 'Connecting...' : 'Test Connection'}
+        </button>
+      </div>
+    </div>
+  {/if}
+
+  <div class="max-w-6xl mx-auto">
     {#if loading}
       <div class="rounded-lg border border-dashed border-slate-300 bg-white px-4 py-8 text-center text-slate-500">
         Loading server details...
@@ -151,7 +149,7 @@
       </div>
     {:else}
       {#if wsSteps.length > 0 || wsError}
-        <section class="mb-6 rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
+        <section class="mb-6 rounded-2xl border border-slate-200 bg-white p-4 sm:p-5 shadow-sm">
           <div class="mb-4 flex items-center justify-between gap-4">
             <div>
               <h2 class="text-sm font-semibold uppercase tracking-wide text-slate-500">Connection Test</h2>
@@ -178,10 +176,10 @@
                   <span class="text-slate-400">·</span>
                   <span class="text-slate-500">{step.status}</span>
                   {#if step.value}
-                    <span class="text-slate-400">→ {step.value}</span>
+                    <span class="text-slate-400 break-all">→ {step.value}</span>
                   {/if}
                   {#if step.error}
-                    <span class="text-rose-600">→ {step.error}</span>
+                    <span class="text-rose-600 break-all">→ {step.error}</span>
                   {/if}
                 </div>
               {/each}
@@ -190,7 +188,7 @@
         </section>
       {/if}
 
-      <section class="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
+      <section class="rounded-2xl border border-slate-200 bg-white p-4 sm:p-5 shadow-sm">
         <div class="mb-4 flex items-center justify-between gap-4">
           <div>
             <h2 class="text-sm font-semibold uppercase tracking-wide text-slate-500">System Information</h2>
@@ -202,7 +200,7 @@
         </div>
 
         {#if info}
-          <div class="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
+          <div class="grid gap-4 grid-cols-1 sm:grid-cols-2 xl:grid-cols-3">
             <div class="rounded-xl border border-slate-200 bg-slate-50 p-4">
               <div class="mb-2 flex items-center gap-2 text-slate-500">
                 <Cpu size={18} />
@@ -268,5 +266,5 @@
         {/if}
       </section>
     {/if}
-  </main>
+  </div>
 </div>

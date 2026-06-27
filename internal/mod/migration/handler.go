@@ -3,6 +3,7 @@ package migration
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"log"
 	"net/http"
 	"strconv"
@@ -18,6 +19,9 @@ type MigrationRunner interface {
 	Plan(ctx context.Context, req PlanRequest, onProgress StepCallback) (*MigrationPlan, error)
 	Execute(ctx context.Context, migrationID int, onProgress StepCallback) error
 	Rollback(ctx context.Context, migrationID int, onProgress StepCallback) error
+	PreFlight(ctx context.Context, migrationID int, onProgress StepCallback) (*PreFlightResult, error)
+	DryRun(ctx context.Context, migrationID int, onProgress StepCallback) (*DryRunResult, error)
+	Diff(ctx context.Context, sourceID, targetID int, categories []string, onProgress StepCallback) (*DiffResult, error)
 }
 
 // Handler exposes REST and WebSocket routes for migrations.
@@ -46,6 +50,9 @@ func (h *Handler) RegisterRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("/api/migrations/", h.handleMigrationByID)
 	mux.HandleFunc("/ws/migrate/", h.handleMigrateWS)
 	mux.HandleFunc("/ws/plan", h.handlePlanWS)
+	mux.HandleFunc("/ws/dryrun/", h.handleDryRunWS)
+	mux.HandleFunc("/ws/diff", h.handleDiffWS)
+	mux.HandleFunc("/api/diff", h.handleDiffREST)
 }
 
 // --- REST: /api/migrations ---
@@ -102,6 +109,24 @@ func (h *Handler) handleMigrationByID(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		h.handleGetSteps(w, r, id)
+	case "preflight":
+		if r.Method != http.MethodGet {
+			shared.WriteError(w, http.StatusMethodNotAllowed, "method not allowed", "METHOD_NOT_ALLOWED")
+			return
+		}
+		h.handlePreFlight(w, r, id)
+	case "dryrun":
+		if r.Method != http.MethodGet {
+			shared.WriteError(w, http.StatusMethodNotAllowed, "method not allowed", "METHOD_NOT_ALLOWED")
+			return
+		}
+		h.handleDryRunREST(w, r, id)
+	case "export":
+		if r.Method != http.MethodGet {
+			shared.WriteError(w, http.StatusMethodNotAllowed, "method not allowed", "METHOD_NOT_ALLOWED")
+			return
+		}
+		h.handleExport(w, r, id)
 	default:
 		shared.WriteError(w, http.StatusNotFound, "not found", "NOT_FOUND")
 	}
@@ -306,4 +331,186 @@ func (h *Handler) handleMigrateWS(w http.ResponseWriter, r *http.Request) {
 	}
 
 	conn.WriteJSON(WSMessage{Step: action, Status: "complete"})
+}
+
+// --- Pre-Flight REST handler ---
+
+func (h *Handler) handlePreFlight(w http.ResponseWriter, r *http.Request, id int) {
+	if h == nil || h.runner == nil {
+		shared.WriteError(w, http.StatusServiceUnavailable, "service unavailable", "SERVICE_UNAVAILABLE")
+		return
+	}
+
+	result, err := h.runner.PreFlight(r.Context(), id, nil)
+	if err != nil {
+		shared.WriteError(w, http.StatusInternalServerError, "pre-flight failed: "+err.Error(), "INTERNAL")
+		return
+	}
+	shared.WriteJSON(w, http.StatusOK, result)
+}
+
+func (h *Handler) handleDryRunREST(w http.ResponseWriter, r *http.Request, id int) {
+	result, err := h.runner.DryRun(r.Context(), id, nil)
+	if err != nil {
+		shared.WriteError(w, http.StatusInternalServerError, "dry run failed: "+err.Error(), "INTERNAL")
+		return
+	}
+	shared.WriteJSON(w, http.StatusOK, result)
+}
+
+// --- Dry Run WebSocket handler ---
+
+func (h *Handler) handleDryRunWS(w http.ResponseWriter, r *http.Request) {
+	if h == nil || h.runner == nil {
+		http.Error(w, "service unavailable", http.StatusServiceUnavailable)
+		return
+	}
+
+	path := strings.TrimPrefix(r.URL.Path, "/ws/dryrun/")
+	migrationID, err := strconv.Atoi(strings.TrimSpace(path))
+	if err != nil {
+		http.Error(w, "invalid migration ID", http.StatusBadRequest)
+		return
+	}
+
+	conn, err := h.upgrader.Upgrade(w, r, nil)
+	if err != nil {
+		log.Printf("websocket upgrade failed: %v", err)
+		return
+	}
+	defer conn.Close()
+
+	ctx, cancel := context.WithCancel(r.Context())
+	defer cancel()
+
+	_, err = h.runner.DryRun(ctx, migrationID, func(msg WSMessage) {
+		if writeErr := conn.WriteJSON(msg); writeErr != nil {
+			log.Printf("websocket write failed: %v", writeErr)
+			cancel()
+		}
+	})
+
+	if err != nil {
+		conn.WriteJSON(WSMessage{Step: "dryrun", Status: "error", Error: err.Error()})
+		return
+	}
+
+	conn.WriteJSON(WSMessage{Step: "dryrun", Status: "complete"})
+}
+
+// --- Diff REST handler ---
+
+func (h *Handler) handleDiffREST(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		shared.WriteError(w, http.StatusMethodNotAllowed, "method not allowed", "METHOD_NOT_ALLOWED")
+		return
+	}
+
+	var req struct {
+		SourceID   int      `json:"sourceId"`
+		TargetID   int      `json:"targetId"`
+		Categories []string `json:"categories"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		shared.WriteError(w, http.StatusBadRequest, "invalid request body", "VALIDATION_ERROR")
+		return
+	}
+
+	if req.SourceID == 0 || req.TargetID == 0 {
+		shared.WriteError(w, http.StatusBadRequest, "sourceId and targetId are required", "VALIDATION_ERROR")
+		return
+	}
+
+	result, err := h.runner.Diff(r.Context(), req.SourceID, req.TargetID, req.Categories, nil)
+	if err != nil {
+		shared.WriteError(w, http.StatusInternalServerError, "diff failed: "+err.Error(), "INTERNAL")
+		return
+	}
+
+	shared.WriteJSON(w, http.StatusOK, result)
+}
+
+// --- Diff WebSocket handler ---
+
+func (h *Handler) handleDiffWS(w http.ResponseWriter, r *http.Request) {
+	if h == nil || h.runner == nil {
+		http.Error(w, "service unavailable", http.StatusServiceUnavailable)
+		return
+	}
+
+	var req struct {
+		SourceID   int      `json:"sourceId"`
+		TargetID   int      `json:"targetId"`
+		Categories []string `json:"categories"`
+	}
+
+	if r.Method == http.MethodPost {
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+			http.Error(w, "invalid request body", http.StatusBadRequest)
+			return
+		}
+	} else {
+		sourceID, _ := strconv.Atoi(r.URL.Query().Get("source"))
+		targetID, _ := strconv.Atoi(r.URL.Query().Get("target"))
+		categories := strings.Split(r.URL.Query().Get("categories"), ",")
+		req = struct {
+			SourceID   int      `json:"sourceId"`
+			TargetID   int      `json:"targetId"`
+			Categories []string `json:"categories"`
+		}{SourceID: sourceID, TargetID: targetID, Categories: categories}
+	}
+
+	if req.SourceID == 0 || req.TargetID == 0 {
+		http.Error(w, "sourceId and targetId are required", http.StatusBadRequest)
+		return
+	}
+
+	conn, err := h.upgrader.Upgrade(w, r, nil)
+	if err != nil {
+		log.Printf("websocket upgrade failed: %v", err)
+		return
+	}
+	defer conn.Close()
+
+	ctx, cancel := context.WithCancel(r.Context())
+	defer cancel()
+
+	_, err = h.runner.Diff(ctx, req.SourceID, req.TargetID, req.Categories, func(msg WSMessage) {
+		if writeErr := conn.WriteJSON(msg); writeErr != nil {
+			log.Printf("websocket write failed: %v", writeErr)
+			cancel()
+		}
+	})
+
+	if err != nil {
+		conn.WriteJSON(WSMessage{Step: "diff", Status: "error", Error: err.Error()})
+		return
+	}
+
+	conn.WriteJSON(WSMessage{Step: "diff", Status: "complete"})
+}
+
+// --- Export handler ---
+
+func (h *Handler) handleExport(w http.ResponseWriter, r *http.Request, id int) {
+	migration, err := h.repo.GetMigration(id)
+	if err != nil {
+		shared.WriteError(w, http.StatusNotFound, "migration not found", "MIGRATION_NOT_FOUND")
+		return
+	}
+
+	steps, err := h.repo.GetSteps(id)
+	if err != nil {
+		shared.WriteError(w, http.StatusInternalServerError, "failed to get steps", "INTERNAL")
+		return
+	}
+
+	export := map[string]interface{}{
+		"migration": migration,
+		"steps":     steps,
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	w.Header().Set("Content-Disposition", fmt.Sprintf("attachment; filename=\"migration-%d.json\"", id))
+	json.NewEncoder(w).Encode(export)
 }

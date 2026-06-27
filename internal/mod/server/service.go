@@ -95,6 +95,7 @@ func (s *Service) Create(req CreateRequest) (*Server, error) {
 		Region:      req.Region,
 		Icon:        req.Icon,
 		Color:       req.Color,
+		BastionID:   req.BastionID,
 	})
 	if err != nil {
 		return nil, err
@@ -159,6 +160,9 @@ func (s *Service) Update(id int, req UpdateRequest) error {
 	}
 	if req.Color != nil {
 		srv.Color = *req.Color
+	}
+	if req.BastionID != nil {
+		srv.BastionID = *req.BastionID
 	}
 
 	if req.Password != nil {

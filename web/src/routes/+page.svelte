@@ -18,8 +18,8 @@
   }
 </script>
 
-<div class="p-6">
-  <div class="mb-6 flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between max-w-7xl mx-auto">
+<div class="p-4 sm:p-6">
+  <div class="mb-6 flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between max-w-7xl mx-auto">
     <div>
       <h2 class="text-lg font-semibold text-slate-900">Servers</h2>
       <p class="mt-1 text-sm text-slate-500">Search, favorite, and manage your saved servers.</p>
@@ -34,7 +34,7 @@
     </a>
   </div>
 
-  <div class="mb-6 flex flex-col gap-3 md:flex-row md:items-center max-w-7xl mx-auto">
+  <div class="mb-6 flex flex-col gap-3 sm:flex-row sm:items-center max-w-7xl mx-auto">
     <div class="relative flex-1">
       <Search size={18} class="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
       <input
@@ -83,7 +83,8 @@
         {/if}
       </p>
     {:else}
-      <div class="overflow-x-auto rounded-2xl border border-slate-200 bg-white shadow-sm">
+      <!-- Desktop: table -->
+      <div class="hidden md:block overflow-x-auto rounded-2xl border border-slate-200 bg-white shadow-sm">
         <table class="min-w-full divide-y divide-slate-200">
           <thead class="bg-slate-50">
             <tr>
@@ -175,6 +176,59 @@
             {/each}
           </tbody>
         </table>
+      </div>
+
+      <!-- Mobile: cards -->
+      <div class="md:hidden space-y-3">
+        {#each $serverStore.filteredServers as server}
+          <div class="rounded-xl border border-slate-200 bg-white p-4 shadow-sm">
+            <div class="flex items-start justify-between gap-2">
+              <div class="flex items-start gap-3 min-w-0">
+                <button
+                  type="button"
+                  on:click={() => toggleFavorite(server.id)}
+                  class="mt-0.5 shrink-0 text-slate-300 transition hover:text-yellow-500"
+                >
+                  <Star
+                    size={18}
+                    fill={server.favorite ? 'currentColor' : 'none'}
+                    class={server.favorite ? 'text-yellow-500' : ''}
+                  />
+                </button>
+                <div class="min-w-0">
+                  <a href={`/servers/${server.id}`} class="font-medium text-slate-900 hover:text-blue-600 block truncate">
+                    {server.name}
+                  </a>
+                  <p class="text-sm text-slate-500 mt-0.5 truncate">{server.host}:{server.port} · {server.username}</p>
+                </div>
+              </div>
+              <div class="rounded-full bg-slate-100 p-2 text-slate-500 shrink-0">
+                <Server size={16} />
+              </div>
+            </div>
+
+            {#if server.description}
+              <p class="mt-2 text-sm text-slate-500 line-clamp-2">{server.description}</p>
+            {/if}
+
+            <div class="mt-3 flex flex-wrap gap-2">
+              {#if server.environment}
+                <span class="rounded-full bg-blue-50 px-2 py-0.5 text-xs font-medium text-blue-600">{server.environment}</span>
+              {/if}
+              {#if server.region}
+                <span class="rounded-full bg-slate-100 px-2 py-0.5 text-xs font-medium text-slate-600">{server.region}</span>
+              {/if}
+              {#each server.tags as tag}
+                <span class="rounded-full bg-slate-100 px-2 py-0.5 text-xs font-medium text-slate-600">{tag}</span>
+              {/each}
+            </div>
+
+            <div class="mt-3 flex gap-4 text-xs font-medium">
+              <a href={`/servers/${server.id}`} class="text-blue-600 hover:text-blue-700">View</a>
+              <a href={`/servers/${server.id}/edit`} class="text-slate-500 hover:text-slate-900">Edit</a>
+            </div>
+          </div>
+        {/each}
       </div>
     {/if}
   </div>
