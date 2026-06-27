@@ -8,6 +8,7 @@ import (
 // SSHExecuter is the interface required by the collector.
 type SSHExecuter interface {
 	Exec(cmd string) (string, string, int, error)
+	IsAlive() bool
 }
 
 // Command defines a single discovery command.
@@ -213,6 +214,9 @@ func (c *Collector) CollectTimezone() StepResult {
 func (c *Collector) CollectProvider() StepResult {
 	stdout, _, _, err := c.client.Exec("curl -s --max-time 2 http://169.254.169.254/latest/meta-data/instance-id || echo unknown")
 	if err != nil {
+		if c.client != nil && !c.client.IsAlive() {
+			return StepResult{Name: "provider", Error: err}
+		}
 		return StepResult{Name: "provider", Value: "unknown"}
 	}
 

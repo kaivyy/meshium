@@ -8,15 +8,26 @@ import (
 // mockSSHClient implements the SSHExecuter interface for testing.
 type mockSSHClient struct {
 	responses map[string]string
+	errors    map[string]error
+	alive     bool
 }
 
 func (m *mockSSHClient) Exec(cmd string) (string, string, int, error) {
+	for pattern, err := range m.errors {
+		if strings.Contains(cmd, pattern) {
+			return "", "", -1, err
+		}
+	}
 	for pattern, response := range m.responses {
 		if strings.Contains(cmd, pattern) {
 			return response, "", 0, nil
 		}
 	}
 	return "", "", 0, nil
+}
+
+func (m *mockSSHClient) IsAlive() bool {
+	return m.alive
 }
 
 func TestCollectHostname(t *testing.T) {

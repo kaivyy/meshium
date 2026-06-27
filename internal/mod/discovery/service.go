@@ -1,8 +1,10 @@
 package discovery
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
+	"strings"
 	"time"
 
 	"meshium/internal/mod/server"
@@ -134,33 +136,86 @@ func applyResultToSystemInfo(info *SystemInfo, r StepResult) {
 	}
 }
 
+func sendErrorStep(onStep StepCallback, step, message string) {
+	onStep(WSMessage{Step: step, Status: "error", Error: message})
+}
+
+func isSSHDisconnectError(err error) bool {
+	if err == nil {
+		return false
+	}
+
+	msg := strings.ToLower(err.Error())
+	for _, needle := range []string{
+		"eof",
+		"connection lost",
+		"connection reset",
+		"broken pipe",
+		"use of closed network connection",
+		"connection timed out",
+		"session is not active",
+	} {
+		if strings.Contains(msg, needle) {
+			return true
+		}
+	}
+
+	return false
+}
+
+func collectorSteps(c *Collector) []func() StepResult {
+	return []func() StepResult{
+		c.CollectHostname,
+		c.CollectOS,
+		c.CollectKernel,
+		c.CollectArchitecture,
+		c.CollectCPUModel,
+		c.CollectCPUCores,
+		c.CollectRAM,
+		c.CollectDisk,
+		c.CollectVirtualization,
+		c.CollectPublicIP,
+		c.CollectPrivateIP,
+		c.CollectTimezone,
+		c.CollectProvider,
+	}
+}
+
 // RunConnectionTest connects to a server, runs all discovery commands,
 // and calls onStep for each result. Results are cached to server_info.
-func (s *Service) RunConnectionTest(serverID int, onStep StepCallback) error {
+func (s *Service) RunConnectionTest(ctx context.Context, serverID int, onStep StepCallback) error {
+	if ctx == nil {
+		ctx = context.Background()
+	}
 	if onStep == nil {
 		onStep = func(WSMessage) {}
 	}
 
 	srv, err := s.repo.GetByID(serverID)
 	if err != nil {
+		sendErrorStep(onStep, "lookup", "server not found")
 		return fmt.Errorf("server not found: %w", err)
 	}
 
 	aesKey := s.authSvc.GetAESKey()
 	if aesKey == nil {
+		sendErrorStep(onStep, "auth", "app is locked")
 		return fmt.Errorf("app is locked")
 	}
 
 	password, err := decryptCredential(aesKey, srv.Password)
 	if err != nil {
+		sendErrorStep(onStep, "auth", "failed to decrypt credentials")
 		return fmt.Errorf("failed to decrypt password: %w", err)
 	}
 	sshKey, err := decryptCredential(aesKey, srv.SSHKey)
 	if err != nil {
+		sendErrorStep(onStep, "auth", "failed to decrypt credentials")
 		return fmt.Errorf("failed to decrypt ssh key: %w", err)
 	}
 	passphrase, err := decryptCredential(aesKey, srv.Passphrase)
 	if err != nil {
+		sendErrorStep(onStep, "auth", "failed to decrypt credentials")
 		return fmt.Errorf("failed to decrypt passphrase: %w", err)
 	}
 
@@ -195,18 +250,40 @@ func (s *Service) RunConnectionTest(serverID int, onStep StepCallback) error {
 		Status:    "success",
 		LatencyMs: int(latency.Milliseconds()),
 	})
+	if ctx.Err() != nil {
+		return ctx.Err()
+	}
 
 	collector := NewCollector(client)
-	results := collector.CollectAll()
-
+	results := collectorSteps(collector)
 	info := SystemInfo{
 		SSHStatus: "connected",
 		LatencyMs: int(latency.Milliseconds()),
 	}
 
-	for _, r := range results {
-		onStep(stepMessageFromResult(r))
-		applyResultToSystemInfo(&info, r)
+	for _, collect := range results {
+		if ctx.Err() != nil {
+			return ctx.Err()
+		}
+
+		result := collect()
+		if result.Error != nil {
+			if client == nil || isSSHDisconnectError(result.Error) || !client.IsAlive() {
+				onStep(WSMessage{Step: "ssh", Status: "error", Error: "SSH connection lost"})
+				return fmt.Errorf("ssh connection lost: %w", result.Error)
+			}
+		}
+
+		onStep(stepMessageFromResult(result))
+		if ctx.Err() != nil {
+			return ctx.Err()
+		}
+
+		applyResultToSystemInfo(&info, result)
+	}
+
+	if ctx.Err() != nil {
+		return ctx.Err()
 	}
 
 	rawData, err := json.Marshal(info)
@@ -215,6 +292,10 @@ func (s *Service) RunConnectionTest(serverID int, onStep StepCallback) error {
 	}
 	if err := s.repo.SaveServerInfo(serverID, server.ServerInfo(info), string(rawData)); err != nil {
 		return err
+	}
+
+	if ctx.Err() != nil {
+		return ctx.Err()
 	}
 
 	onStep(WSMessage{Step: "done", Status: "complete"})

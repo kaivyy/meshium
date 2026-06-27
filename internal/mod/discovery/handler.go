@@ -1,6 +1,7 @@
 package discovery
 
 import (
+	"context"
 	"log"
 	"net/http"
 	"strconv"
@@ -17,7 +18,7 @@ var upgrader = websocket.Upgrader{
 
 // ConnectionRunner runs a connection test and streams step results.
 type ConnectionRunner interface {
-	RunConnectionTest(serverID int, onStep StepCallback) error
+	RunConnectionTest(ctx context.Context, serverID int, onStep StepCallback) error
 }
 
 // Handler exposes WebSocket routes for discovery.
@@ -60,9 +61,14 @@ func (h *Handler) handleConnect(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if err := h.svc.RunConnectionTest(serverID, func(msg WSMessage) {
+	ctx, cancel := context.WithCancel(r.Context())
+	defer cancel()
+
+	if err := h.svc.RunConnectionTest(ctx, serverID, func(msg WSMessage) {
 		if err := conn.WriteJSON(msg); err != nil {
 			log.Printf("websocket write failed: %v", err)
+			_ = conn.Close()
+			cancel()
 		}
 	}); err != nil {
 		log.Printf("connection test failed for server %d: %v", serverID, err)
