@@ -3,7 +3,8 @@
   import { goto } from '$app/navigation';
   import { page } from '$app/stores';
   import { onMount } from 'svelte';
-  import { authStore, checkStatus } from '$lib/stores/auth';
+  import { authStore, checkStatus, lock } from '$lib/stores/auth';
+  import Sidebar from '$lib/components/Sidebar.svelte';
 
   onMount(() => {
     checkStatus();
@@ -23,6 +24,18 @@
       }
     }
   }
+
+  // Pages that should NOT have sidebar (full-screen auth pages)
+  $: noSidebar = $page.url.pathname === '/login' || $page.url.pathname === '/setup';
 </script>
 
-<slot />
+{#if noSidebar}
+  <slot />
+{:else}
+  <div class="flex h-screen">
+    <Sidebar />
+    <main class="flex-1 overflow-auto bg-slate-50">
+      <slot />
+    </main>
+  </div>
+{/if}

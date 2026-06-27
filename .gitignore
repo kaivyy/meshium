@@ -1,0 +1,23 @@
+# Binaries
+bin/
+server
+
+# Database
+*.db
+*.db-journal
+
+# Environment
+.env
+.env.*
+
+# OS
+.DS_Store
+Thumbs.db
+
+# IDE
+.vscode/
+.idea/
+
+# SvelteKit build artifacts (embedded via cmd/server/web/build)
+web/.svelte-kit/
+web/build/

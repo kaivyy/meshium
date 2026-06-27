@@ -1,7 +1,6 @@
 <script lang="ts">
   import { onMount } from 'svelte';
   import { Plus, Search, Server, Star } from 'lucide-svelte';
-  import { lock } from '$lib/stores/auth';
   import {
     fetchServers,
     serverStore,
@@ -19,68 +18,54 @@
   }
 </script>
 
-<div class="min-h-screen bg-slate-50">
-  <header class="flex items-center justify-between border-b border-slate-200 bg-white px-6 py-4">
-    <h1 class="text-xl font-bold tracking-tight text-slate-900">Meshium</h1>
-    <div class="flex items-center gap-4">
-      <a href="/settings" class="text-sm font-medium text-slate-600 transition hover:text-slate-900">Settings</a>
-      <button
-        type="button"
-        on:click={() => lock()}
-        class="text-sm font-medium text-slate-600 transition hover:text-slate-900"
-      >
-        Lock
-      </button>
-    </div>
-  </header>
-
-  <main class="mx-auto w-full max-w-7xl p-6">
-    <div class="mb-6 flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
-      <div>
-        <h2 class="text-lg font-semibold text-slate-900">Servers</h2>
-        <p class="mt-1 text-sm text-slate-500">Search, favorite, and manage your saved servers.</p>
-      </div>
-
-      <a
-        href="/servers/new"
-        class="inline-flex items-center justify-center gap-2 rounded-lg bg-blue-600 px-4 py-2 text-sm font-medium text-white transition hover:bg-blue-700"
-      >
-        <Plus size={18} />
-        Add Server
-      </a>
+<div class="p-6">
+  <div class="mb-6 flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between max-w-7xl mx-auto">
+    <div>
+      <h2 class="text-lg font-semibold text-slate-900">Servers</h2>
+      <p class="mt-1 text-sm text-slate-500">Search, favorite, and manage your saved servers.</p>
     </div>
 
-    <div class="mb-6 flex flex-col gap-3 md:flex-row md:items-center">
-      <div class="relative flex-1">
-        <Search size={18} class="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
-        <input
-          type="text"
-          value={$serverStore.searchQuery}
-          on:input={handleSearch}
-          placeholder="Search servers..."
-          class="w-full rounded-lg border border-slate-300 bg-white py-2 pl-10 pr-4 text-slate-900 shadow-sm outline-none transition focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20"
-        />
-      </div>
+    <a
+      href="/servers/new"
+      class="inline-flex items-center justify-center gap-2 rounded-lg bg-blue-600 px-4 py-2 text-sm font-medium text-white transition hover:bg-blue-700"
+    >
+      <Plus size={18} />
+      Add Server
+    </a>
+  </div>
 
-      <button
-        type="button"
-        on:click={() => setFilterFavorites(!$serverStore.filterFavorites)}
-        aria-pressed={$serverStore.filterFavorites}
-        class={`inline-flex items-center justify-center gap-2 rounded-lg border px-4 py-2 text-sm font-medium shadow-sm transition focus:outline-none focus:ring-2 focus:ring-blue-500/20 ${
-          $serverStore.filterFavorites
-            ? 'border-yellow-300 bg-yellow-50 text-yellow-700 hover:bg-yellow-100'
-            : 'border-slate-300 bg-white text-slate-700 hover:bg-slate-50'
-        }`}
-      >
-        <Star
-          size={18}
-          fill={$serverStore.filterFavorites ? 'currentColor' : 'none'}
-          class={$serverStore.filterFavorites ? 'text-yellow-500' : 'text-slate-400'}
-        />
-        Favorites only
-      </button>
+  <div class="mb-6 flex flex-col gap-3 md:flex-row md:items-center max-w-7xl mx-auto">
+    <div class="relative flex-1">
+      <Search size={18} class="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
+      <input
+        type="text"
+        value={$serverStore.searchQuery}
+        on:input={handleSearch}
+        placeholder="Search servers..."
+        class="w-full rounded-lg border border-slate-300 bg-white py-2 pl-10 pr-4 text-slate-900 shadow-sm outline-none transition focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20"
+      />
     </div>
 
+    <button
+      type="button"
+      on:click={() => setFilterFavorites(!$serverStore.filterFavorites)}
+      aria-pressed={$serverStore.filterFavorites}
+      class={`inline-flex items-center justify-center gap-2 rounded-lg border px-4 py-2 text-sm font-medium shadow-sm transition focus:outline-none focus:ring-2 focus:ring-blue-500/20 ${
+        $serverStore.filterFavorites
+          ? 'border-yellow-300 bg-yellow-50 text-yellow-700 hover:bg-yellow-100'
+          : 'border-slate-300 bg-white text-slate-700 hover:bg-slate-50'
+      }`}
+    >
+      <Star
+        size={18}
+        fill={$serverStore.filterFavorites ? 'currentColor' : 'none'}
+        class={$serverStore.filterFavorites ? 'text-yellow-500' : 'text-slate-400'}
+      />
+      Favorites only
+    </button>
+  </div>
+
+  <div class="max-w-7xl mx-auto">
     {#if $serverStore.loading}
       <div class="rounded-lg border border-dashed border-slate-300 bg-white px-4 py-8 text-center text-slate-500">
         Loading servers...
@@ -192,5 +177,5 @@
         </table>
       </div>
     {/if}
-  </main>
+  </div>
 </div>
