@@ -163,7 +163,7 @@ func (h *Handler) handleUpdate(w http.ResponseWriter, r *http.Request, id int) {
 func (h *Handler) handleDelete(w http.ResponseWriter, r *http.Request, id int) {
 	if err := h.svc.Delete(id); err != nil {
 		if isNotFoundError(err) {
-			shared.WriteError(w, http.StatusNotFound, "server not found", "SERVER_NOT_FOUND")
+			shared.WriteError(w, http.StatusNotFound, "server not found", "NOT_FOUND")
 			return
 		}
 		shared.WriteError(w, http.StatusInternalServerError, "failed to delete server", "INTERNAL")
@@ -176,7 +176,7 @@ func (h *Handler) handleDelete(w http.ResponseWriter, r *http.Request, id int) {
 func (h *Handler) handleToggleFavorite(w http.ResponseWriter, r *http.Request, id int) {
 	if err := h.svc.ToggleFavorite(id); err != nil {
 		if isNotFoundError(err) {
-			shared.WriteError(w, http.StatusNotFound, "server not found", "SERVER_NOT_FOUND")
+			shared.WriteError(w, http.StatusNotFound, "server not found", "NOT_FOUND")
 			return
 		}
 		shared.WriteError(w, http.StatusInternalServerError, "failed to toggle favorite", "INTERNAL")

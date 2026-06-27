@@ -125,10 +125,7 @@ func (s *Service) generateAndStoreSSHKeyPair() (string, error) {
 		return "", err
 	}
 
-	if err := s.repo.SetEncryptedSSHKey(string(encrypted)); err != nil {
-		return "", err
-	}
-	if err := s.repo.SetSSHPublicKey(string(publicSSH)); err != nil {
+	if err := s.repo.SetSSHKeyPair(string(encrypted), string(publicSSH)); err != nil {
 		return "", err
 	}
 

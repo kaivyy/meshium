@@ -113,6 +113,36 @@ func TestDelete(t *testing.T) {
 	}
 }
 
+func TestDeleteMissingReturnsNotFound(t *testing.T) {
+	d := setupTestDB(t)
+	defer d.Close()
+
+	repo := NewRepo(d)
+
+	err := repo.Delete(999)
+	if err == nil {
+		t.Fatal("expected error when deleting missing server")
+	}
+	if err.Error() != "server not found" {
+		t.Fatalf("expected server not found error, got %v", err)
+	}
+}
+
+func TestToggleFavoriteMissingReturnsNotFound(t *testing.T) {
+	d := setupTestDB(t)
+	defer d.Close()
+
+	repo := NewRepo(d)
+
+	err := repo.ToggleFavorite(999)
+	if err == nil {
+		t.Fatal("expected error when toggling favorite on missing server")
+	}
+	if err.Error() != "server not found" {
+		t.Fatalf("expected server not found error, got %v", err)
+	}
+}
+
 func TestSaveAndGetServerInfo(t *testing.T) {
 	d := setupTestDB(t)
 	defer d.Close()

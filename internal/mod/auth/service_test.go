@@ -210,3 +210,65 @@ func TestSetupGeneratesAndRegeneratesSSHKey(t *testing.T) {
 		t.Fatalf("expected PEM private key after regeneration, got %q", string(decrypted2))
 	}
 }
+
+func TestRegenerateSSHKeyIsAtomic(t *testing.T) {
+	d := setupTestDB(t)
+	defer d.Close()
+
+	repo := NewRepo(d)
+	svc := NewService(repo)
+
+	if err := svc.Setup("my-password"); err != nil {
+		t.Fatalf("Setup failed: %v", err)
+	}
+
+	originalPublic, err := repo.GetSSHPublicKey()
+	if err != nil {
+		t.Fatalf("GetSSHPublicKey failed: %v", err)
+	}
+	originalEncrypted, err := repo.GetEncryptedSSHKey()
+	if err != nil {
+		t.Fatalf("GetEncryptedSSHKey failed: %v", err)
+	}
+
+	if _, err := d.Exec(`
+		CREATE TRIGGER reject_ssh_key_public_insert
+		BEFORE INSERT ON app_config
+		WHEN NEW.key = 'ssh_key_public'
+		BEGIN
+			SELECT RAISE(ABORT, 'reject ssh public key write');
+		END;
+	`); err != nil {
+		t.Fatalf("create insert trigger failed: %v", err)
+	}
+	if _, err := d.Exec(`
+		CREATE TRIGGER reject_ssh_key_public_update
+		BEFORE UPDATE ON app_config
+		WHEN NEW.key = 'ssh_key_public'
+		BEGIN
+			SELECT RAISE(ABORT, 'reject ssh public key write');
+		END;
+	`); err != nil {
+		t.Fatalf("create update trigger failed: %v", err)
+	}
+
+	if _, err := svc.RegenerateSSHKey(); err == nil {
+		t.Fatal("expected regeneration to fail when public key write is rejected")
+	}
+
+	publicAfter, err := repo.GetSSHPublicKey()
+	if err != nil {
+		t.Fatalf("GetSSHPublicKey failed: %v", err)
+	}
+	if publicAfter != originalPublic {
+		t.Fatalf("expected public key to remain unchanged after rollback")
+	}
+
+	encryptedAfter, err := repo.GetEncryptedSSHKey()
+	if err != nil {
+		t.Fatalf("GetEncryptedSSHKey failed: %v", err)
+	}
+	if encryptedAfter != originalEncrypted {
+		t.Fatalf("expected encrypted private key to remain unchanged after rollback")
+	}
+}

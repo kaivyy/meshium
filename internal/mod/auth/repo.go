@@ -14,6 +14,7 @@ type Repo interface {
 	SetEncryptedSSHKey(key string) error
 	GetSSHPublicKey() (string, error)
 	SetSSHPublicKey(key string) error
+	SetSSHKeyPair(encryptedPrivateKey, publicKey string) error
 }
 
 type sqliteRepo struct {
@@ -67,4 +68,29 @@ func (r *sqliteRepo) GetSSHPublicKey() (string, error) {
 
 func (r *sqliteRepo) SetSSHPublicKey(key string) error {
 	return r.SetConfigValue("ssh_key_public", key)
+}
+
+func (r *sqliteRepo) SetSSHKeyPair(encryptedPrivateKey, publicKey string) error {
+	tx, err := r.db.Begin()
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+
+	if err := setConfigValueTx(tx, "ssh_key_private_encrypted", encryptedPrivateKey); err != nil {
+		return err
+	}
+	if err := setConfigValueTx(tx, "ssh_key_public", publicKey); err != nil {
+		return err
+	}
+
+	return tx.Commit()
+}
+
+func setConfigValueTx(tx *sql.Tx, key, value string) error {
+	_, err := tx.Exec(
+		"INSERT INTO app_config (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = ?",
+		key, value, value,
+	)
+	return err
 }

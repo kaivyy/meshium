@@ -10,6 +10,7 @@ import (
 
 	"meshium/internal/db"
 	"meshium/internal/mod/auth"
+	"meshium/internal/shared"
 )
 
 func setupHandlerTest(t *testing.T) (*Handler, *sql.DB) {
@@ -147,6 +148,48 @@ func TestHandleGetUpdateDeleteAndFavorite(t *testing.T) {
 	h.handleDelete(w, req, 1)
 	if w.Code != http.StatusOK {
 		t.Fatalf("expected 200, got %d", w.Code)
+	}
+}
+
+func TestHandleDeleteMissingServerReturns404(t *testing.T) {
+	h, d := setupHandlerTest(t)
+	defer d.Close()
+
+	req := httptest.NewRequest(http.MethodDelete, "/api/servers/999", nil)
+	w := httptest.NewRecorder()
+	h.handleDelete(w, req, 999)
+
+	if w.Code != http.StatusNotFound {
+		t.Fatalf("expected 404, got %d", w.Code)
+	}
+
+	var apiErr shared.APIError
+	if err := json.NewDecoder(w.Body).Decode(&apiErr); err != nil {
+		t.Fatalf("decode failed: %v", err)
+	}
+	if apiErr.Error != "server not found" || apiErr.Code != "NOT_FOUND" {
+		t.Fatalf("unexpected error response: %+v", apiErr)
+	}
+}
+
+func TestHandleToggleFavoriteMissingServerReturns404(t *testing.T) {
+	h, d := setupHandlerTest(t)
+	defer d.Close()
+
+	req := httptest.NewRequest(http.MethodPatch, "/api/servers/999/favorite", nil)
+	w := httptest.NewRecorder()
+	h.handleToggleFavorite(w, req, 999)
+
+	if w.Code != http.StatusNotFound {
+		t.Fatalf("expected 404, got %d", w.Code)
+	}
+
+	var apiErr shared.APIError
+	if err := json.NewDecoder(w.Body).Decode(&apiErr); err != nil {
+		t.Fatalf("decode failed: %v", err)
+	}
+	if apiErr.Error != "server not found" || apiErr.Code != "NOT_FOUND" {
+		t.Fatalf("unexpected error response: %+v", apiErr)
 	}
 }
 

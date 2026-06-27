@@ -122,13 +122,37 @@ func (r *sqliteRepo) Update(id int, s Server) error {
 }
 
 func (r *sqliteRepo) Delete(id int) error {
-	_, err := r.db.Exec("DELETE FROM servers WHERE id = ?", id)
-	return err
+	res, err := r.db.Exec("DELETE FROM servers WHERE id = ?", id)
+	if err != nil {
+		return err
+	}
+
+	rowsAffected, err := res.RowsAffected()
+	if err != nil {
+		return err
+	}
+	if rowsAffected == 0 {
+		return errors.New("server not found")
+	}
+
+	return nil
 }
 
 func (r *sqliteRepo) ToggleFavorite(id int) error {
-	_, err := r.db.Exec("UPDATE servers SET favorite = 1 - favorite WHERE id = ?", id)
-	return err
+	res, err := r.db.Exec("UPDATE servers SET favorite = 1 - favorite WHERE id = ?", id)
+	if err != nil {
+		return err
+	}
+
+	rowsAffected, err := res.RowsAffected()
+	if err != nil {
+		return err
+	}
+	if rowsAffected == 0 {
+		return errors.New("server not found")
+	}
+
+	return nil
 }
 
 func (r *sqliteRepo) SaveServerInfo(serverID int, info ServerInfo, rawData string) error {
