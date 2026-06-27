@@ -1,6 +1,7 @@
 <script lang="ts">
   import { goto } from '$app/navigation';
   import { onMount } from 'svelte';
+  import { APIError } from '$lib/api/client';
   import { authStore, unlock } from '$lib/stores/auth';
 
   let password = '';
@@ -14,7 +15,7 @@
       }
 
       if (!state.locked) {
-        goto('/servers');
+        goto('/');
       }
     });
 
@@ -27,9 +28,9 @@
 
     try {
       await unlock(password);
-      goto('/servers');
-    } catch {
-      error = 'Invalid password';
+      goto('/');
+    } catch (e) {
+      error = e instanceof APIError ? e.message : 'Failed to unlock Meshium';
     } finally {
       loading = false;
     }

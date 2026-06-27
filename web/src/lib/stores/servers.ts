@@ -36,36 +36,90 @@ export interface ServerInfo {
   timezone: string;
 }
 
-export const serverStore = writable<{
+export interface ServerStoreState {
   servers: Server[];
+  filteredServers: Server[];
+  searchQuery: string;
+  filterFavorites: boolean;
   loading: boolean;
   error: string | null;
-}>({
+}
+
+function normalize(value: string) {
+  return value.trim().toLowerCase();
+}
+
+function applyFilters(state: ServerStoreState): ServerStoreState {
+  const query = normalize(state.searchQuery);
+
+  const filteredServers = state.servers.filter((server) => {
+    if (state.filterFavorites && !server.favorite) {
+      return false;
+    }
+
+    if (!query) {
+      return true;
+    }
+
+    const searchable = [
+      server.name,
+      server.description,
+      server.host,
+      server.username,
+      server.environment,
+      server.region,
+      server.tags.join(' ')
+    ]
+      .join(' ')
+      .toLowerCase();
+
+    return searchable.includes(query);
+  });
+
+  return {
+    ...state,
+    filteredServers
+  };
+}
+
+function updateState(update: (state: ServerStoreState) => ServerStoreState) {
+  serverStore.update((state) => applyFilters(update(state)));
+}
+
+export const serverStore = writable<ServerStoreState>({
   servers: [],
+  filteredServers: [],
+  searchQuery: '',
+  filterFavorites: false,
   loading: false,
   error: null
 });
 
-export async function fetchServers(filter?: {
-  environment?: string;
-  region?: string;
-  tag?: string;
-  q?: string;
-}) {
-  serverStore.update((s) => ({ ...s, loading: true, error: null }));
+export function setSearchQuery(searchQuery: string) {
+  updateState((state) => ({ ...state, searchQuery }));
+}
 
-  const params = new URLSearchParams();
-  if (filter?.environment) params.set('environment', filter.environment);
-  if (filter?.region) params.set('region', filter.region);
-  if (filter?.tag) params.set('tag', filter.tag);
-  if (filter?.q) params.set('q', filter.q);
+export function setFilterFavorites(filterFavorites: boolean) {
+  updateState((state) => ({ ...state, filterFavorites }));
+}
 
-  const query = params.toString() ? `?${params}` : '';
+export async function fetchServers() {
+  updateState((state) => ({ ...state, loading: true, error: null }));
+
   try {
-    const servers = await api.get<Server[]>(`/servers${query}`);
-    serverStore.set({ servers, loading: false, error: null });
+    const servers = await api.get<Server[]>('/servers');
+    updateState((state) => ({
+      ...state,
+      servers,
+      loading: false,
+      error: null
+    }));
   } catch (e) {
-    serverStore.set({ servers: [], loading: false, error: (e as Error).message });
+    updateState((state) => ({
+      ...state,
+      loading: false,
+      error: e instanceof Error ? e.message : 'Failed to fetch servers'
+    }));
   }
 }
 

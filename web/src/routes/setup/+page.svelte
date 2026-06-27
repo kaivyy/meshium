@@ -11,7 +11,7 @@
   onMount(() => {
     const unsubscribe = authStore.subscribe((state) => {
       if (state.setup && !state.locked) {
-        goto('/servers');
+        goto('/');
       }
     });
 
@@ -35,7 +35,7 @@
 
     try {
       await setup(password);
-      goto('/servers');
+      goto('/');
     } catch (e) {
       error = e instanceof Error ? e.message : 'Failed to set up master password';
     } finally {
