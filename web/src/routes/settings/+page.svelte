@@ -8,14 +8,16 @@
   let loading = true;
   let copied = false;
   let regenerating = false;
-  let error = '';
+  let loadError = '';
+  let regenerateError = '';
 
   onMount(async () => {
     try {
       const res = (await api.get('/ssh-key/public')) as { publicKey: string };
       publicKey = res.publicKey;
-    } catch {
-      error = 'Failed to load SSH public key';
+      loadError = '';
+    } catch (e) {
+      loadError = e instanceof Error ? `Unable to load the SSH public key: ${e.message}` : 'Unable to load the SSH public key.';
     } finally {
       loading = false;
     }
@@ -35,12 +37,14 @@
     }
 
     regenerating = true;
+    regenerateError = '';
 
     try {
       const res = (await api.post('/ssh-key/regenerate')) as { publicKey: string };
       publicKey = res.publicKey;
-    } catch {
-      error = 'Failed to regenerate SSH key pair';
+      loadError = '';
+    } catch (e) {
+      regenerateError = e instanceof Error ? `Unable to regenerate the SSH key pair: ${e.message}` : 'Unable to regenerate the SSH key pair.';
     } finally {
       regenerating = false;
     }
@@ -68,10 +72,6 @@
   </header>
 
   <main class="mx-auto w-full max-w-3xl p-6">
-    {#if error}
-      <div class="mb-4 rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">{error}</div>
-    {/if}
-
     <section class="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm">
       <div class="mb-4">
         <h2 class="text-lg font-semibold text-slate-900">SSH Public Key</h2>
@@ -85,25 +85,33 @@
           Loading SSH key...
         </div>
       {:else}
-        <div class="rounded-xl border border-slate-200 bg-slate-50 p-4">
-          <div class="mb-3 flex items-center justify-between gap-3">
-            <span class="text-sm font-medium text-slate-700">Public Key</span>
-            <button
-              type="button"
-              on:click={copyKey}
-              class="inline-flex items-center gap-2 text-sm font-medium text-blue-600 transition hover:text-blue-700"
-            >
-              {#if copied}
-                <Check size={14} /> Copied
-              {:else}
-                <Copy size={14} /> Copy
-              {/if}
-            </button>
+        {#if loadError}
+          <div class="rounded-xl border border-red-200 bg-red-50 p-4 shadow-sm" role="alert">
+            <p class="text-sm font-semibold text-red-900">Unable to load SSH public key</p>
+            <p class="mt-1 text-sm text-red-700">{loadError}</p>
+            <p class="mt-2 text-sm text-red-700">You can try regenerating the key pair below to recover access.</p>
           </div>
-          <pre class="overflow-x-auto whitespace-pre-wrap break-all rounded-lg bg-white p-3 font-mono text-xs text-slate-700">{publicKey || 'No SSH public key has been generated yet.'}</pre>
-        </div>
+        {:else}
+          <div class="rounded-xl border border-slate-200 bg-slate-50 p-4">
+            <div class="mb-3 flex items-center justify-between gap-3">
+              <span class="text-sm font-medium text-slate-700">Public Key</span>
+              <button
+                type="button"
+                on:click={copyKey}
+                class="inline-flex items-center gap-2 text-sm font-medium text-blue-600 transition hover:text-blue-700"
+              >
+                {#if copied}
+                  <Check size={14} /> Copied
+                {:else}
+                  <Copy size={14} /> Copy
+                {/if}
+              </button>
+            </div>
+            <pre class="overflow-x-auto whitespace-pre-wrap break-all rounded-lg bg-white p-3 font-mono text-xs text-slate-700">{publicKey || 'No SSH public key has been generated yet.'}</pre>
+          </div>
+        {/if}
 
-        <div class="mt-4 flex flex-wrap gap-3">
+        <div class="mt-4 flex flex-col gap-3">
           <button
             type="button"
             on:click={regenerate}
@@ -112,6 +120,13 @@
           >
             {regenerating ? 'Regenerating...' : 'Regenerate Key Pair'}
           </button>
+
+          {#if regenerateError}
+            <div class="rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700" role="alert">
+              <p class="font-semibold text-red-900">Regeneration failed</p>
+              <p class="mt-1">{regenerateError}</p>
+            </div>
+          {/if}
         </div>
       {/if}
     </section>

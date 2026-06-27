@@ -66,6 +66,7 @@ type ServerResponse struct {
 	Host        string   `json:"host"`
 	Port        int      `json:"port"`
 	Username    string   `json:"username"`
+	AuthMethod  string   `json:"authMethod"`
 	Tags        []string `json:"tags"`
 	Environment string   `json:"environment"`
 	Region      string   `json:"region"`
@@ -97,6 +98,11 @@ type ServerInfo struct {
 
 // Response converts the internal server model into the public response shape.
 func (s Server) Response() ServerResponse {
+	authMethod := "password"
+	if s.SSHKey != "" {
+		authMethod = "key"
+	}
+
 	return ServerResponse{
 		ID:          s.ID,
 		Name:        s.Name,
@@ -104,6 +110,7 @@ func (s Server) Response() ServerResponse {
 		Host:        s.Host,
 		Port:        s.Port,
 		Username:    s.Username,
+		AuthMethod:  authMethod,
 		Tags:        s.Tags,
 		Environment: s.Environment,
 		Region:      s.Region,

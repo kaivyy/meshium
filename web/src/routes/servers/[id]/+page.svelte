@@ -11,8 +11,10 @@
   let loading = true;
   let loadingInfo = false;
   let connecting = false;
+  let wsError = '';
   let wsSteps: { step: string; status: string; value?: string; error?: string }[] = [];
   let ws: WebSocket | null = null;
+  let connectionId = 0;
 
   const serverId = parseInt($page.params.id, 10);
 
@@ -28,6 +30,7 @@
   });
 
   onDestroy(() => {
+    connectionId += 1;
     ws?.close();
   });
 
@@ -44,13 +47,21 @@
   }
 
   function handleConnect() {
+    const currentConnection = ++connectionId;
     connecting = true;
+    wsError = '';
     wsSteps = [];
     ws?.close();
 
     ws = wsConnect(
       serverId,
       (msg: WSMessage) => {
+        if (currentConnection !== connectionId) return;
+
+        if (msg.status === 'error' || msg.error) {
+          wsError = msg.error || `Connection test failed during ${msg.step}`;
+        }
+
         if (msg.step === 'done' || msg.status === 'complete') {
           connecting = false;
           loadInfo();
@@ -68,10 +79,18 @@
         ];
       },
       () => {
+        if (currentConnection !== connectionId) return;
         connecting = false;
+        if (!wsSteps.length && !wsError) {
+          wsError = 'Unable to open the WebSocket connection.';
+        }
       },
       () => {
+        if (currentConnection !== connectionId) return;
         connecting = false;
+        if (!wsSteps.length && !wsError) {
+          wsError = 'The WebSocket connection closed before any connection steps were received.';
+        }
       }
     );
   }
@@ -131,7 +150,7 @@
         Server not found.
       </div>
     {:else}
-      {#if wsSteps.length > 0}
+      {#if wsSteps.length > 0 || wsError}
         <section class="mb-6 rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
           <div class="mb-4 flex items-center justify-between gap-4">
             <div>
@@ -143,22 +162,31 @@
             {/if}
           </div>
 
-          <div class="space-y-2">
-            {#each wsSteps as step}
-              <div class="flex flex-wrap items-center gap-2 rounded-lg bg-slate-50 px-3 py-2 text-sm">
-                <span class={`h-2.5 w-2.5 rounded-full ${step.status === 'success' ? 'bg-emerald-500' : 'bg-rose-500'}`}></span>
-                <span class="font-mono text-slate-700">{step.step}</span>
-                <span class="text-slate-400">·</span>
-                <span class="text-slate-500">{step.status}</span>
-                {#if step.value}
-                  <span class="text-slate-400">→ {step.value}</span>
-                {/if}
-                {#if step.error}
-                  <span class="text-rose-600">→ {step.error}</span>
-                {/if}
-              </div>
-            {/each}
-          </div>
+          {#if wsError}
+            <div class="mb-4 rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700" role="alert">
+              <p class="font-semibold text-red-900">Connection test failed</p>
+              <p class="mt-1">{wsError}</p>
+            </div>
+          {/if}
+
+          {#if wsSteps.length > 0}
+            <div class="space-y-2">
+              {#each wsSteps as step}
+                <div class="flex flex-wrap items-center gap-2 rounded-lg bg-slate-50 px-3 py-2 text-sm">
+                  <span class={`h-2.5 w-2.5 rounded-full ${step.status === 'success' ? 'bg-emerald-500' : 'bg-rose-500'}`}></span>
+                  <span class="font-mono text-slate-700">{step.step}</span>
+                  <span class="text-slate-400">·</span>
+                  <span class="text-slate-500">{step.status}</span>
+                  {#if step.value}
+                    <span class="text-slate-400">→ {step.value}</span>
+                  {/if}
+                  {#if step.error}
+                    <span class="text-rose-600">→ {step.error}</span>
+                  {/if}
+                </div>
+              {/each}
+            </div>
+          {/if}
         </section>
       {/if}
 

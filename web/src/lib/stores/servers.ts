@@ -8,6 +8,7 @@ export interface Server {
   host: string;
   port: number;
   username: string;
+  authMethod?: 'password' | 'key';
   tags: string[];
   environment: string;
   region: string;

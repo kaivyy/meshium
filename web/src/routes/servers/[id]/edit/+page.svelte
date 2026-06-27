@@ -13,6 +13,7 @@
   let port = 22;
   let username = 'root';
   let authMethod: 'password' | 'key' = 'password';
+  let initialAuthMethod: 'password' | 'key' = 'password';
   let password = '';
   let sshKey = '';
   let passphrase = '';
@@ -38,6 +39,8 @@
       environment = server.environment || '';
       region = server.region || '';
       color = server.color || '#3b82f6';
+      authMethod = server.authMethod === 'key' ? 'key' : 'password';
+      initialAuthMethod = authMethod;
     } catch {
       error = 'Failed to load server';
     } finally {
@@ -74,10 +77,21 @@
         color
       };
 
-      if (authMethod === 'password' && password) {
-        data.password = password;
+      if (authMethod === 'password') {
+        if (password) {
+          data.password = password;
+          if (initialAuthMethod === 'key') {
+            data.sshKey = '';
+            data.passphrase = '';
+          }
+        }
       } else if (authMethod === 'key') {
-        data.sshKey = sshKey;
+        if (sshKey) {
+          data.sshKey = sshKey;
+          if (initialAuthMethod === 'password') {
+            data.password = '';
+          }
+        }
         if (passphrase) {
           data.passphrase = passphrase;
         }
@@ -188,7 +202,7 @@
                   bind:value={sshKey}
                   rows="6"
                   class="w-full rounded-lg border border-slate-300 bg-white px-3 py-2 font-mono text-sm text-slate-900 shadow-sm outline-none transition focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20"
-                  placeholder="-----BEGIN OPENSSH PRIVATE KEY-----"
+                  placeholder="Leave blank to keep the existing SSH key"
                 ></textarea>
               </div>
 
