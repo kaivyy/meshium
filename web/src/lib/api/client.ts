@@ -20,6 +20,17 @@ async function request<T>(method: string, path: string, body?: unknown): Promise
     throw new APIError(err.error, err.code);
   }
 
+  const contentLength = res.headers.get('content-length');
+  const contentType = res.headers.get('content-type')?.toLowerCase();
+
+  if (res.status === 204 || contentLength === '0') {
+    return undefined as T;
+  }
+
+  if (!contentType || !contentType.includes('application/json')) {
+    return undefined as T;
+  }
+
   return res.json();
 }
 
