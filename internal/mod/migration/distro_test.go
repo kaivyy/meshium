@@ -1,33 +1,18 @@
 package migration
 
 import (
-	"io"
 	"strings"
 	"testing"
 )
 
-// mockSSHExecuter for testing distro detection
-type mockSSHExecuter struct {
-	stdout string
-	err    error
-}
-
-func (m *mockSSHExecuter) Exec(cmd string) (string, string, int, error) {
-	return m.stdout, "", 0, m.err
-}
-func (m *mockSSHExecuter) IsAlive() bool { return true }
-func (m *mockSSHExecuter) Upload(src io.Reader, remotePath string) error { return nil }
-func (m *mockSSHExecuter) Download(remotePath string, dst io.Writer) error { return nil }
-
 func TestDetectDistroDebian(t *testing.T) {
-	ssh := &mockSSHExecuter{
-		stdout: `PRETTY_NAME="Debian GNU/Linux 12 (bookworm)"
+	ssh := newMockSSH()
+	ssh.execOutput["cat /etc/os-release"] = `PRETTY_NAME="Debian GNU/Linux 12 (bookworm)"
 NAME="Debian GNU/Linux"
 VERSION_ID="12"
 VERSION="12 (bookworm)"
 ID=debian
-VERSION_CODENAME=bookworm`,
-	}
+VERSION_CODENAME=bookworm`
 	info, err := DetectDistro(ssh)
 	if err != nil {
 		t.Fatalf("DetectDistro failed: %v", err)
@@ -47,12 +32,11 @@ VERSION_CODENAME=bookworm`,
 }
 
 func TestDetectDistroUbuntu(t *testing.T) {
-	ssh := &mockSSHExecuter{
-		stdout: `PRETTY_NAME="Ubuntu 22.04.4 LTS"
+	ssh := newMockSSH()
+	ssh.execOutput["cat /etc/os-release"] = `PRETTY_NAME="Ubuntu 22.04.4 LTS"
 NAME="Ubuntu"
 VERSION_ID="22.04"
-ID=ubuntu`,
-	}
+ID=ubuntu`
 	info, _ := DetectDistro(ssh)
 	if info.Name != "ubuntu" || info.Family != "debian" || info.PackageManager != "apt" {
 		t.Errorf("ubuntu detection wrong: %+v", info)
@@ -60,11 +44,10 @@ ID=ubuntu`,
 }
 
 func TestDetectDistroAlpine(t *testing.T) {
-	ssh := &mockSSHExecuter{
-		stdout: `NAME="Alpine Linux"
+	ssh := newMockSSH()
+	ssh.execOutput["cat /etc/os-release"] = `NAME="Alpine Linux"
 ID=alpine
-VERSION_ID=3.19.1`,
-	}
+VERSION_ID=3.19.1`
 	info, _ := DetectDistro(ssh)
 	if info.Name != "alpine" || info.Family != "alpine" || info.PackageManager != "apk" {
 		t.Errorf("alpine detection wrong: %+v", info)
@@ -72,11 +55,10 @@ VERSION_ID=3.19.1`,
 }
 
 func TestDetectDistroArch(t *testing.T) {
-	ssh := &mockSSHExecuter{
-		stdout: `NAME="Arch Linux"
+	ssh := newMockSSH()
+	ssh.execOutput["cat /etc/os-release"] = `NAME="Arch Linux"
 ID=arch
-PRETTY_NAME="Arch Linux"`,
-	}
+PRETTY_NAME="Arch Linux"`
 	info, _ := DetectDistro(ssh)
 	if info.Name != "arch" || info.Family != "arch" || info.PackageManager != "pacman" {
 		t.Errorf("arch detection wrong: %+v", info)
@@ -84,11 +66,10 @@ PRETTY_NAME="Arch Linux"`,
 }
 
 func TestDetectDistroRHEL(t *testing.T) {
-	ssh := &mockSSHExecuter{
-		stdout: `NAME="Red Hat Enterprise Linux"
+	ssh := newMockSSH()
+	ssh.execOutput["cat /etc/os-release"] = `NAME="Red Hat Enterprise Linux"
 ID="rhel"
-VERSION_ID="9.3"`,
-	}
+VERSION_ID="9.3"`
 	info, _ := DetectDistro(ssh)
 	if info.Name != "rhel" || info.Family != "rhel" || info.PackageManager != "dnf" {
 		t.Errorf("rhel detection wrong: %+v", info)
