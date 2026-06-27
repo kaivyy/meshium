@@ -3,7 +3,6 @@ package discovery
 import (
 	"encoding/json"
 	"fmt"
-	"net"
 	"time"
 
 	"meshium/internal/mod/server"
@@ -20,12 +19,12 @@ type AESKeyProvider interface {
 
 // ConnectionPool provides SSH clients for a server.
 type ConnectionPool interface {
-	Get(serverID int, cfg modssh.ServerConfig, hostKeyCallback func(hostname string, remote net.Addr, key xssh.PublicKey) error) (SSHExecuter, error)
+	Get(serverID int, cfg modssh.ServerConfig, hostKeyCallback xssh.HostKeyCallback) (SSHExecuter, error)
 }
 
 // HostKeyStore provides host key verification callbacks.
 type HostKeyStore interface {
-	MakeHostKeyCallback() func(hostname string, remote net.Addr, key xssh.PublicKey) error
+	MakeHostKeyCallback() xssh.HostKeyCallback
 }
 
 type poolAdapter struct {
@@ -37,7 +36,7 @@ func NewPoolAdapter(pool *modssh.Pool) ConnectionPool {
 	return &poolAdapter{pool: pool}
 }
 
-func (a *poolAdapter) Get(serverID int, cfg modssh.ServerConfig, hostKeyCallback func(hostname string, remote net.Addr, key xssh.PublicKey) error) (SSHExecuter, error) {
+func (a *poolAdapter) Get(serverID int, cfg modssh.ServerConfig, hostKeyCallback xssh.HostKeyCallback) (SSHExecuter, error) {
 	if a == nil || a.pool == nil {
 		return nil, fmt.Errorf("ssh pool is not configured")
 	}

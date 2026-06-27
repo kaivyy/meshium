@@ -21,11 +21,11 @@ type SystemInfo struct {
 
 // WSMessage is the message format sent over WebSocket.
 type WSMessage struct {
-	Step      string      `json:"step"`
-	Status    string      `json:"status"`
-	Value     any         `json:"value,omitempty"`
-	Error     string      `json:"error,omitempty"`
-	LatencyMs int         `json:"latencyMs,omitempty"`
+	Step      string `json:"step"`
+	Status    string `json:"status"`
+	Value     any    `json:"value,omitempty"`
+	Error     string `json:"error,omitempty"`
+	LatencyMs int    `json:"latencyMs,omitempty"`
 }
 
 // StepResult holds the result of a single discovery step.

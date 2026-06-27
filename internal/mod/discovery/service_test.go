@@ -29,7 +29,7 @@ type fakeConnectionPool struct {
 	serverConf modssh.ServerConfig
 }
 
-func (f *fakeConnectionPool) Get(serverID int, cfg modssh.ServerConfig, hostKeyCallback func(hostname string, remote net.Addr, key xssh.PublicKey) error) (SSHExecuter, error) {
+func (f *fakeConnectionPool) Get(serverID int, cfg modssh.ServerConfig, hostKeyCallback xssh.HostKeyCallback) (SSHExecuter, error) {
 	f.called = true
 	f.serverID = serverID
 	f.serverConf = cfg
@@ -38,7 +38,7 @@ func (f *fakeConnectionPool) Get(serverID int, cfg modssh.ServerConfig, hostKeyC
 
 type fakeHostKeyStore struct{}
 
-func (f fakeHostKeyStore) MakeHostKeyCallback() func(hostname string, remote net.Addr, key xssh.PublicKey) error {
+func (f fakeHostKeyStore) MakeHostKeyCallback() xssh.HostKeyCallback {
 	return func(string, net.Addr, xssh.PublicKey) error { return nil }
 }
 

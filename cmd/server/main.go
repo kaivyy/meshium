@@ -4,10 +4,13 @@ import (
 	"fmt"
 	"net/http"
 	"os"
+	"time"
 
 	"meshium/internal/db"
 	"meshium/internal/mod/auth"
+	"meshium/internal/mod/discovery"
 	"meshium/internal/mod/server"
+	"meshium/internal/mod/ssh"
 	"meshium/internal/shared"
 )
 
@@ -38,12 +41,22 @@ func main() {
 	serverSvc := server.NewService(serverRepo, authSvc)
 	serverHandler := server.NewHandler(serverSvc)
 
+	sshPool := ssh.NewPool(ssh.PoolConfig{
+		MaxIdle:     10 * time.Minute,
+		MaxLifetime: 30 * time.Minute,
+	})
+	knownHosts := ssh.NewKnownHostsStore(database)
+
+	discoverySvc := discovery.NewService(discovery.NewPoolAdapter(sshPool), serverRepo, authSvc, knownHosts)
+	discoveryHandler := discovery.NewHandler(discoverySvc)
+
 	mux := http.NewServeMux()
 	mux.HandleFunc("/api/health", func(w http.ResponseWriter, r *http.Request) {
 		shared.WriteJSON(w, http.StatusOK, map[string]string{"status": "ok"})
 	})
 	authHandler.RegisterRoutes(mux)
 	serverHandler.RegisterRoutes(mux)
+	discoveryHandler.RegisterRoutes(mux)
 
 	addr := ":" + cfg.ServerPort
 	fmt.Printf("Meshium server starting on %s\n", addr)
