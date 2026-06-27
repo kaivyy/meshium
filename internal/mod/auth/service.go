@@ -61,23 +61,34 @@ func (s *Service) Setup(password string) error {
 		return errors.New("master password already set")
 	}
 
+	privatePEM, publicSSH, err := ssh.GenerateKeyPair()
+	if err != nil {
+		return err
+	}
+
 	hash, err := shared.HashPassword(password)
 	if err != nil {
 		return err
 	}
+
+	salt := []byte("meshium-salt-v1")
+	aesKey := shared.DeriveKey(password, salt)
+	encryptedPrivateKey, err := shared.Encrypt(aesKey, privatePEM)
+	if err != nil {
+		return err
+	}
+
 	if err := s.repo.SetMasterPassword(hash); err != nil {
 		return err
 	}
 
-	salt := []byte("meshium-salt-v1")
-	s.aesKey = shared.DeriveKey(password, salt)
-	s.locked = false
-
-	// Generate SSH key pair
-	if err := s.EnsureSSHKey(); err != nil {
+	if err := s.repo.SetSSHKeyPair(string(encryptedPrivateKey), string(publicSSH)); err != nil {
+		_ = s.repo.SetMasterPassword("")
 		return err
 	}
 
+	s.aesKey = aesKey
+	s.locked = false
 	return nil
 }
 

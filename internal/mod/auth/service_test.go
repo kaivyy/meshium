@@ -2,6 +2,7 @@ package auth
 
 import (
 	"database/sql"
+	"errors"
 	"strings"
 	"testing"
 
@@ -18,6 +19,18 @@ func setupTestDB(t *testing.T) *sql.DB {
 		t.Fatalf("Migrate failed: %v", err)
 	}
 	return d
+}
+
+type setupFailureRepo struct {
+	Repo
+	failSSHKeyPair bool
+}
+
+func (r *setupFailureRepo) SetSSHKeyPair(encryptedPrivateKey, publicKey string) error {
+	if r.failSSHKeyPair {
+		return errors.New("forced ssh key storage failure")
+	}
+	return r.Repo.SetSSHKeyPair(encryptedPrivateKey, publicKey)
 }
 
 func TestSetupCreatesMasterPassword(t *testing.T) {
@@ -148,6 +161,43 @@ func TestLockClearsKey(t *testing.T) {
 
 	if got := svc.GetAESKey(); got != nil {
 		t.Error("AES key should be nil after Lock()")
+	}
+}
+
+func TestSetupDoesNotPersistMasterPasswordOnSSHKeyFailure(t *testing.T) {
+	d := setupTestDB(t)
+	defer d.Close()
+
+	repo := &setupFailureRepo{Repo: NewRepo(d), failSSHKeyPair: true}
+	svc := NewService(repo)
+
+	if err := svc.Setup("my-password"); err == nil {
+		t.Fatal("Setup should fail when SSH key storage fails")
+	}
+
+	setup, err := repo.HasMasterPassword()
+	if err != nil {
+		t.Fatalf("HasMasterPassword failed: %v", err)
+	}
+	if setup {
+		t.Fatal("master password should not be persisted after setup failure")
+	}
+
+	if !svc.IsLocked() {
+		t.Fatal("service should remain locked after failed setup")
+	}
+
+	repo.failSSHKeyPair = false
+	if err := svc.Setup("my-password"); err != nil {
+		t.Fatalf("retry Setup failed: %v", err)
+	}
+
+	setup, err = repo.HasMasterPassword()
+	if err != nil {
+		t.Fatalf("HasMasterPassword failed: %v", err)
+	}
+	if !setup {
+		t.Fatal("master password should be persisted after successful retry")
 	}
 }
 
