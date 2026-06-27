@@ -28,4 +28,17 @@ func TestMigrateCreatesTables(t *testing.T) {
 	if err := dbConn.QueryRow("SELECT name FROM sqlite_master WHERE type='table' AND name='known_hosts'").Scan(&name); err != nil {
 		t.Error("known_hosts table not created")
 	}
+
+	// Check migrations table exists
+	if err := dbConn.QueryRow("SELECT name FROM sqlite_master WHERE type='table' AND name='migrations'").Scan(&name); err != nil {
+		t.Error("migrations table not created")
+	}
+	// Check migration_steps table exists
+	if err := dbConn.QueryRow("SELECT name FROM sqlite_master WHERE type='table' AND name='migration_steps'").Scan(&name); err != nil {
+		t.Error("migration_steps table not created")
+	}
+	// Check migration_backups table exists
+	if err := dbConn.QueryRow("SELECT name FROM sqlite_master WHERE type='table' AND name='migration_backups'").Scan(&name); err != nil {
+		t.Error("migration_backups table not created")
+	}
 }

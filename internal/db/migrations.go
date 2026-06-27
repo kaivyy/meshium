@@ -58,6 +58,37 @@ func Migrate(db *sql.DB) error {
 			created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
 			UNIQUE(host, port)
 		);`,
+		`CREATE TABLE IF NOT EXISTS migrations (
+			id           INTEGER PRIMARY KEY AUTOINCREMENT,
+			source_id    INTEGER NOT NULL REFERENCES servers(id),
+			target_id    INTEGER NOT NULL REFERENCES servers(id),
+			categories   TEXT NOT NULL,
+			status       TEXT NOT NULL DEFAULT 'pending',
+			plan         TEXT,
+			error        TEXT,
+			created_at   DATETIME DEFAULT CURRENT_TIMESTAMP,
+			completed_at DATETIME
+		);`,
+		`CREATE TABLE IF NOT EXISTS migration_steps (
+			id           INTEGER PRIMARY KEY AUTOINCREMENT,
+			migration_id INTEGER NOT NULL REFERENCES migrations(id) ON DELETE CASCADE,
+			category     TEXT NOT NULL,
+			action       TEXT NOT NULL,
+			status       TEXT NOT NULL DEFAULT 'pending',
+			output       TEXT,
+			error        TEXT,
+			started_at   DATETIME,
+			completed_at DATETIME
+		);`,
+		`CREATE TABLE IF NOT EXISTS migration_backups (
+			id           INTEGER PRIMARY KEY AUTOINCREMENT,
+			migration_id INTEGER NOT NULL REFERENCES migrations(id) ON DELETE CASCADE,
+			server_id    INTEGER NOT NULL REFERENCES servers(id),
+			category     TEXT NOT NULL,
+			backup_path  TEXT NOT NULL,
+			backup_type  TEXT NOT NULL,
+			created_at   DATETIME DEFAULT CURRENT_TIMESTAMP
+		);`,
 	}
 
 	tx, err := db.Begin()
