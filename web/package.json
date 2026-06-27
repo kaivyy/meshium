@@ -1,0 +1,31 @@
+{
+  "name": "meshium-web",
+  "private": true,
+  "version": "0.0.1",
+  "type": "module",
+  "scripts": {
+    "dev": "vite dev",
+    "build": "vite build",
+    "preview": "vite preview",
+    "check": "svelte-kit sync && svelte-check --tsconfig ./tsconfig.json"
+  },
+  "devDependencies": {
+    "@sveltejs/adapter-static": "3.0.8",
+    "@sveltejs/kit": "2.16.0",
+    "@types/node": "22.13.9",
+    "@sveltejs/vite-plugin-svelte": "5.1.1",
+    "autoprefixer": "10.4.21",
+    "postcss": "8.5.3",
+    "svelte": "5.23.1",
+    "svelte-check": "4.1.4",
+    "tailwindcss": "3.4.17",
+    "typescript": "5.7.3",
+    "vite": "6.4.3"
+  },
+  "dependencies": {
+    "clsx": "^2.1.1",
+    "lucide-svelte": "^0.468.0",
+    "tailwind-merge": "^3.0.2",
+    "tailwind-variants": "^3.0.0"
+  }
+}
