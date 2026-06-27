@@ -7,6 +7,7 @@ import (
 
 	"meshium/internal/db"
 	"meshium/internal/mod/auth"
+	"meshium/internal/mod/server"
 	"meshium/internal/shared"
 )
 
@@ -33,11 +34,16 @@ func main() {
 	authSvc := auth.NewService(authRepo)
 	authHandler := auth.NewHandler(authSvc)
 
+	serverRepo := server.NewRepo(database)
+	serverSvc := server.NewService(serverRepo, authSvc)
+	serverHandler := server.NewHandler(serverSvc)
+
 	mux := http.NewServeMux()
 	mux.HandleFunc("/api/health", func(w http.ResponseWriter, r *http.Request) {
 		shared.WriteJSON(w, http.StatusOK, map[string]string{"status": "ok"})
 	})
 	authHandler.RegisterRoutes(mux)
+	serverHandler.RegisterRoutes(mux)
 
 	addr := ":" + cfg.ServerPort
 	fmt.Printf("Meshium server starting on %s\n", addr)
