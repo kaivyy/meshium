@@ -3,6 +3,7 @@ module meshium
 go 1.24.4
 
 require (
+	github.com/gorilla/websocket v1.5.3
 	github.com/pkg/sftp v1.13.10
 	golang.org/x/crypto v0.48.0
 	modernc.org/sqlite v1.40.1
