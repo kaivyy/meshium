@@ -11,18 +11,18 @@ type Repo interface {
 	CreateMigration(sourceID, targetID int, categories []string) (int, error)
 	GetMigration(id int) (*Migration, error)
 	ListMigrations() ([]Migration, error)
-	UpdateMigrationStatus(id int, status string) error
+	UpdateMigrationStatus(id int, status, errMsg string) error
 	SetMigrationPlan(id int, plan MigrationPlan) error
-	SetMigrationError(id int, errMsg string) error
-	SetMigrationCompleted(id int) error
+	SetMigrationCompletedAt(id int, ts string) error
+	SetMigrationRolledBackAt(id int, ts string) error
 	DeleteMigration(id int) error
 
-	CreateStep(migrationID int, category, action string) (int, error)
-	UpdateStepStatus(id int, status, output, errMsg string) error
-	ListSteps(migrationID int) ([]MigrationStep, error)
+	CreateStep(migrationID int, category, action, data string) (int, error)
+	UpdateStepStatus(id int, status, errMsg string) error
+	GetSteps(migrationID int) ([]MigrationStep, error)
 
-	CreateBackup(migrationID, serverID int, category, backupPath, backupType string) error
-	ListBackups(migrationID int) ([]MigrationBackup, error)
+	CreateBackup(migrationID, serverID int, category, data string) (int, error)
+	GetBackups(migrationID int) ([]MigrationBackup, error)
 }
 
 type sqliteRepo struct {
@@ -36,7 +36,7 @@ func NewRepo(db *sql.DB) Repo {
 func (r *sqliteRepo) CreateMigration(sourceID, targetID int, categories []string) (int, error) {
 	cats, _ := json.Marshal(categories)
 	res, err := r.db.Exec(
-		`INSERT INTO migrations (source_id, target_id, categories, status) VALUES (?, ?, ?, 'pending')`,
+		`INSERT INTO migrations (source_id, target_id, categories, status) VALUES (?, ?, ?, 'planned')`,
 		sourceID, targetID, string(cats),
 	)
 	if err != nil {
@@ -61,7 +61,7 @@ func (r *sqliteRepo) GetMigration(id int) (*Migration, error) {
 		return nil, err
 	}
 	json.Unmarshal([]byte(categoriesJSON), &m.Categories)
-	_ = planJSON // plan is loaded separately when needed
+	_ = planJSON
 	if completedAt.Valid {
 		m.CompletedAt = completedAt.String
 	}
@@ -95,8 +95,11 @@ func (r *sqliteRepo) ListMigrations() ([]Migration, error) {
 	return migrations, nil
 }
 
-func (r *sqliteRepo) UpdateMigrationStatus(id int, status string) error {
-	_, err := r.db.Exec("UPDATE migrations SET status = ? WHERE id = ?", status, id)
+func (r *sqliteRepo) UpdateMigrationStatus(id int, status, errMsg string) error {
+	_, err := r.db.Exec(
+		"UPDATE migrations SET status = ?, error = ? WHERE id = ?",
+		status, errMsg, id,
+	)
 	return err
 }
 
@@ -106,15 +109,13 @@ func (r *sqliteRepo) SetMigrationPlan(id int, plan MigrationPlan) error {
 	return err
 }
 
-func (r *sqliteRepo) SetMigrationError(id int, errMsg string) error {
-	_, err := r.db.Exec("UPDATE migrations SET error = ? WHERE id = ?", errMsg, id)
+func (r *sqliteRepo) SetMigrationCompletedAt(id int, ts string) error {
+	_, err := r.db.Exec("UPDATE migrations SET completed_at = ? WHERE id = ?", ts, id)
 	return err
 }
 
-func (r *sqliteRepo) SetMigrationCompleted(id int) error {
-	_, err := r.db.Exec(
-		"UPDATE migrations SET status = 'success', completed_at = CURRENT_TIMESTAMP WHERE id = ?", id,
-	)
+func (r *sqliteRepo) SetMigrationRolledBackAt(id int, ts string) error {
+	_, err := r.db.Exec("UPDATE migrations SET completed_at = ? WHERE id = ?", ts, id)
 	return err
 }
 
@@ -130,11 +131,11 @@ func (r *sqliteRepo) DeleteMigration(id int) error {
 	return nil
 }
 
-func (r *sqliteRepo) CreateStep(migrationID int, category, action string) (int, error) {
+func (r *sqliteRepo) CreateStep(migrationID int, category, action, data string) (int, error) {
 	res, err := r.db.Exec(
-		`INSERT INTO migration_steps (migration_id, category, action, status, started_at)
-		 VALUES (?, ?, ?, 'running', CURRENT_TIMESTAMP)`,
-		migrationID, category, action,
+		`INSERT INTO migration_steps (migration_id, category, action, status, data, started_at)
+		 VALUES (?, ?, ?, 'completed', ?, CURRENT_TIMESTAMP)`,
+		migrationID, category, action, data,
 	)
 	if err != nil {
 		return 0, err
@@ -143,17 +144,17 @@ func (r *sqliteRepo) CreateStep(migrationID int, category, action string) (int, 
 	return int(id), err
 }
 
-func (r *sqliteRepo) UpdateStepStatus(id int, status, output, errMsg string) error {
+func (r *sqliteRepo) UpdateStepStatus(id int, status, errMsg string) error {
 	_, err := r.db.Exec(
-		`UPDATE migration_steps SET status = ?, output = ?, error = ?, completed_at = CURRENT_TIMESTAMP WHERE id = ?`,
-		status, output, errMsg, id,
+		`UPDATE migration_steps SET status = ?, error = ?, completed_at = CURRENT_TIMESTAMP WHERE id = ?`,
+		status, errMsg, id,
 	)
 	return err
 }
 
-func (r *sqliteRepo) ListSteps(migrationID int) ([]MigrationStep, error) {
+func (r *sqliteRepo) GetSteps(migrationID int) ([]MigrationStep, error) {
 	rows, err := r.db.Query(
-		`SELECT id, migration_id, category, action, status, output, error, started_at, completed_at
+		`SELECT id, migration_id, category, action, status, data, error, started_at, completed_at
 		 FROM migration_steps WHERE migration_id = ? ORDER BY id ASC`,
 		migrationID,
 	)
@@ -165,12 +166,12 @@ func (r *sqliteRepo) ListSteps(migrationID int) ([]MigrationStep, error) {
 	var steps []MigrationStep
 	for rows.Next() {
 		var s MigrationStep
-		var output, errMsg, startedAt, completedAt sql.NullString
-		if err := rows.Scan(&s.ID, &s.MigrationID, &s.Category, &s.Action, &s.Status, &output, &errMsg, &startedAt, &completedAt); err != nil {
+		var data, errMsg, startedAt, completedAt sql.NullString
+		if err := rows.Scan(&s.ID, &s.MigrationID, &s.Category, &s.Action, &s.Status, &data, &errMsg, &startedAt, &completedAt); err != nil {
 			return nil, err
 		}
-		if output.Valid {
-			s.Output = output.String
+		if data.Valid {
+			s.Data = data.String
 		}
 		if errMsg.Valid {
 			s.Error = errMsg.String
@@ -186,18 +187,22 @@ func (r *sqliteRepo) ListSteps(migrationID int) ([]MigrationStep, error) {
 	return steps, nil
 }
 
-func (r *sqliteRepo) CreateBackup(migrationID, serverID int, category, backupPath, backupType string) error {
-	_, err := r.db.Exec(
+func (r *sqliteRepo) CreateBackup(migrationID, serverID int, category, data string) (int, error) {
+	res, err := r.db.Exec(
 		`INSERT INTO migration_backups (migration_id, server_id, category, backup_path, backup_type)
-		 VALUES (?, ?, ?, ?, ?)`,
-		migrationID, serverID, category, backupPath, backupType,
+		 VALUES (?, ?, ?, ?, 'data')`,
+		migrationID, serverID, category, data,
 	)
-	return err
+	if err != nil {
+		return 0, err
+	}
+	id, err := res.LastInsertId()
+	return int(id), err
 }
 
-func (r *sqliteRepo) ListBackups(migrationID int) ([]MigrationBackup, error) {
+func (r *sqliteRepo) GetBackups(migrationID int) ([]MigrationBackup, error) {
 	rows, err := r.db.Query(
-		`SELECT id, migration_id, server_id, category, backup_path, backup_type, created_at
+		`SELECT id, migration_id, server_id, category, backup_path, created_at
 		 FROM migration_backups WHERE migration_id = ?`,
 		migrationID,
 	)
@@ -209,7 +214,7 @@ func (r *sqliteRepo) ListBackups(migrationID int) ([]MigrationBackup, error) {
 	var backups []MigrationBackup
 	for rows.Next() {
 		var b MigrationBackup
-		if err := rows.Scan(&b.ID, &b.MigrationID, &b.ServerID, &b.Category, &b.BackupPath, &b.BackupType, &b.CreatedAt); err != nil {
+		if err := rows.Scan(&b.ID, &b.MigrationID, &b.ServerID, &b.Category, &b.Data, &b.CreatedAt); err != nil {
 			return nil, err
 		}
 		backups = append(backups, b)
