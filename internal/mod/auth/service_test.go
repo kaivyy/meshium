@@ -81,9 +81,12 @@ func TestUnlockWithCorrectPassword(t *testing.T) {
 		t.Error("should be locked after Lock()")
 	}
 
-	err := svc.Unlock("my-password")
+	token, err := svc.Unlock("my-password")
 	if err != nil {
 		t.Fatalf("Unlock failed: %v", err)
+	}
+	if token == "" {
+		t.Error("Unlock should return a non-empty session token")
 	}
 
 	if svc.IsLocked() {
@@ -101,7 +104,7 @@ func TestUnlockWithWrongPassword(t *testing.T) {
 	svc.Setup("my-password")
 	svc.Lock()
 
-	err := svc.Unlock("wrong-password")
+	_, err := svc.Unlock("wrong-password")
 	if err == nil {
 		t.Error("Unlock with wrong password should fail")
 	}

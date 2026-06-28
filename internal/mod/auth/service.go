@@ -1,6 +1,8 @@
 package auth
 
 import (
+	"crypto/rand"
+	"encoding/base64"
 	"errors"
 	"sync"
 
@@ -9,10 +11,11 @@ import (
 )
 
 type Service struct {
-	repo   Repo
-	mu     sync.RWMutex
-	aesKey []byte
-	locked bool
+	repo      Repo
+	mu        sync.RWMutex
+	aesKey    []byte
+	locked    bool
+	sessionToken string
 }
 
 func NewService(repo Repo) *Service {
@@ -71,7 +74,13 @@ func (s *Service) Setup(password string) error {
 		return err
 	}
 
-	salt := []byte("meshium-salt-v1")
+	// Generate a random per-installation salt (32 bytes)
+	salt := make([]byte, 32)
+	if _, err := rand.Read(salt); err != nil {
+		return err
+	}
+	saltB64 := base64.StdEncoding.EncodeToString(salt)
+
 	aesKey := shared.DeriveKey(password, salt)
 	encryptedPrivateKey, err := shared.Encrypt(aesKey, privatePEM)
 	if err != nil {
@@ -81,9 +90,14 @@ func (s *Service) Setup(password string) error {
 	if err := s.repo.SetupAll(hash, string(encryptedPrivateKey), string(publicSSH)); err != nil {
 		return err
 	}
+	// Store the salt separately so it can be retrieved during unlock
+	if err := s.repo.SetConfigValue("pbkdf2_salt", saltB64); err != nil {
+		return err
+	}
 
 	s.aesKey = aesKey
 	s.locked = false
+	s.sessionToken = generateSessionToken()
 	return nil
 }
 
@@ -139,26 +153,36 @@ func (s *Service) generateAndStoreSSHKeyPair() (string, error) {
 }
 
 // Unlock verifies the master password and loads the AES key into memory.
-func (s *Service) Unlock(password string) error {
+func (s *Service) Unlock(password string) (string, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
 	hash, err := s.repo.GetConfigValue("master_password_hash")
 	if err != nil {
-		return err
+		return "", err
 	}
 	if hash == "" {
-		return errors.New("master password not set")
+		return "", errors.New("master password not set")
 	}
 
 	if !shared.VerifyPassword(password, hash) {
-		return errors.New("invalid password")
+		return "", errors.New("invalid password")
 	}
 
-	salt := []byte("meshium-salt-v1")
+	// Retrieve the per-installation salt
+	saltB64, err := s.repo.GetConfigValue("pbkdf2_salt")
+	if err != nil {
+		return "", err
+	}
+	salt, err := base64.StdEncoding.DecodeString(saltB64)
+	if err != nil {
+		return "", err
+	}
+
 	s.aesKey = shared.DeriveKey(password, salt)
 	s.locked = false
-	return nil
+	s.sessionToken = generateSessionToken()
+	return s.sessionToken, nil
 }
 
 // Lock clears the AES key from memory.
@@ -171,4 +195,32 @@ func (s *Service) Lock() {
 	}
 	s.aesKey = nil
 	s.locked = true
+	s.sessionToken = ""
+}
+
+// GetSessionToken returns the current session token (empty if locked).
+func (s *Service) GetSessionToken() string {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	return s.sessionToken
+}
+
+// ValidateSessionToken checks if the provided token matches the current session.
+func (s *Service) ValidateSessionToken(token string) bool {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	if s.locked || s.sessionToken == "" {
+		return false
+	}
+	return token == s.sessionToken
+}
+
+// generateSessionToken creates a cryptographically random session token.
+func generateSessionToken() string {
+	b := make([]byte, 32)
+	if _, err := rand.Read(b); err != nil {
+		// This should never happen; if it does, the system is broken
+		return ""
+	}
+	return base64.StdEncoding.EncodeToString(b)
 }

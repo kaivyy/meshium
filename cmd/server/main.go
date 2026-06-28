@@ -37,6 +37,7 @@ func main() {
 	authRepo := auth.NewRepo(database)
 	authSvc := auth.NewService(authRepo)
 	authHandler := auth.NewHandler(authSvc)
+	authMiddleware := auth.NewMiddleware(authSvc)
 
 	serverRepo := server.NewRepo(database)
 	serverSvc := server.NewService(serverRepo, authSvc)
@@ -71,9 +72,13 @@ func main() {
 	migrationHandler.RegisterRoutes(mux)
 	mux.Handle("/", staticHandler())
 
+	// Wrap the mux with authentication middleware
+	// This protects all API endpoints with session token validation
+	protectedMux := authMiddleware.RequireAuth(mux)
+
 	addr := ":" + cfg.ServerPort
 	fmt.Printf("Meshium server starting on %s\n", addr)
-	if err := http.ListenAndServe(addr, mux); err != nil {
+	if err := http.ListenAndServe(addr, protectedMux); err != nil {
 		fmt.Fprintf(os.Stderr, "Server error: %v\n", err)
 		os.Exit(1)
 	}

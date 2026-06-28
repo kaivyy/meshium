@@ -55,7 +55,8 @@ func (h *Handler) handleSetup(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	shared.WriteJSON(w, http.StatusOK, map[string]string{"status": "ok"})
+	token := h.svc.GetSessionToken()
+	shared.WriteJSON(w, http.StatusOK, AuthResponse{Status: "ok", SessionToken: token})
 }
 
 func (h *Handler) handleUnlock(w http.ResponseWriter, r *http.Request) {
@@ -70,12 +71,13 @@ func (h *Handler) handleUnlock(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if err := h.svc.Unlock(req.Password); err != nil {
+	token, err := h.svc.Unlock(req.Password)
+	if err != nil {
 		shared.WriteError(w, http.StatusUnauthorized, "invalid password", "AUTH_FAILED")
 		return
 	}
 
-	shared.WriteJSON(w, http.StatusOK, map[string]string{"status": "ok"})
+	shared.WriteJSON(w, http.StatusOK, AuthResponse{Status: "ok", SessionToken: token})
 }
 
 func (h *Handler) handleLock(w http.ResponseWriter, r *http.Request) {
