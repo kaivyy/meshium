@@ -14,12 +14,16 @@ import (
 )
 
 // Client wraps an SSH connection.
+// If the connection is tunneled through a bastion/jump host, bastionConn
+// holds the bastion SSH client so its lifetime is tied to the target
+// connection. Closing the Client closes both connections.
 type Client struct {
-	serverID  int
-	conn      *ssh.Client
-	createdAt time.Time
-	mu        sync.Mutex
-	lastUsed  time.Time
+	serverID    int
+	conn        *ssh.Client
+	bastionConn *ssh.Client // non-nil if connection is via bastion
+	createdAt   time.Time
+	mu          sync.Mutex
+	lastUsed    time.Time
 }
 
 func (c *Client) touch() {
@@ -84,11 +88,11 @@ func connect(cfg ServerConfig, hostKeyCallback ssh.HostKeyCallback) (*Client, er
 		if err != nil {
 			return nil, fmt.Errorf("bastion connection failed: %w", err)
 		}
-		defer bastionClient.Close()
 
 		// Dial the target through the bastion
 		conn, err := bastionClient.Dial("tcp", targetAddr)
 		if err != nil {
+			bastionClient.Close()
 			return nil, fmt.Errorf("bastion dial target failed: %w", err)
 		}
 
@@ -96,14 +100,19 @@ func connect(cfg ServerConfig, hostKeyCallback ssh.HostKeyCallback) (*Client, er
 		ncc, chans, reqs, err := ssh.NewClientConn(conn, targetAddr, sshConfig)
 		if err != nil {
 			conn.Close()
+			bastionClient.Close()
 			return nil, fmt.Errorf("target SSH through bastion failed: %w", err)
 		}
 
+		// Store the bastion client so it lives as long as the target
+		// connection. The target connection is tunneled through the
+		// bastion — closing the bastion would kill the tunnel.
 		now := time.Now()
 		return &Client{
-			conn:      ssh.NewClient(ncc, chans, reqs),
-			createdAt: now,
-			lastUsed:  now,
+			conn:        ssh.NewClient(ncc, chans, reqs),
+			bastionConn: bastionClient,
+			createdAt:   now,
+			lastUsed:     now,
 		}, nil
 	}
 
@@ -310,10 +319,30 @@ func (c *Client) IsAlive() bool {
 	return err == nil
 }
 
-// Close closes the SSH connection.
+// HasBastion returns true if this connection is tunneled through a bastion.
+func (c *Client) HasBastion() bool {
+	if c == nil {
+		return false
+	}
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return c.bastionConn != nil
+}
+
+// Close closes the SSH connection and any associated bastion connection.
+// The target connection is closed first, then the bastion tunnel.
 func (c *Client) Close() error {
 	if c == nil || c.conn == nil {
 		return nil
 	}
-	return c.conn.Close()
+
+	// Close the target connection first
+	targetErr := c.conn.Close()
+
+	// Close the bastion tunnel if present
+	if c.bastionConn != nil {
+		_ = c.bastionConn.Close()
+	}
+
+	return targetErr
 }
