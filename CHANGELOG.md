@@ -7,6 +7,38 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [1.2.0] — 2026-06-28
+
+### Mobile & UX
+
+#### Fixed — Mobile Responsive Layout
+- **Bottom Navbar** — Replaced desktop sidebar with a mobile bottom navigation bar on screens < 768px
+  - 4-item navbar: Servers, Migrations, Settings, Lock
+  - Fixed positioning with `safe-area-inset-bottom` for iPhone notch/home indicator
+  - Desktop sidebar hidden on mobile (`hidden md:flex`), bottom navbar hidden on desktop (`md:hidden`)
+  - Removed hamburger menu, mobile top bar, and slide animations from layout
+  - Added `pb-16` padding on main content to prevent bottom navbar overlap
+
+#### Fixed — SSH Host Key Auto-Accept
+- **First-Connection Trust** — New SSH host keys are now auto-accepted on first connection (like `ssh -o StrictHostKeyChecking=accept-new`)
+  - Previously, connections to new servers failed with "host key not found — needs verification" before authentication
+  - Host keys are now automatically saved to the `known_hosts` table on first connect
+  - Existing host keys are still verified for mismatch (MITM protection)
+  - `MakeHostKeyCallback` now accepts a `serverID` parameter to associate keys with server records
+
+#### Fixed — API Null Response Bug
+- **Empty Arrays Instead of Null** — All list API endpoints now return `[]` instead of `null` when there are no records
+  - Affected endpoints: `GET /api/migrations`, `GET /api/servers`, `GET /api/migrations/{id}/steps`, backups
+  - Go nil slices were marshaling to JSON `null`, causing the frontend to stay in loading state
+  - All repo `List*` functions now use `make([]T, 0)` initialization
+
+### Changed
+- `HostKeyStore` interface updated: `MakeHostKeyCallback(serverID int)` instead of `MakeHostKeyCallback()`
+- `discovery/service.go` and `migration/ssh_helper.go` pass `serverID` to callback
+- All `ListMigrations`, `List`, `GetSteps`, `GetBackups` functions return initialized empty slices
+
+---
+
 ## [1.1.0] — 2026-06-28
 
 ### Migration Engine Enhancements
@@ -163,5 +195,6 @@ The first complete release of Meshium — a self-hosted server migration engine 
 
 | Version | Date | Highlights |
 |---------|------|------------|
+| 1.2.0 | 2026-06-28 | Mobile bottom navbar, SSH host key auto-accept, API null→[] fix |
 | 1.1.0 | 2026-06-28 | Docker migration, dry run, diff view, bastion/jump host, pre-flight validation, config exclusion, CI/CD, SSH pool concurrency |
 | 1.0.0 | 2026-06-27 | Initial release — full migration engine, web UI, 85 tests |
