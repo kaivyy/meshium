@@ -22,6 +22,7 @@ type Client struct {
 	conn        *ssh.Client
 	bastionConn *ssh.Client // non-nil if connection is via bastion
 	createdAt   time.Time
+	timeouts    TimeoutConfig
 	mu          sync.Mutex
 	lastUsed    time.Time
 }
@@ -47,24 +48,15 @@ func (c *Client) LastUsed() time.Time {
 	return c.lastUsed
 }
 
-const (
-	// commandTimeout is the default timeout for a single SSH command.
-	// Long enough for most discovery commands but short enough to catch
-	// hung sessions. Use ExecWithTimeout or ExecContextWithTimeout for
-	// commands that may take longer (e.g. docker pull, apt-get install).
-	commandTimeout = 30 * time.Second
-
-	// defaultExecTimeout is the fallback timeout when none is specified.
-	defaultExecTimeout = 5 * time.Minute
-)
-
 // connect establishes an SSH connection.
 // If a bastion config is provided, the connection is tunneled through the bastion.
 func connect(cfg ServerConfig, hostKeyCallback ssh.HostKeyCallback) (*Client, error) {
+	timeouts := cfg.Timeouts.withDefaults()
+
 	sshConfig := &ssh.ClientConfig{
 		User:            cfg.Username,
 		HostKeyCallback: hostKeyCallback,
-		Timeout:         10 * time.Second,
+		Timeout:         timeouts.Connect,
 		Config: ssh.Config{
 			Ciphers: []string{"aes256-gcm@openssh.com", "chacha20-poly1305@openssh.com"},
 		},
@@ -121,6 +113,7 @@ func connect(cfg ServerConfig, hostKeyCallback ssh.HostKeyCallback) (*Client, er
 			conn:        ssh.NewClient(ncc, chans, reqs),
 			bastionConn: bastionClient,
 			createdAt:   now,
+			timeouts:    timeouts,
 			lastUsed:     now,
 		}, nil
 	}
@@ -135,6 +128,7 @@ func connect(cfg ServerConfig, hostKeyCallback ssh.HostKeyCallback) (*Client, er
 	return &Client{
 		conn:      conn,
 		createdAt: now,
+		timeouts:  timeouts,
 		lastUsed:  now,
 	}, nil
 }
@@ -148,7 +142,7 @@ func dialBastion(b *BastionConfig) (*ssh.Client, error) {
 	bastionConfig := &ssh.ClientConfig{
 		User:            b.Username,
 		HostKeyCallback: b.HostKeyCallback,
-		Timeout:         10 * time.Second,
+		Timeout:         DefaultTimeouts.Connect,
 	}
 
 	var authMethods []ssh.AuthMethod
@@ -174,17 +168,18 @@ func dialBastion(b *BastionConfig) (*ssh.Client, error) {
 	return ssh.Dial("tcp", bastionAddr, bastionConfig)
 }
 
-// Exec runs a command with the default timeout and returns stdout, stderr,
-// and exit code. It is a backward-compatible wrapper around ExecContextWithTimeout.
+// Exec runs a command with the client's default command timeout and returns
+// stdout, stderr, and exit code. It is a backward-compatible wrapper around
+// ExecContextWithTimeout.
 func (c *Client) Exec(cmd string) (string, string, int, error) {
-	return c.ExecContextWithTimeout(context.Background(), cmd, commandTimeout)
+	return c.ExecContextWithTimeout(context.Background(), cmd, c.timeouts.Command)
 }
 
 // ExecContext runs a command with the supplied parent context for cancellation.
-// The default command timeout (commandTimeout) is applied in addition to the
-// parent context — whichever fires first wins.
+// The client's default command timeout is applied in addition to the parent
+// context — whichever fires first wins.
 func (c *Client) ExecContext(ctx context.Context, cmd string) (string, string, int, error) {
-	return c.ExecContextWithTimeout(ctx, cmd, commandTimeout)
+	return c.ExecContextWithTimeout(ctx, cmd, c.timeouts.Command)
 }
 
 // ExecWithTimeout runs a command with a custom timeout. The parent context
@@ -253,7 +248,7 @@ func (c *Client) ExecContextWithTimeout(ctx context.Context, cmd string, timeout
 }
 
 // ExecStream runs a command and calls onOutput for each stdout line.
-// It uses the default command timeout.
+// It uses the client's default command timeout.
 func (c *Client) ExecStream(cmd string, onOutput func(line string)) error {
 	return c.ExecStreamContext(context.Background(), cmd, onOutput)
 }
@@ -261,7 +256,7 @@ func (c *Client) ExecStream(cmd string, onOutput func(line string)) error {
 // ExecStreamContext runs a command with the supplied parent context for
 // cancellation and calls onOutput for each stdout line.
 func (c *Client) ExecStreamContext(ctx context.Context, cmd string, onOutput func(line string)) error {
-	return c.ExecStreamContextWithTimeout(ctx, cmd, commandTimeout, onOutput)
+	return c.ExecStreamContextWithTimeout(ctx, cmd, c.timeouts.Command, onOutput)
 }
 
 // ExecStreamWithTimeout runs a command with a custom timeout and calls
