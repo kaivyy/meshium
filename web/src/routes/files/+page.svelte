@@ -6,14 +6,14 @@
     Search, Filter, ChevronDown, ChevronUp, AlertCircle, Folder
   } from 'lucide-svelte';
   import { api } from '$lib/api/client';
-  import { discoveryApi, type ServerSnapshot, type DiskPartition } from '$lib/api/discovery';
+  import { type ServerSnapshot, type DiskPartition } from '$lib/api/discovery';
+  import { snapshotsStore, loadSnapshots } from '$lib/stores/snapshots';
   import { type Server } from '$lib/stores/servers';
   import { Badge, Card, EmptyState, PageHeader, Skeleton, Spinner, ProgressBar } from '$lib/components/ui';
   import { formatRelativeTime } from '$lib/utils/format';
   import { toast } from '$lib/stores/toast';
 
   let servers = $state([] as Server[]);
-  let snapshots = $state({} as Record<number, ServerSnapshot | null>);
   let loading = $state(true);
   let searchQuery = $state('');
   let showFilters = $state(false);
@@ -30,7 +30,7 @@
   const allPartitions = $derived.by(() => {
     const result: AggregatedPartition[] = [];
     servers.forEach(s => {
-      const snap = snapshots[s.id];
+      const snap: ServerSnapshot | null | undefined = $snapshotsStore[s.id];
       if (snap?.diskUsage) {
         snap.diskUsage.forEach(p => {
           result.push({ partition: p, serverId: s.id, serverName: s.name, capturedAt: snap.capturedAt });
@@ -90,19 +90,12 @@
     try {
       const data = await api.get('/servers') as Server[];
       servers = data;
-      await Promise.all(data.map(s => loadSnapshot(s.id)));
+      await loadSnapshots(data.map(s => s.id));
     } catch {
       toast.error('Failed to load disk data');
     } finally {
       loading = false;
     }
-  }
-
-  async function loadSnapshot(serverId: number) {
-    try {
-      const snap = await discoveryApi.getSnapshot(serverId);
-      snapshots = { ...snapshots, [serverId]: snap };
-    } catch { /* Snapshot may not exist yet */ }
   }
 
   function usageVariant(pct: number): 'default' | 'success' | 'warning' | 'error' {

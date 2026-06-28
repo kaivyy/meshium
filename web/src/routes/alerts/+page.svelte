@@ -6,7 +6,8 @@
     HardDrive, Container, Database, Clock, CheckCircle2, XCircle
   } from 'lucide-svelte';
   import { api } from '$lib/api/client';
-  import { discoveryApi, type ServerSnapshot, type DiskPartition } from '$lib/api/discovery';
+  import { type ServerSnapshot, type DiskPartition } from '$lib/api/discovery';
+  import { snapshotsStore, loadSnapshots } from '$lib/stores/snapshots';
   import { type Server } from '$lib/stores/servers';
   import { Badge, Card, EmptyState, PageHeader, Skeleton, Spinner } from '$lib/components/ui';
   import { formatRelativeTime } from '$lib/utils/format';
@@ -26,7 +27,6 @@
   }
 
   let servers = $state([] as Server[]);
-  let snapshots = $state({} as Record<number, ServerSnapshot | null>);
   let jobs = $state([] as Array<{ id: string; type: string; status: string; createdAt: string; error?: string }>);
   let migrations = $state([] as Array<{ id: number; status: string; createdAt: string; error?: string }>);
   let loading = $state(true);
@@ -37,7 +37,7 @@
 
     // Disk usage alerts from snapshots
     servers.forEach(s => {
-      const snap = snapshots[s.id];
+      const snap: ServerSnapshot | null | undefined = $snapshotsStore[s.id];
       if (!snap) return;
 
       // Check disk partitions
@@ -226,19 +226,12 @@
       servers = serverData;
       jobs = jobData?.jobs || [];
       migrations = migData || [];
-      await Promise.all(serverData.map(s => loadSnapshot(s.id)));
+      await loadSnapshots(serverData.map(s => s.id));
     } catch {
       toast.error('Failed to load alerts');
     } finally {
       loading = false;
     }
-  }
-
-  async function loadSnapshot(serverId: number) {
-    try {
-      const snap = await discoveryApi.getSnapshot(serverId);
-      snapshots = { ...snapshots, [serverId]: snap };
-    } catch { /* Snapshot may not exist yet */ }
   }
 
   function severityVariant(s: AlertSeverity): 'error' | 'warning' | 'neutral' {

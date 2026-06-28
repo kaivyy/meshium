@@ -1,11 +1,12 @@
 <script lang="ts">
-  import { onMount } from 'svelte';
+  import { onMount, onDestroy } from 'svelte';
   import { goto } from '$app/navigation';
   import { Link, Server as ServerIcon, ArrowRight, Clock, CheckCircle2, XCircle, Loader2, AlertCircle } from 'lucide-svelte';
   import { PageHeader, Card, Badge, Skeleton } from '$lib/components/ui';
   import { fetchServers, serverStore } from '$lib/stores/servers';
   import { api } from '$lib/api/client';
-  import { discoveryApi, type ServerSnapshot } from '$lib/api/discovery';
+  import { type ServerSnapshot } from '$lib/api/discovery';
+  import { snapshotsStore, loadSnapshots } from '$lib/stores/snapshots';
   import { formatRelativeTime } from '$lib/utils/format';
 
   let totalServers = $state(0);
@@ -16,11 +17,17 @@
   let recentJobs = $state([] as Array<{ id: string; type: string; status: string; createdAt: string; error?: string }>);
   let recentMigrations = $state([] as Array<{ id: number; status: string; createdAt: string; sourceId: number; targetId: number }>);
   let loadingActivity = $state(true);
-  let snapshots = $state({} as Record<number, ServerSnapshot | null>);
+  let refreshTimer: ReturnType<typeof setInterval> | null = null;
 
   onMount(async () => {
     fetchServers();
     await loadActivity();
+    // Auto-refresh activity feed every 30s
+    refreshTimer = setInterval(() => loadActivity(), 30000);
+  });
+
+  onDestroy(() => {
+    if (refreshTimer) clearInterval(refreshTimer);
   });
 
   async function loadActivity() {
@@ -42,14 +49,10 @@
       totalServers = serverData?.length || 0;
 
       // Check which servers have snapshots (proxy for "online")
-      await Promise.all((serverData || []).map(async (s) => {
-        try {
-          const snap = await discoveryApi.getSnapshot(s.id);
-          snapshots = { ...snapshots, [s.id]: snap };
-        } catch { /* no snapshot */ }
-      }));
+      await loadSnapshots((serverData || []).map((s) => s.id));
+      const snaps: Record<number, ServerSnapshot | null> = $snapshotsStore;
 
-      onlineServers = Object.values(snapshots).filter(s => s != null).length;
+      onlineServers = Object.values(snaps).filter(s => s != null).length;
     } catch {
       // ignore errors
     } finally {

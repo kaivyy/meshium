@@ -1,20 +1,23 @@
 <script lang="ts">
-  import { onMount } from 'svelte';
+  import { onMount, onDestroy } from 'svelte';
   import { goto } from '$app/navigation';
   import {
     Activity, RefreshCw, Cpu, HardDrive, MemoryStick, AlertCircle,
     Server as ServerIcon, Clock
   } from 'lucide-svelte';
   import { api } from '$lib/api/client';
-  import { discoveryApi, type ServerSnapshot, type DiskPartition } from '$lib/api/discovery';
+  import { type ServerSnapshot, type DiskPartition } from '$lib/api/discovery';
+  import { snapshotsStore, loadSnapshots, hasSnapshot as hasSnap, invalidateAll } from '$lib/stores/snapshots';
   import { type Server } from '$lib/stores/servers';
   import { Badge, Card, EmptyState, PageHeader, Skeleton, Spinner, ProgressBar } from '$lib/components/ui';
   import { formatRelativeTime } from '$lib/utils/format';
   import { toast } from '$lib/stores/toast';
 
   let servers = $state([] as Server[]);
-  let snapshots = $state({} as Record<number, ServerSnapshot | null>);
   let loading = $state(true);
+  let autoRefresh = $state(true);
+  let lastRefresh = $state<Date | null>(null);
+  let refreshTimer: ReturnType<typeof setInterval> | null = null;
 
   interface ServerHealth {
     server: Server;
@@ -28,7 +31,7 @@
 
   const serverHealth = $derived.by(() => {
     return servers.map(s => {
-      const snap = snapshots[s.id];
+      const snap = $snapshotsStore[s.id];
       let cpuUsage: number | null = null;
       let ramUsage: number | null = null;
       let diskUsage: number | null = null;
@@ -82,26 +85,45 @@
 
   onMount(async () => {
     await loadServers();
+    startAutoRefresh();
   });
+
+  onDestroy(() => {
+    if (refreshTimer) clearInterval(refreshTimer);
+  });
+
+  function startAutoRefresh() {
+    if (refreshTimer) clearInterval(refreshTimer);
+    refreshTimer = setInterval(async () => {
+      if (autoRefresh && servers.length > 0) {
+        await refreshSnapshots();
+      }
+    }, 30000); // 30 seconds
+  }
+
+  async function refreshSnapshots() {
+    try {
+      // Invalidate all cached snapshots and reload
+      invalidateAll();
+      await loadSnapshots(servers.map(s => s.id));
+      lastRefresh = new Date();
+    } catch {
+      // silent fail on auto-refresh
+    }
+  }
 
   async function loadServers() {
     loading = true;
     try {
       const data = await api.get('/servers') as Server[];
       servers = data;
-      await Promise.all(data.map(s => loadSnapshot(s.id)));
+      await loadSnapshots(data.map(s => s.id));
+      lastRefresh = new Date();
     } catch {
       toast.error('Failed to load servers');
     } finally {
       loading = false;
     }
-  }
-
-  async function loadSnapshot(serverId: number) {
-    try {
-      const snap = await discoveryApi.getSnapshot(serverId);
-      snapshots = { ...snapshots, [serverId]: snap };
-    } catch { /* Snapshot may not exist yet */ }
   }
 
   function ramVariant(usage: number | null): 'default' | 'success' | 'warning' | 'error' {
@@ -132,9 +154,6 @@
     return formatRelativeTime(snap.capturedAt);
   }
 
-  function hasSnapshot(snap: ServerSnapshot | null | undefined): boolean {
-    return snap != null && snap.capturedAt !== undefined;
-  }
 </script>
 
 <svelte:head><title>Monitoring - Meshium</title></svelte:head>
@@ -142,10 +161,23 @@
 <div class="p-4 sm:p-6 max-w-7xl mx-auto">
   <PageHeader title="Monitoring" subtitle="Resource utilization and health across your fleet.">
     {#snippet actions()}
-      <button type="button" onclick={loadServers} disabled={loading} class="inline-flex items-center gap-2 rounded-lg border border-slate-300 bg-white px-4 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50 disabled:opacity-60">
-        {#if loading}<Spinner size="sm" label="Refreshing" />{:else}<RefreshCw size={16} />{/if}
-        Refresh
-      </button>
+      <div class="flex items-center gap-3">
+        {#if lastRefresh}
+          <span class="text-xs text-slate-400">Updated {formatRelativeTime(lastRefresh.toISOString())}</span>
+        {/if}
+        <button
+          type="button"
+          onclick={() => { autoRefresh = !autoRefresh; if (autoRefresh) startAutoRefresh(); }}
+          class="inline-flex items-center gap-1.5 rounded-lg border border-slate-300 bg-white px-3 py-2 text-xs font-medium text-slate-600 hover:bg-slate-50"
+        >
+          <span class={`inline-block h-2 w-2 rounded-full ${autoRefresh ? 'bg-green-500' : 'bg-slate-300'}`}></span>
+          Auto {autoRefresh ? 'ON' : 'OFF'}
+        </button>
+        <button type="button" onclick={refreshSnapshots} disabled={loading} class="inline-flex items-center gap-2 rounded-lg border border-slate-300 bg-white px-4 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50 disabled:opacity-60">
+          {#if loading}<Spinner size="sm" label="Refreshing" />{:else}<RefreshCw size={16} />{/if}
+          Refresh
+        </button>
+      </div>
     {/snippet}
   </PageHeader>
 
@@ -214,7 +246,8 @@
             <a href={`/servers/${h.server.id}`} class="text-xs text-blue-600 hover:underline">View →</a>
           </div>
 
-          {#if !hasSnapshot(h.snapshot)}
+          {@const snap = $snapshotsStore[h.server.id]}
+          {#if !hasSnap(h.server.id)}
             <div class="rounded-lg border border-dashed border-slate-200 bg-slate-50 p-4 text-center">
               <Activity size={20} class="mx-auto text-slate-300" />
               <p class="mt-2 text-sm text-slate-500">Not scanned yet</p>
@@ -225,9 +258,9 @@
               <div>
                 <div class="mb-1 flex items-center justify-between text-xs">
                   <span class="flex items-center gap-1 text-slate-500"><Cpu size={12} />CPU</span>
-                  <span class="font-medium text-slate-700">{h.snapshot!.hardware?.cpuCores || 0} cores</span>
+                  <span class="font-medium text-slate-700">{snap!.hardware?.cpuCores || 0} cores</span>
                 </div>
-                <p class="text-xs text-slate-400 truncate">{h.snapshot!.hardware?.cpuModel || 'Unknown'}</p>
+                <p class="text-xs text-slate-400 truncate">{snap!.hardware?.cpuModel || 'Unknown'}</p>
               </div>
 
               <!-- RAM -->
@@ -238,7 +271,7 @@
                 </div>
                 <ProgressBar value={h.ramUsage ?? 0} variant={ramVariant(h.ramUsage)} />
                 <p class="mt-1 text-xs text-slate-400">
-                  {h.snapshot!.hardware?.ramUsedMb ? formatRAM(h.snapshot!.hardware.ramUsedMb) : '—'} / {h.snapshot!.hardware?.ramTotalMb ? formatRAM(h.snapshot!.hardware.ramTotalMb) : '—'}
+                  {snap!.hardware?.ramUsedMb ? formatRAM(snap!.hardware.ramUsedMb) : '—'} / {snap!.hardware?.ramTotalMb ? formatRAM(snap!.hardware.ramTotalMb) : '—'}
                 </p>
               </div>
 
@@ -250,14 +283,14 @@
                 </div>
                 <ProgressBar value={h.diskUsage ?? 0} variant={diskVariant(h.diskWarning, h.diskCritical)} />
                 <p class="mt-1 text-xs text-slate-400">
-                  {h.snapshot!.hardware?.diskUsedGb ? formatGB(h.snapshot!.hardware.diskUsedGb) : '—'} / {h.snapshot!.hardware?.diskTotalGb ? formatGB(h.snapshot!.hardware.diskTotalGb) : '—'}
+                  {snap!.hardware?.diskUsedGb ? formatGB(snap!.hardware.diskUsedGb) : '—'} / {snap!.hardware?.diskTotalGb ? formatGB(snap!.hardware.diskTotalGb) : '—'}
                 </p>
               </div>
 
               <!-- Partitions with warnings -->
-              {#if h.snapshot!.diskUsage && h.snapshot!.diskUsage.filter(p => p.usePercent > 75).length > 0}
+              {#if snap!.diskUsage && snap!.diskUsage.filter(p => p.usePercent > 75).length > 0}
                 <div class="space-y-1.5 border-t border-slate-100 pt-2">
-                  {#each h.snapshot!.diskUsage.filter(p => p.usePercent > 75) as part}
+                  {#each snap!.diskUsage.filter(p => p.usePercent > 75) as part}
                     <div class="flex items-center justify-between text-xs">
                       <span class="truncate text-slate-600">{part.mountPoint}</span>
                       <Badge variant={part.usePercent > 90 ? 'error' : 'warning'} size="sm">{Math.round(part.usePercent)}%</Badge>
@@ -269,7 +302,7 @@
               <!-- Last scan -->
               <div class="flex items-center gap-1 text-xs text-slate-400">
                 <Clock size={12} />
-                <span>Scanned {getSnapshotAge(h.snapshot)}</span>
+                <span>Scanned {getSnapshotAge(snap)}</span>
               </div>
             </div>
           {/if}

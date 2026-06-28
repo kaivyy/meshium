@@ -7,15 +7,15 @@
   } from 'lucide-svelte';
   import { api } from '$lib/api/client';
   import { discoveryApi, type ServerSnapshot, type CollectorError } from '$lib/api/discovery';
+  import { snapshotsStore, loadSnapshots, invalidateSnapshot, hasSnapshot as hasSnap } from '$lib/stores/snapshots';
   import { type Server } from '$lib/stores/servers';
   import { Badge, Card, DropdownMenu, EmptyState, PageHeader, Skeleton, Spinner } from '$lib/components/ui';
   import { formatRelativeTime } from '$lib/utils/format';
   import { toast } from '$lib/stores/toast';
 
   let servers = $state([] as Server[]);
-  let snapshots = $state({} as Record<number, ServerSnapshot | null>);
+  let snapshots = $derived.by(() => $snapshotsStore);
   let loading = $state(true);
-  let loadingSnapshots = $state(new Set());
   let searchQuery = $state('');
   let showFilters = $state(false);
 
@@ -94,7 +94,7 @@
     try {
       const data = await api.get('/servers') as Server[];
       servers = data;
-      await Promise.all(data.map(s => loadSnapshot(s.id)));
+      await loadSnapshots(data.map(s => s.id));
     } catch {
       toast.error('Failed to load servers');
     } finally {
@@ -102,23 +102,11 @@
     }
   }
 
-  async function loadSnapshot(serverId: number) {
-    loadingSnapshots = new Set([...loadingSnapshots, serverId]);
-    try {
-      const snap = await discoveryApi.getSnapshot(serverId);
-      snapshots = { ...snapshots, [serverId]: snap };
-    } catch { /* Snapshot may not exist yet */ }
-    finally {
-      const next = new Set(loadingSnapshots);
-      next.delete(serverId);
-      loadingSnapshots = next;
-    }
-  }
-
   async function triggerDiscovery(serverId: number) {
     try {
       await discoveryApi.triggerDiscovery(serverId);
       toast.success('Discovery started - check Jobs for progress');
+      invalidateSnapshot(serverId);
     } catch {
       toast.error('Failed to start discovery');
     }
@@ -176,8 +164,8 @@
     return formatRelativeTime(snap.capturedAt);
   }
 
-  function hasSnapshot(snap: ServerSnapshot | null | undefined): boolean {
-    return snap != null && snap.capturedAt !== undefined;
+  function hasSnapshot(serverId: number): boolean {
+    return hasSnap(serverId);
   }
 </script>
 
@@ -260,7 +248,7 @@
     <div class="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
       {#each filteredServers as server (server.id)}
         {@const snap = snapshots[server.id]}
-        {@const isLoading = loadingSnapshots.has(server.id)}
+        {@const isLoading = snap === undefined}
         {@const errors = getCollectionErrors(snap)}
         <Card padding="lg" hoverable>
           <div class="mb-3 flex items-start justify-between gap-2">
@@ -274,7 +262,7 @@
             <DropdownMenu items={[
               { label: 'Open server', href: `/servers/${server.id}` },
               { label: 'Re-scan', onclick: () => triggerDiscovery(server.id) },
-              ...(hasSnapshot(snap) ? [
+              ...(hasSnapshot(server.id) ? [
                 { label: 'View raw snapshot', onclick: () => viewRawSnapshot(server.id) },
                 { label: 'Export snapshot', onclick: () => exportSnapshot(server.id) },
               ] : []),
@@ -282,7 +270,7 @@
           </div>
           {#if isLoading}
             <div class="flex items-center justify-center py-6 text-slate-400"><Spinner size="md" label="Loading" /></div>
-          {:else if !hasSnapshot(snap)}
+          {:else if !hasSnapshot(server.id)}
             <div class="rounded-lg border border-dashed border-slate-200 bg-slate-50 p-4 text-center">
               <ServerIcon size={24} class="mx-auto text-slate-300" />
               <p class="mt-2 text-sm text-slate-500">Not discovered yet</p>
