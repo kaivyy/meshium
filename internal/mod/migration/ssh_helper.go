@@ -10,7 +10,7 @@ import (
 
 // resolveBastion checks if the server has a bastion configured and returns
 // the bastion config if so. Returns nil if no bastion is configured.
-func resolveBastion(srv *server.Server, srvRepo server.Repo, aesKey []byte) *modssh.BastionConfig {
+func resolveBastion(srv *server.Server, srvRepo server.Repo, aesKey []byte, hosts HostKeyStore) *modssh.BastionConfig {
 	if srv.BastionID == 0 {
 		return nil
 	}
@@ -30,11 +30,12 @@ func resolveBastion(srv *server.Server, srvRepo server.Repo, aesKey []byte) *mod
 	}
 
 	cfg := &modssh.BastionConfig{
-		Host:       bastion.Host,
-		Port:       bastionPort,
-		Username:   bastion.Username,
-		Password:   string(bPassword),
-		Passphrase: string(bPassphrase),
+		Host:            bastion.Host,
+		Port:            bastionPort,
+		Username:        bastion.Username,
+		Password:        string(bPassword),
+		Passphrase:      string(bPassphrase),
+		HostKeyCallback: hosts.MakeHostKeyCallback(bastion.ID),
 	}
 	if len(bSSHKey) > 0 {
 		cfg.PrivateKey = bSSHKey
@@ -44,7 +45,7 @@ func resolveBastion(srv *server.Server, srvRepo server.Repo, aesKey []byte) *mod
 }
 
 // buildSSHConfig creates an SSH config for a server, including bastion support if configured.
-func buildSSHConfig(srv *server.Server, srvRepo server.Repo, aesKey []byte) (modssh.ServerConfig, error) {
+func buildSSHConfig(srv *server.Server, srvRepo server.Repo, aesKey []byte, hosts HostKeyStore) (modssh.ServerConfig, error) {
 	password, _ := shared.Decrypt(aesKey, []byte(srv.Password))
 	sshKey, _ := shared.Decrypt(aesKey, []byte(srv.SSHKey))
 	passphrase, _ := shared.Decrypt(aesKey, []byte(srv.Passphrase))
@@ -62,7 +63,7 @@ func buildSSHConfig(srv *server.Server, srvRepo server.Repo, aesKey []byte) (mod
 	}
 
 	// Add bastion if configured
-	sshConfig.Bastion = resolveBastion(srv, srvRepo, aesKey)
+	sshConfig.Bastion = resolveBastion(srv, srvRepo, aesKey, hosts)
 
 	return sshConfig, nil
 }
@@ -75,7 +76,7 @@ func getSSHClientForServer(serverID int, srv *server.Server, srvRepo server.Repo
 		return nil, fmt.Errorf("app is locked")
 	}
 
-	sshConfig, err := buildSSHConfig(srv, srvRepo, aesKey)
+	sshConfig, err := buildSSHConfig(srv, srvRepo, aesKey, hosts)
 	if err != nil {
 		return nil, err
 	}
