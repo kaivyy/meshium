@@ -270,3 +270,144 @@ func TestClientLastUsedConcurrentAccess(t *testing.T) {
 	}
 	wg.Wait()
 }
+
+func TestPoolKeepaliveRemovesDeadConnections(t *testing.T) {
+	addr := startPoolTestSSHServer(t)
+	host, portStr, err := net.SplitHostPort(addr)
+	if err != nil {
+		t.Fatalf("SplitHostPort failed: %v", err)
+	}
+	var port int
+	if _, err := fmt.Sscanf(portStr, "%d", &port); err != nil {
+		t.Fatalf("parse port failed: %v", err)
+	}
+
+	pool := NewPool(PoolConfig{
+		MaxIdle:           time.Minute,
+		MaxLifetime:       5 * time.Minute,
+		KeepaliveInterval: 50 * time.Millisecond,
+	})
+	defer pool.CloseAll()
+
+	cfg := ServerConfig{Host: host, Port: port, Username: "test"}
+	client, err := pool.Get(1, cfg, ssh.InsecureIgnoreHostKey())
+	if err != nil {
+		t.Fatalf("Get failed: %v", err)
+	}
+	if got := pool.Count(); got != 1 {
+		t.Fatalf("expected count 1, got %d", got)
+	}
+
+	// Kill the underlying SSH connection to simulate a dropped connection
+	client.Close()
+
+	// Start keepalive — it should detect the dead connection and remove it
+	pool.StartKeepalive()
+
+	// Wait for at least one keepalive cycle
+	time.Sleep(200 * time.Millisecond)
+
+	if got := pool.Count(); got != 0 {
+		t.Fatalf("expected count 0 after keepalive removed dead connection, got %d", got)
+	}
+}
+
+func TestPoolKeepaliveStartStopIdempotent(t *testing.T) {
+	pool := NewPool(PoolConfig{
+		KeepaliveInterval: 100 * time.Millisecond,
+	})
+	defer pool.CloseAll()
+
+	// Start keepalive multiple times — should not panic
+	pool.StartKeepalive()
+	pool.StartKeepalive()
+	pool.StartKeepalive()
+
+	// Stop and start again
+	pool.StopKeepalive()
+	pool.StartKeepalive()
+
+	// StopKeepalive should be safe to call again
+	pool.StopKeepalive()
+}
+
+func TestPoolCloseAllStopsKeepalive(t *testing.T) {
+	pool := NewPool(PoolConfig{
+		KeepaliveInterval: 50 * time.Millisecond,
+	})
+
+	pool.StartKeepalive()
+	pool.CloseAll()
+
+	// After CloseAll, keepaliveStop should be nil
+	if pool.keepaliveStop != nil {
+		t.Fatal("expected keepaliveStop to be nil after CloseAll")
+	}
+}
+
+func TestPoolRetriesOnTransientError(t *testing.T) {
+	addr := startPoolTestSSHServer(t)
+	host, portStr, err := net.SplitHostPort(addr)
+	if err != nil {
+		t.Fatalf("SplitHostPort failed: %v", err)
+	}
+	var port int
+	if _, err := fmt.Sscanf(portStr, "%d", &port); err != nil {
+		t.Fatalf("parse port failed: %v", err)
+	}
+
+	pool := NewPool(PoolConfig{
+		MaxIdle:     time.Minute,
+		MaxLifetime: 5 * time.Minute,
+		MaxRetries:  2,
+	})
+	defer pool.CloseAll()
+
+	// First attempt to a non-existent server should fail and retry
+	cfg := ServerConfig{Host: "127.0.0.1", Port: 1, Username: "test"}
+	_, err = pool.Get(99, cfg, ssh.InsecureIgnoreHostKey())
+	if err == nil {
+		t.Fatal("expected error connecting to invalid port")
+	}
+
+	// Now connect to the real server — should succeed
+	cfg = ServerConfig{Host: host, Port: port, Username: "test"}
+	client, err := pool.Get(1, cfg, ssh.InsecureIgnoreHostKey())
+	if err != nil {
+		t.Fatalf("Get to real server failed: %v", err)
+	}
+	if client == nil {
+		t.Fatal("expected client")
+	}
+}
+
+func TestIsTransientError(t *testing.T) {
+	tests := []struct {
+		err      error
+		expected bool
+	}{
+		{nil, false},
+		{fmt.Errorf("connection refused"), true},
+		{fmt.Errorf("connection reset by peer"), true},
+		{fmt.Errorf("i/o timeout"), true},
+		{fmt.Errorf("read: EOF"), true},
+		{fmt.Errorf("broken pipe"), true},
+		{fmt.Errorf("authentication failed"), false},
+		{fmt.Errorf("no supported methods remain"), false},
+		{fmt.Errorf("handshake failed: ssh: unable to authenticate"), false},
+	}
+
+	for _, tt := range tests {
+		got := isTransientError(tt.err)
+		if got != tt.expected {
+			t.Errorf("isTransientError(%v) = %v, want %v", tt.err, got, tt.expected)
+		}
+	}
+}
+
+func TestNewPoolAppliesDefaultKeepaliveInterval(t *testing.T) {
+	pool := NewPool(PoolConfig{})
+	if got, want := pool.config.KeepaliveInterval, 2*time.Minute; got != want {
+		t.Fatalf("expected default KeepaliveInterval %v, got %v", want, got)
+	}
+}
