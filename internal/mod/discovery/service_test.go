@@ -37,6 +37,10 @@ func (f *fakeConnectionPool) Get(serverID int, cfg modssh.ServerConfig, hostKeyC
 	return f.client, nil
 }
 
+func (f *fakeConnectionPool) GetContext(ctx context.Context, serverID int, cfg modssh.ServerConfig, hostKeyCallback xssh.HostKeyCallback) (SSHExecuter, error) {
+	return f.Get(serverID, cfg, hostKeyCallback)
+}
+
 type fakeHostKeyStore struct{}
 
 func (f fakeHostKeyStore) MakeHostKeyCallback(serverID int) xssh.HostKeyCallback {

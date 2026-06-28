@@ -44,6 +44,17 @@ func (a *poolAdapter) Get(serverID int, cfg modssh.ServerConfig, hostKeyCallback
 	return client, nil
 }
 
+func (a *poolAdapter) GetContext(ctx context.Context, serverID int, cfg modssh.ServerConfig, hostKeyCallback xssh.HostKeyCallback) (SSHExecuter, error) {
+	if a == nil || a.pool == nil {
+		return nil, fmt.Errorf("ssh pool is not configured")
+	}
+	client, err := a.pool.GetContext(ctx, serverID, cfg, hostKeyCallback)
+	if err != nil {
+		return nil, err
+	}
+	return client, nil
+}
+
 // Service orchestrates the connection test.
 type Service struct {
 	pool    ConnectionPool

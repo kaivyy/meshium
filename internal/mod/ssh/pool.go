@@ -1,8 +1,8 @@
 package ssh
 
 import (
+	"context"
 	"net"
-	"strings"
 	"sync"
 	"time"
 
@@ -64,7 +64,18 @@ func NewPool(cfg PoolConfig) *Pool {
 // and MaxRetries is configured, it retries with exponential backoff.
 // Concurrent calls for the same serverID are deduplicated — only one
 // goroutine establishes the connection while others wait.
+//
+// Get is a backward-compatible wrapper around GetContext that uses
+// context.Background(). Use GetContext for cancellation support.
 func (p *Pool) Get(serverID int, cfg ServerConfig, hostKeyCallback func(hostname string, remote net.Addr, key ssh.PublicKey) error) (*Client, error) {
+	return p.GetContext(context.Background(), serverID, cfg, hostKeyCallback)
+}
+
+// GetContext is the context-aware version of Get. It behaves identically
+// to Get but respects the supplied context for cancellation during retry
+// backoff. If the context is cancelled during a backoff wait, GetContext
+// returns the context error immediately.
+func (p *Pool) GetContext(ctx context.Context, serverID int, cfg ServerConfig, hostKeyCallback func(hostname string, remote net.Addr, key ssh.PublicKey) error) (*Client, error) {
 	p.mu.Lock()
 	// Check for a valid cached connection
 	if entry, ok := p.connections[serverID]; ok {
@@ -84,9 +95,13 @@ func (p *Pool) Get(serverID int, cfg ServerConfig, hostKeyCallback func(hostname
 	if waitCh, ok := p.pending[serverID]; ok {
 		p.mu.Unlock()
 		// Wait for the other goroutine to finish connecting
-		<-waitCh
+		select {
+		case <-waitCh:
+		case <-ctx.Done():
+			return nil, ctx.Err()
+		}
 		// Try again to get the cached connection
-		return p.Get(serverID, cfg, hostKeyCallback)
+		return p.GetContext(ctx, serverID, cfg, hostKeyCallback)
 	}
 
 	// Register our intent to connect
@@ -103,7 +118,11 @@ func (p *Pool) Get(serverID int, cfg ServerConfig, hostKeyCallback func(hostname
 	}()
 
 	if p.semaphore != nil {
-		p.semaphore <- struct{}{}
+		select {
+		case p.semaphore <- struct{}{}:
+		case <-ctx.Done():
+			return nil, ctx.Err()
+		}
 		defer func() {
 			<-p.semaphore
 		}()
@@ -119,7 +138,12 @@ func (p *Pool) Get(serverID int, cfg ServerConfig, hostKeyCallback func(hostname
 			if backoff > 30*time.Second {
 				backoff = 30 * time.Second
 			}
-			time.Sleep(backoff)
+			// Context-aware wait: return immediately if cancelled
+			select {
+			case <-time.After(backoff):
+			case <-ctx.Done():
+				return nil, ctx.Err()
+			}
 		}
 
 		client, err := connect(cfg, hostKeyCallback)
@@ -155,31 +179,6 @@ func (p *Pool) Get(serverID int, cfg ServerConfig, hostKeyCallback func(hostname
 	}
 
 	return nil, lastErr
-}
-
-// isTransientError returns true for errors that may resolve on retry
-// (e.g. connection refused, timeout, EOF).
-func isTransientError(err error) bool {
-	if err == nil {
-		return false
-	}
-	msg := strings.ToLower(err.Error())
-	// Common transient error patterns
-	for _, needle := range []string{
-		"connection refused",
-		"connection reset",
-		"timeout",
-		"timed out",
-		"eof",
-		"broken pipe",
-		"temporarily unavailable",
-		"i/o timeout",
-	} {
-		if strings.Contains(msg, needle) {
-			return true
-		}
-	}
-	return false
 }
 
 // StartKeepalive launches a background goroutine that periodically sends

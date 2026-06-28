@@ -1,6 +1,7 @@
 package migration
 
 import (
+	"context"
 	"fmt"
 
 	"meshium/internal/mod/discovery"
@@ -167,6 +168,17 @@ func (a *PoolAdapter) Get(serverID int, cfg modssh.ServerConfig, hostKeyCallback
 		return nil, err
 	}
 	// The underlying *ssh.Client implements Upload/Download, so type-assert
+	if s, ok := client.(SSHExecuter); ok {
+		return s, nil
+	}
+	return nil, fmt.Errorf("SSH client does not support SFTP operations")
+}
+
+func (a *PoolAdapter) GetContext(ctx context.Context, serverID int, cfg modssh.ServerConfig, hostKeyCallback xssh.HostKeyCallback) (SSHExecuter, error) {
+	client, err := a.Inner.GetContext(ctx, serverID, cfg, hostKeyCallback)
+	if err != nil {
+		return nil, err
+	}
 	if s, ok := client.(SSHExecuter); ok {
 		return s, nil
 	}

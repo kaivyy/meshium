@@ -26,6 +26,7 @@ type SSHExecuter interface {
 // ConnectionPool provides SSH clients for a server.
 type ConnectionPool interface {
 	Get(serverID int, cfg modssh.ServerConfig, hostKeyCallback xssh.HostKeyCallback) (SSHExecuter, error)
+	GetContext(ctx context.Context, serverID int, cfg modssh.ServerConfig, hostKeyCallback xssh.HostKeyCallback) (SSHExecuter, error)
 }
 
 // AESKeyProvider exposes the AES key needed to decrypt stored credentials.

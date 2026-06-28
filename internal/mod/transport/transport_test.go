@@ -46,6 +46,10 @@ func (m *mockPool) Get(serverID int, cfg modssh.ServerConfig, hostKeyCallback xs
 	return nil, nil
 }
 
+func (m *mockPool) GetContext(ctx context.Context, serverID int, cfg modssh.ServerConfig, hostKeyCallback xssh.HostKeyCallback) (SSHExecuter, error) {
+	return nil, nil
+}
+
 // TestAESKeyProviderInterface verifies that the AESKeyProvider interface
 // is correctly defined.
 func TestAESKeyProviderInterface(t *testing.T) {
