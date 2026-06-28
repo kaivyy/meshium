@@ -44,3 +44,13 @@ func (r *CompositeRunner) Diff(ctx context.Context, sourceID, targetID int, cate
 	ds := NewDiffService(r.executor.registry, r.executor.srvRepo, r.executor.pool, r.executor.authSvc, r.executor.hosts)
 	return ds.Diff(ctx, sourceID, targetID, categories, onProgress)
 }
+
+// Resume delegates to the Executor.
+func (r *CompositeRunner) Resume(ctx context.Context, migrationID int, onProgress StepCallback) error {
+	return r.executor.Resume(ctx, migrationID, onProgress)
+}
+
+// RecoverInterrupted delegates to the Executor.
+func (r *CompositeRunner) RecoverInterrupted() ([]int, error) {
+	return r.executor.RecoverInterrupted()
+}

@@ -21,6 +21,8 @@ const (
 	StatusRollingBack    = "rolling_back"
 	StatusRolledBack     = "rolled_back"
 	StatusRollbackFailed = "rollback_failed"
+	StatusInterrupted    = "interrupted" // set when a running migration is detected after a crash
+	StatusResuming       = "resuming"    // set when an interrupted migration is being resumed
 )
 
 const (
@@ -28,6 +30,7 @@ const (
 	StepStatusRunning   = "running"
 	StepStatusCompleted = "completed"
 	StepStatusFailed    = "failed"
+	StepStatusApplied   = "applied" // step has been applied to the target (checkpoint marker)
 )
 
 // --- SSH and progress types ---

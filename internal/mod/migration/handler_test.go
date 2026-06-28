@@ -112,6 +112,16 @@ func (m *mockRepo) GetBackups(migrationID int) ([]MigrationBackup, error) {
 	return result, nil
 }
 
+func (m *mockRepo) GetAppliedCategories(migrationID int) ([]string, error) {
+	var result []string
+	for _, s := range m.steps {
+		if s.MigrationID == migrationID && s.Action == "collect" && s.Status == StepStatusApplied {
+			result = append(result, s.Category)
+		}
+	}
+	return result, nil
+}
+
 func TestHandleList(t *testing.T) {
 	repo := &mockRepo{
 		migrations: []Migration{

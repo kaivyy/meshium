@@ -20,6 +20,7 @@ type Repo interface {
 	CreateStep(migrationID int, category, action, data string) (int, error)
 	UpdateStepStatus(id int, status, errMsg string) error
 	GetSteps(migrationID int) ([]MigrationStep, error)
+	GetAppliedCategories(migrationID int) ([]string, error) // categories with StepStatusApplied
 
 	CreateBackup(migrationID, serverID int, category, data string) (int, error)
 	GetBackups(migrationID int) ([]MigrationBackup, error)
@@ -220,6 +221,31 @@ func (r *sqliteRepo) GetBackups(migrationID int) ([]MigrationBackup, error) {
 		backups = append(backups, b)
 	}
 	return backups, nil
+}
+
+// GetAppliedCategories returns the list of categories that have been
+// successfully applied (StepStatusApplied) for a migration. Used for
+// checkpoint/resume: these categories can be skipped on resume.
+func (r *sqliteRepo) GetAppliedCategories(migrationID int) ([]string, error) {
+	rows, err := r.db.Query(
+		`SELECT DISTINCT category FROM migration_steps
+		 WHERE migration_id = ? AND action = 'collect' AND status = ?`,
+		migrationID, StepStatusApplied,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var categories []string
+	for rows.Next() {
+		var cat string
+		if err := rows.Scan(&cat); err != nil {
+			return nil, err
+		}
+		categories = append(categories, cat)
+	}
+	return categories, nil
 }
 
 // Helper: parse categories from JSON string to slice
