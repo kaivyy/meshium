@@ -51,6 +51,7 @@ func (h *Handler) handleSetup(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	shared.LimitRequestBody(r)
 	var req SetupRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		shared.WriteError(w, http.StatusBadRequest, "invalid request body", "VALIDATION_ERROR")
@@ -58,6 +59,10 @@ func (h *Handler) handleSetup(w http.ResponseWriter, r *http.Request) {
 	}
 	if len(req.Password) < 8 {
 		shared.WriteError(w, http.StatusBadRequest, "password must be at least 8 characters", "VALIDATION_ERROR")
+		return
+	}
+	if len(req.Password) > 1024 {
+		shared.WriteError(w, http.StatusBadRequest, "password is too long", "VALIDATION_ERROR")
 		return
 	}
 
@@ -82,9 +87,14 @@ func (h *Handler) handleUnlock(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	shared.LimitRequestBody(r)
 	var req UnlockRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		shared.WriteError(w, http.StatusBadRequest, "invalid request body", "VALIDATION_ERROR")
+		return
+	}
+	if len(req.Password) > 1024 {
+		shared.WriteError(w, http.StatusBadRequest, "password is too long", "VALIDATION_ERROR")
 		return
 	}
 
