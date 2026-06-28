@@ -4,6 +4,7 @@ import (
 	"crypto/rand"
 	"crypto/rsa"
 	"crypto/x509"
+	"encoding/base64"
 	"encoding/pem"
 	"fmt"
 	"strings"
@@ -41,10 +42,9 @@ func InstallPublicKey(client *Client, publicKey []byte) error {
 	}
 
 	key := strings.TrimSpace(string(publicKey))
-	cmd := fmt.Sprintf(`mkdir -p ~/.ssh && chmod 700 ~/.ssh && cat <<'EOF' >> ~/.ssh/authorized_keys
-%s
-EOF
-chmod 600 ~/.ssh/authorized_keys`, key)
+	// Use base64 encoding to safely write the key without heredoc injection risk
+	encoded := base64.StdEncoding.EncodeToString([]byte(key))
+	cmd := fmt.Sprintf(`mkdir -p ~/.ssh && chmod 700 ~/.ssh && echo '%s' | base64 -d >> ~/.ssh/authorized_keys && chmod 600 ~/.ssh/authorized_keys`, encoded)
 
 	stdout, stderr, exitCode, err := client.Exec(cmd)
 	if err != nil {
