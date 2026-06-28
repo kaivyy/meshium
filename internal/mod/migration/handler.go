@@ -163,7 +163,7 @@ func (h *Handler) handleCreate(w http.ResponseWriter, r *http.Request) {
 	// Plan synchronously (for REST, without WebSocket progress)
 	plan, err := h.runner.Plan(r.Context(), req, nil)
 	if err != nil {
-		shared.WriteError(w, http.StatusInternalServerError, "failed to create plan: "+err.Error(), "INTERNAL")
+		shared.WriteError(w, http.StatusInternalServerError, "failed to create plan", "INTERNAL")
 		return
 	}
 
@@ -198,7 +198,7 @@ func (h *Handler) handleDelete(w http.ResponseWriter, r *http.Request, id int) {
 func (h *Handler) handleRollback(w http.ResponseWriter, r *http.Request, id int) {
 	err := h.runner.Rollback(r.Context(), id, nil)
 	if err != nil {
-		shared.WriteError(w, http.StatusInternalServerError, "rollback failed: "+err.Error(), "INTERNAL")
+		shared.WriteError(w, http.StatusInternalServerError, "rollback failed", "INTERNAL")
 		return
 	}
 	shared.WriteJSON(w, http.StatusOK, map[string]string{"status": "rolled_back"})
@@ -343,7 +343,7 @@ func (h *Handler) handlePreFlight(w http.ResponseWriter, r *http.Request, id int
 
 	result, err := h.runner.PreFlight(r.Context(), id, nil)
 	if err != nil {
-		shared.WriteError(w, http.StatusInternalServerError, "pre-flight failed: "+err.Error(), "INTERNAL")
+		shared.WriteError(w, http.StatusInternalServerError, "pre-flight failed", "INTERNAL")
 		return
 	}
 	shared.WriteJSON(w, http.StatusOK, result)
@@ -352,7 +352,7 @@ func (h *Handler) handlePreFlight(w http.ResponseWriter, r *http.Request, id int
 func (h *Handler) handleDryRunREST(w http.ResponseWriter, r *http.Request, id int) {
 	result, err := h.runner.DryRun(r.Context(), id, nil)
 	if err != nil {
-		shared.WriteError(w, http.StatusInternalServerError, "dry run failed: "+err.Error(), "INTERNAL")
+		shared.WriteError(w, http.StatusInternalServerError, "dry run failed", "INTERNAL")
 		return
 	}
 	shared.WriteJSON(w, http.StatusOK, result)
@@ -423,7 +423,7 @@ func (h *Handler) handleDiffREST(w http.ResponseWriter, r *http.Request) {
 
 	result, err := h.runner.Diff(r.Context(), req.SourceID, req.TargetID, req.Categories, nil)
 	if err != nil {
-		shared.WriteError(w, http.StatusInternalServerError, "diff failed: "+err.Error(), "INTERNAL")
+		shared.WriteError(w, http.StatusInternalServerError, "diff failed", "INTERNAL")
 		return
 	}
 
