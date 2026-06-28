@@ -3,16 +3,21 @@ package auth
 import (
 	"encoding/json"
 	"net/http"
+	"time"
 
 	"meshium/internal/shared"
 )
 
 type Handler struct {
-	svc *Service
+	svc       *Service
+	limiter   *shared.RateLimiter
 }
 
 func NewHandler(svc *Service) *Handler {
-	return &Handler{svc: svc}
+	// 5 attempts per minute for auth endpoints (brute force protection)
+	limiter := shared.NewRateLimiter(5, time.Minute)
+	limiter.StartCleanup(5 * time.Minute)
+	return &Handler{svc: svc, limiter: limiter}
 }
 
 func (h *Handler) RegisterRoutes(mux *http.ServeMux) {
@@ -27,6 +32,12 @@ func (h *Handler) RegisterRoutes(mux *http.ServeMux) {
 func (h *Handler) handleSetup(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
 		shared.WriteError(w, http.StatusMethodNotAllowed, "method not allowed", "METHOD_NOT_ALLOWED")
+		return
+	}
+
+	// Rate limit setup attempts to prevent brute force
+	if !h.limiter.Allow(shared.ExtractIP(r)) {
+		shared.WriteError(w, http.StatusTooManyRequests, "too many attempts — try again later", "RATE_LIMITED")
 		return
 	}
 
@@ -62,6 +73,12 @@ func (h *Handler) handleSetup(w http.ResponseWriter, r *http.Request) {
 func (h *Handler) handleUnlock(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
 		shared.WriteError(w, http.StatusMethodNotAllowed, "method not allowed", "METHOD_NOT_ALLOWED")
+		return
+	}
+
+	// Rate limit unlock attempts to prevent brute force
+	if !h.limiter.Allow(shared.ExtractIP(r)) {
+		shared.WriteError(w, http.StatusTooManyRequests, "too many attempts — try again later", "RATE_LIMITED")
 		return
 	}
 
