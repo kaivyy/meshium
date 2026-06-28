@@ -247,27 +247,81 @@ func (c *Client) ExecContextWithTimeout(ctx context.Context, cmd string, timeout
 	return stdout.String(), stderr.String(), -1, err
 }
 
+// StreamSource indicates whether a streamed line came from stdout or stderr.
+type StreamSource int
+
+const (
+	// StreamStdout indicates a line from stdout.
+	StreamStdout StreamSource = iota
+	// StreamStderr indicates a line from stderr.
+	StreamStderr
+)
+
+// StreamCallback is called for each line of output during streaming execution.
+// The source parameter indicates whether the line came from stdout or stderr.
+type StreamCallback func(source StreamSource, line string)
+
+// maxScanBufferSize is the maximum buffer size for the line scanner.
+// The default bufio.Scanner buffer is 64KB which can be too small for
+// lines with long JSON payloads or base64-encoded data.
+const maxScanBufferSize = 1024 * 1024 // 1MB
+
 // ExecStream runs a command and calls onOutput for each stdout line.
 // It uses the client's default command timeout.
+// Deprecated: use ExecStreamLines for stdout and stderr capture.
 func (c *Client) ExecStream(cmd string, onOutput func(line string)) error {
 	return c.ExecStreamContext(context.Background(), cmd, onOutput)
 }
 
 // ExecStreamContext runs a command with the supplied parent context for
 // cancellation and calls onOutput for each stdout line.
+// Deprecated: use ExecStreamLinesContext for stdout and stderr capture.
 func (c *Client) ExecStreamContext(ctx context.Context, cmd string, onOutput func(line string)) error {
 	return c.ExecStreamContextWithTimeout(ctx, cmd, c.timeouts.Command, onOutput)
 }
 
 // ExecStreamWithTimeout runs a command with a custom timeout and calls
 // onOutput for each stdout line.
+// Deprecated: use ExecStreamLinesWithTimeout for stdout and stderr capture.
 func (c *Client) ExecStreamWithTimeout(cmd string, timeout time.Duration, onOutput func(line string)) error {
 	return c.ExecStreamContextWithTimeout(context.Background(), cmd, timeout, onOutput)
 }
 
-// ExecStreamContextWithTimeout is the primary streaming execution method.
-// It combines a parent context with a per-command timeout.
+// ExecStreamContextWithTimeout is the primary streaming execution method
+// for the stdout-only callback API. It combines a parent context with a
+// per-command timeout. For stderr capture, use ExecStreamLinesContextWithTimeout.
 func (c *Client) ExecStreamContextWithTimeout(ctx context.Context, cmd string, timeout time.Duration, onOutput func(line string)) error {
+	return c.ExecStreamLinesContextWithTimeout(ctx, cmd, timeout, func(source StreamSource, line string) {
+		if source == StreamStdout {
+			onOutput(line)
+		}
+	})
+}
+
+// ExecStreamLines runs a command and calls onOutput for each output line
+// from both stdout and stderr. It uses the client's default command timeout.
+func (c *Client) ExecStreamLines(cmd string, onOutput StreamCallback) error {
+	return c.ExecStreamLinesContext(context.Background(), cmd, onOutput)
+}
+
+// ExecStreamLinesContext runs a command with the supplied parent context
+// for cancellation and calls onOutput for each output line from both
+// stdout and stderr.
+func (c *Client) ExecStreamLinesContext(ctx context.Context, cmd string, onOutput StreamCallback) error {
+	return c.ExecStreamLinesContextWithTimeout(ctx, cmd, c.timeouts.Command, onOutput)
+}
+
+// ExecStreamLinesWithTimeout runs a command with a custom timeout and
+// calls onOutput for each output line from both stdout and stderr.
+func (c *Client) ExecStreamLinesWithTimeout(cmd string, timeout time.Duration, onOutput StreamCallback) error {
+	return c.ExecStreamLinesContextWithTimeout(context.Background(), cmd, timeout, onOutput)
+}
+
+// ExecStreamLinesContextWithTimeout is the primary streaming execution method
+// that captures both stdout and stderr. It combines a parent context with a
+// per-command timeout. Whichever fires first cancels the command.
+// A timeout of 0 means no explicit timeout — only the parent context applies.
+func (c *Client) ExecStreamLinesContextWithTimeout(ctx context.Context, cmd string, timeout time.Duration, onOutput StreamCallback) error {
 	c.touch()
 
 	var execCtx context.Context
@@ -307,6 +361,10 @@ func (c *Client) ExecStreamContextWithTimeout(ctx context.Context, cmd string, t
 	if err != nil {
 		return err
 	}
+	stderr, err := session.StderrPipe()
+	if err != nil {
+		return err
+	}
 
 	if err := session.Start(cmd); err != nil {
 		if execCtx.Err() != nil {
@@ -315,14 +373,33 @@ func (c *Client) ExecStreamContextWithTimeout(ctx context.Context, cmd string, t
 		return err
 	}
 
+	// Scan stderr in a goroutine so we can interleave stdout and stderr
+	// without blocking on either pipe.
+	stderrDone := make(chan error, 1)
+	go func() {
+		scanner := bufio.NewScanner(stderr)
+		scanner.Buffer(make([]byte, 0, maxScanBufferSize), maxScanBufferSize)
+		for scanner.Scan() {
+			onOutput(StreamStderr, scanner.Text())
+		}
+		stderrDone <- scanner.Err()
+	}()
+
+	// Scan stdout in the current goroutine.
 	scanner := bufio.NewScanner(stdout)
+	scanner.Buffer(make([]byte, 0, maxScanBufferSize), maxScanBufferSize)
 	for scanner.Scan() {
-		onOutput(scanner.Text())
+		onOutput(StreamStdout, scanner.Text())
 	}
 	if execCtx.Err() != nil {
 		return execCtx.Err()
 	}
 	if err := scanner.Err(); err != nil {
+		return err
+	}
+
+	// Wait for stderr scanner to finish.
+	if err := <-stderrDone; err != nil {
 		return err
 	}
 
