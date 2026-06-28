@@ -7,7 +7,8 @@ import (
 
 func TestConfigsCollector(t *testing.T) {
 	ssh := newMockSSH()
-	ssh.execOutput["find /etc/nginx -type f 2>/dev/null"] = "/etc/nginx/nginx.conf\n/etc/nginx/conf.d/default.conf\n"
+	// Path is shell-quoted in the find command
+	ssh.execOutput["find '/etc/nginx' -type f 2>/dev/null"] = "/etc/nginx/nginx.conf\n/etc/nginx/conf.d/default.conf\n"
 	ssh.downloadData["/etc/nginx/nginx.conf"] = []byte("worker_processes auto;\n")
 	ssh.downloadData["/etc/nginx/conf.d/default.conf"] = []byte("server { listen 80; }\n")
 

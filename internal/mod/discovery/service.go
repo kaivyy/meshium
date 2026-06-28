@@ -243,11 +243,12 @@ func (s *Service) RunConnectionTest(ctx context.Context, serverID int, onStep St
 				bPort = 22
 			}
 			bastionCfg := &modssh.BastionConfig{
-				Host:       bastion.Host,
-				Port:       bPort,
-				Username:   bastion.Username,
-				Password:   bPassword,
-				Passphrase: bPassphrase,
+				Host:            bastion.Host,
+				Port:            bPort,
+				Username:        bastion.Username,
+				Password:        bPassword,
+				Passphrase:      bPassphrase,
+				HostKeyCallback: s.hosts.MakeHostKeyCallback(bastion.ID),
 			}
 			if bSSHKey != "" {
 				bastionCfg.PrivateKey = []byte(bSSHKey)

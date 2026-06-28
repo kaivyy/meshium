@@ -97,14 +97,35 @@ func (h *Handler) handleList(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *Handler) handleCreate(w http.ResponseWriter, r *http.Request) {
+	shared.LimitRequestBody(r)
 	var req CreateRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		shared.WriteError(w, http.StatusBadRequest, "invalid request body", "VALIDATION_ERROR")
 		return
 	}
 
-	if req.Name == "" || req.Host == "" || req.Username == "" {
-		shared.WriteError(w, http.StatusBadRequest, "name, host, and username are required", "VALIDATION_ERROR")
+	if !shared.ValidateRequiredString(req.Name, shared.MaxFieldNameLength) {
+		shared.WriteError(w, http.StatusBadRequest, "name is required and must be at most 255 characters", "VALIDATION_ERROR")
+		return
+	}
+	if !shared.ValidateRequiredString(req.Host, shared.MaxFieldNameLength) {
+		shared.WriteError(w, http.StatusBadRequest, "host is required and must be at most 255 characters", "VALIDATION_ERROR")
+		return
+	}
+	if !shared.ValidateRequiredString(req.Username, shared.MaxFieldNameLength) {
+		shared.WriteError(w, http.StatusBadRequest, "username is required and must be at most 255 characters", "VALIDATION_ERROR")
+		return
+	}
+	if !shared.ValidateOptionalString(req.Description, shared.MaxDescriptionLength) {
+		shared.WriteError(w, http.StatusBadRequest, "description must be at most 1024 characters", "VALIDATION_ERROR")
+		return
+	}
+	if req.Port != 0 && !shared.ValidatePort(req.Port) {
+		shared.WriteError(w, http.StatusBadRequest, "port must be between 1 and 65535", "VALIDATION_ERROR")
+		return
+	}
+	if !shared.ValidateTags(req.Tags) {
+		shared.WriteError(w, http.StatusBadRequest, "invalid tags — max 20 tags, 64 characters each", "VALIDATION_ERROR")
 		return
 	}
 
@@ -132,9 +153,36 @@ func (h *Handler) handleGet(w http.ResponseWriter, r *http.Request, id int) {
 }
 
 func (h *Handler) handleUpdate(w http.ResponseWriter, r *http.Request, id int) {
+	shared.LimitRequestBody(r)
 	var req UpdateRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		shared.WriteError(w, http.StatusBadRequest, "invalid request body", "VALIDATION_ERROR")
+		return
+	}
+
+	// Validate provided fields
+	if req.Name != nil && !shared.ValidateRequiredString(*req.Name, shared.MaxFieldNameLength) {
+		shared.WriteError(w, http.StatusBadRequest, "name must be non-empty and at most 255 characters", "VALIDATION_ERROR")
+		return
+	}
+	if req.Host != nil && !shared.ValidateRequiredString(*req.Host, shared.MaxFieldNameLength) {
+		shared.WriteError(w, http.StatusBadRequest, "host must be non-empty and at most 255 characters", "VALIDATION_ERROR")
+		return
+	}
+	if req.Username != nil && !shared.ValidateRequiredString(*req.Username, shared.MaxFieldNameLength) {
+		shared.WriteError(w, http.StatusBadRequest, "username must be non-empty and at most 255 characters", "VALIDATION_ERROR")
+		return
+	}
+	if req.Description != nil && !shared.ValidateOptionalString(*req.Description, shared.MaxDescriptionLength) {
+		shared.WriteError(w, http.StatusBadRequest, "description must be at most 1024 characters", "VALIDATION_ERROR")
+		return
+	}
+	if req.Port != nil && !shared.ValidatePort(*req.Port) {
+		shared.WriteError(w, http.StatusBadRequest, "port must be between 1 and 65535", "VALIDATION_ERROR")
+		return
+	}
+	if req.Tags != nil && !shared.ValidateTags(*req.Tags) {
+		shared.WriteError(w, http.StatusBadRequest, "invalid tags — max 20 tags, 64 characters each", "VALIDATION_ERROR")
 		return
 	}
 

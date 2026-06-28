@@ -13,6 +13,11 @@ type AuthStatus struct {
 	Locked bool `json:"locked"`
 }
 
+type AuthResponse struct {
+	Status       string `json:"status"`
+	SessionToken string `json:"sessionToken,omitempty"`
+}
+
 type SSHKeyResponse struct {
 	PublicKey string `json:"publicKey"`
 }

@@ -9,7 +9,7 @@ func TestUsersCollector(t *testing.T) {
 	ssh := newMockSSH()
 	ssh.execOutput["cat /etc/passwd"] = "root:x:0:0:root:/root:/bin/bash\nwww-data:x:33:33:www-data:/var/www:/usr/sbin/nologin\nappuser:x:1000:1000:App User:/home/appuser:/bin/bash\ndeploy:x:1001:1001:Deploy:/home/deploy:/bin/bash\n"
 	ssh.execOutput["cat /etc/group"] = "root:x:0:\nappuser:x:1000:\ndeploy:x:1001:\n"
-	ssh.execOutput["crontab -u appuser -l 2>/dev/null"] = "0 2 * * * /usr/bin/backup.sh\n"
+	ssh.execOutput["crontab -u 'appuser' -l 2>/dev/null"] = "0 2 * * * /usr/bin/backup.sh\n"
 	ssh.execOutput["iptables-save 2>/dev/null || ufw status 2>/dev/null"] = "*filter\n:INPUT ACCEPT [0:0]\nCOMMIT\n"
 
 	collector := &UsersCollector{}

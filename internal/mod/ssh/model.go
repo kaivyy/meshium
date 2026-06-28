@@ -1,6 +1,10 @@
 package ssh
 
-import "time"
+import (
+	"time"
+
+	xssh "golang.org/x/crypto/ssh"
+)
 
 // ServerConfig holds the connection parameters for a server.
 type ServerConfig struct {
@@ -16,12 +20,13 @@ type ServerConfig struct {
 
 // BastionConfig holds connection parameters for a bastion/jump host.
 type BastionConfig struct {
-	Host       string
-	Port       int
-	Username   string
-	Password   string
-	PrivateKey []byte
-	Passphrase string
+	Host            string
+	Port            int
+	Username        string
+	Password        string
+	PrivateKey      []byte
+	Passphrase      string
+	HostKeyCallback xssh.HostKeyCallback // optional: if nil, connection will fail
 }
 
 // ConnectResult holds the result of a connection attempt.

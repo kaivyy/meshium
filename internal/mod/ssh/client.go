@@ -123,9 +123,13 @@ func connect(cfg ServerConfig, hostKeyCallback ssh.HostKeyCallback) (*Client, er
 
 // dialBastion establishes a connection to the bastion/jump host.
 func dialBastion(b *BastionConfig) (*ssh.Client, error) {
+	if b.HostKeyCallback == nil {
+		return nil, fmt.Errorf("bastion host key callback is required — refusing to connect without host key verification")
+	}
+
 	bastionConfig := &ssh.ClientConfig{
 		User:            b.Username,
-		HostKeyCallback: ssh.InsecureIgnoreHostKey(), // bastion keys are verified separately
+		HostKeyCallback: b.HostKeyCallback,
 		Timeout:         10 * time.Second,
 	}
 

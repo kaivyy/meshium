@@ -5,6 +5,8 @@ import (
 	"encoding/json"
 	"fmt"
 	"strings"
+
+	"meshium/internal/shared"
 )
 
 // DockerContainer represents a running container on the source server.
@@ -81,7 +83,7 @@ func (c *DockerCollector) Collect(ssh SSHExecuter) (CategoryData, error) {
 			}
 
 			// Collect env vars for the container
-			envOut, _, _, _ := ssh.Exec(fmt.Sprintf("docker inspect --format '{{range .Config.Env}}{{println .}}{{end}}' %s 2>/dev/null", container.ID))
+			envOut, _, _, _ := ssh.Exec(fmt.Sprintf("docker inspect --format '{{range .Config.Env}}{{println .}}{{end}}' %s 2>/dev/null", shared.ShellQuote(container.ID)))
 			if strings.TrimSpace(envOut) != "" {
 				container.Env = make(map[string]string)
 				for _, envLine := range strings.Split(strings.TrimSpace(envOut), "\n") {
@@ -96,7 +98,7 @@ func (c *DockerCollector) Collect(ssh SSHExecuter) (CategoryData, error) {
 			}
 
 			// Collect labels
-			labelOut, _, _, _ := ssh.Exec(fmt.Sprintf("docker inspect --format '{{range $k, $v := .Config.Labels}}{{println $k \"=\" $v}}{{end}}' %s 2>/dev/null", container.ID))
+			labelOut, _, _, _ := ssh.Exec(fmt.Sprintf("docker inspect --format '{{range $k, $v := .Config.Labels}}{{println $k \"=\" $v}}{{end}}' %s 2>/dev/null", shared.ShellQuote(container.ID)))
 			if strings.TrimSpace(labelOut) != "" {
 				container.Labels = make(map[string]string)
 				for _, labelLine := range strings.Split(strings.TrimSpace(labelOut), "\n") {
@@ -250,7 +252,7 @@ func (a *DockerApplier) Apply(ssh SSHExecuter, data CategoryData, onProgress Ste
 				Value:  fmt.Sprintf("Pulling image %d/%d: %s", i+1, len(dd.Images), image),
 			})
 		}
-		_, stderr, exitCode, _ := ssh.Exec(fmt.Sprintf("docker pull %s 2>&1", image))
+		_, stderr, exitCode, _ := ssh.Exec(fmt.Sprintf("docker pull %s 2>&1", shared.ShellQuote(image)))
 		if exitCode != 0 && onProgress != nil {
 			onProgress(WSMessage{
 				Step:   "docker:apply",
@@ -262,7 +264,7 @@ func (a *DockerApplier) Apply(ssh SSHExecuter, data CategoryData, onProgress Ste
 
 	// 3. Create volumes
 	for _, vol := range dd.Volumes {
-		_, _, _, _ = ssh.Exec(fmt.Sprintf("docker volume create %s 2>/dev/null", vol.Name))
+		_, _, _, _ = ssh.Exec(fmt.Sprintf("docker volume create %s 2>/dev/null", shared.ShellQuote(vol.Name)))
 	}
 
 	// 4. Recreate containers from compose files
@@ -278,7 +280,7 @@ func (a *DockerApplier) Apply(ssh SSHExecuter, data CategoryData, onProgress Ste
 		if idx := strings.LastIndex(dir, "/"); idx >= 0 {
 			dir = dir[:idx]
 		}
-		_, stderr, exitCode, _ := ssh.Exec(fmt.Sprintf("cd %s && docker compose up -d 2>&1 || docker-compose up -d 2>&1", dir))
+		_, stderr, exitCode, _ := ssh.Exec(fmt.Sprintf("cd %s && docker compose up -d 2>&1 || docker-compose up -d 2>&1", shared.ShellQuote(dir)))
 		if exitCode != 0 && onProgress != nil {
 			onProgress(WSMessage{
 				Step:   "docker:apply",
@@ -299,18 +301,18 @@ func (a *DockerApplier) Apply(ssh SSHExecuter, data CategoryData, onProgress Ste
 				})
 			}
 			// Build docker run command from collected data
-			cmd := fmt.Sprintf("docker run -d --name %s", container.Name)
+			cmd := fmt.Sprintf("docker run -d --name %s", shared.ShellQuote(container.Name))
 			if container.Env != nil {
 				for k, v := range container.Env {
-					cmd += fmt.Sprintf(" -e %s=%s", k, v)
+					cmd += fmt.Sprintf(" -e %s=%s", shared.ShellQuote(k), shared.ShellQuote(v))
 				}
 			}
 			if container.Labels != nil {
 				for k, v := range container.Labels {
-					cmd += fmt.Sprintf(" --label %s=%s", k, v)
+					cmd += fmt.Sprintf(" --label %s=%s", shared.ShellQuote(k), shared.ShellQuote(v))
 				}
 			}
-			cmd += fmt.Sprintf(" %s", container.Image)
+			cmd += fmt.Sprintf(" %s", shared.ShellQuote(container.Image))
 			_, stderr, exitCode, _ := ssh.Exec(cmd + " 2>&1")
 			if exitCode != 0 && onProgress != nil {
 				onProgress(WSMessage{
@@ -353,7 +355,7 @@ func (a *DockerApplier) Rollback(ssh SSHExecuter, backup BackupData) error {
 	// Remove containers that weren't in the backup
 	for name := range currentContainers {
 		if !contains(db.Containers, name) {
-			ssh.Exec(fmt.Sprintf("docker rm -f %s 2>/dev/null", name))
+			ssh.Exec(fmt.Sprintf("docker rm -f %s 2>/dev/null", shared.ShellQuote(name)))
 		}
 	}
 
@@ -370,7 +372,7 @@ func (a *DockerApplier) Rollback(ssh SSHExecuter, backup BackupData) error {
 	// Remove images that weren't in the backup
 	for image := range currentImages {
 		if !contains(db.Images, image) {
-			ssh.Exec(fmt.Sprintf("docker rmi %s 2>/dev/null", image))
+			ssh.Exec(fmt.Sprintf("docker rmi %s 2>/dev/null", shared.ShellQuote(image)))
 		}
 	}
 
@@ -387,7 +389,7 @@ func (a *DockerApplier) Rollback(ssh SSHExecuter, backup BackupData) error {
 	// Remove volumes that weren't in the backup
 	for vol := range currentVolumes {
 		if !contains(db.Volumes, vol) {
-			ssh.Exec(fmt.Sprintf("docker volume rm %s 2>/dev/null", vol))
+			ssh.Exec(fmt.Sprintf("docker volume rm %s 2>/dev/null", shared.ShellQuote(vol)))
 		}
 	}
 

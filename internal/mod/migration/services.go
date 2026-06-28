@@ -4,6 +4,8 @@ import (
 	"encoding/json"
 	"fmt"
 	"strings"
+
+	"meshium/internal/shared"
 )
 
 // ServicesData holds the collected service list from the source server.
@@ -179,7 +181,7 @@ func (a *ServicesApplier) Rollback(ssh SSHExecuter, backup BackupData) error {
 	// Disable services that are enabled now but weren't in the backup
 	for svc := range currentServices {
 		if !contains(sb.Services, svc) {
-			ssh.Exec(fmt.Sprintf("systemctl disable --now %s 2>/dev/null", svc))
+			ssh.Exec(fmt.Sprintf("systemctl disable --now %s 2>/dev/null", shared.ShellQuote(svc)))
 		}
 	}
 
