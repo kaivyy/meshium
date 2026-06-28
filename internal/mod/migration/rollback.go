@@ -119,7 +119,7 @@ func (rm *RollbackManager) Rollback(ctx context.Context, migrationID int, onProg
 		}
 
 		// Rollback
-		err := mod.Applier.Rollback(sshClient, backupData)
+		err := mod.Applier.Rollback(ctx, sshClient, backupData)
 		if err != nil {
 			onProgress(WSMessage{
 				Step:   "rollback:" + backup.Category,

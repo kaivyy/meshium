@@ -2,6 +2,7 @@ package migration
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"fmt"
 	"strings"
@@ -69,7 +70,7 @@ type ConfigsCollector struct {
 }
 
 // Collect downloads config files from the source server.
-func (c *ConfigsCollector) Collect(ssh SSHExecuter) (CategoryData, error) {
+func (c *ConfigsCollector) Collect(ctx context.Context, ssh SSHExecuter) (CategoryData, error) {
 	paths := c.Paths
 	if len(paths) == 0 {
 		paths = []string{"/etc/"}
@@ -81,7 +82,7 @@ func (c *ConfigsCollector) Collect(ssh SSHExecuter) (CategoryData, error) {
 
 	for _, path := range paths {
 		// List files in the directory
-		stdout, _, _, err := ssh.Exec(fmt.Sprintf("find %s -type f 2>/dev/null", shared.ShellQuote(strings.TrimRight(path, "/"))))
+		stdout, _, _, err := ssh.ExecContext(ctx, fmt.Sprintf("find %s -type f 2>/dev/null", shared.ShellQuote(strings.TrimRight(path, "/"))))
 		if err != nil {
 			continue // non-fatal
 		}
@@ -116,13 +117,13 @@ func (c *ConfigsCollector) Collect(ssh SSHExecuter) (CategoryData, error) {
 type ConfigsApplier struct{}
 
 // Backup saves the target's current config files.
-func (a *ConfigsApplier) Backup(ssh SSHExecuter) (BackupData, error) {
+func (a *ConfigsApplier) Backup(ctx context.Context, ssh SSHExecuter) (BackupData, error) {
 	backup := ConfigsBackup{
 		Files: make(map[string][]byte),
 	}
 
 	// Backup /etc/ on the target
-	stdout, _, _, err := ssh.Exec("find /etc -type f 2>/dev/null")
+	stdout, _, _, err := ssh.ExecContext(ctx, "find /etc -type f 2>/dev/null")
 	if err != nil {
 		return BackupData{}, err
 	}
@@ -148,7 +149,7 @@ func (a *ConfigsApplier) Backup(ssh SSHExecuter) (BackupData, error) {
 }
 
 // Apply uploads config files to the target server.
-func (a *ConfigsApplier) Apply(ssh SSHExecuter, data CategoryData, onProgress StepCallback) error {
+func (a *ConfigsApplier) Apply(ctx context.Context, ssh SSHExecuter, data CategoryData, onProgress StepCallback) error {
 	var cd ConfigsData
 	if err := json.Unmarshal(data.Data, &cd); err != nil {
 		return err
@@ -207,7 +208,7 @@ func (a *ConfigsApplier) Apply(ssh SSHExecuter, data CategoryData, onProgress St
 }
 
 // Rollback restores the target's original config files.
-func (a *ConfigsApplier) Rollback(ssh SSHExecuter, backup BackupData) error {
+func (a *ConfigsApplier) Rollback(ctx context.Context, ssh SSHExecuter, backup BackupData) error {
 	var cb ConfigsBackup
 	if err := json.Unmarshal(backup.Data, &cb); err != nil {
 		return err

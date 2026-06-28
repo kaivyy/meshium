@@ -130,7 +130,7 @@ func (e *Executor) Execute(ctx context.Context, migrationID int, onProgress Step
 			Value:  "Backing up " + catName + "...",
 		})
 
-		backup, err := mod.Applier.Backup(sshClient)
+		backup, err := mod.Applier.Backup(ctx, sshClient)
 		if err != nil {
 			onProgress(WSMessage{
 				Step:   "backup:" + catName,
@@ -181,7 +181,7 @@ func (e *Executor) Execute(ctx context.Context, migrationID int, onProgress Step
 		})
 
 		// Apply
-		err := mod.Applier.Apply(sshClient, data, func(msg WSMessage) {
+		err := mod.Applier.Apply(ctx, sshClient, data, func(msg WSMessage) {
 			msg.Step = "apply:" + step.Category + ":" + msg.Step
 			onProgress(msg)
 		})
@@ -199,7 +199,7 @@ func (e *Executor) Execute(ctx context.Context, migrationID int, onProgress Step
 					Status: "progress",
 					Value:  "Rolling back " + step.Category + "...",
 				})
-				mod.Applier.Rollback(sshClient, backup)
+				mod.Applier.Rollback(ctx, sshClient, backup)
 				onProgress(WSMessage{
 					Step:   "rollback:" + step.Category,
 					Status: "success",

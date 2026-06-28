@@ -1,6 +1,7 @@
 package migration
 
 import (
+	"context"
 	"encoding/json"
 	"testing"
 )
@@ -13,7 +14,7 @@ func TestConfigsCollector(t *testing.T) {
 	ssh.downloadData["/etc/nginx/conf.d/default.conf"] = []byte("server { listen 80; }\n")
 
 	collector := &ConfigsCollector{Paths: []string{"/etc/nginx/"}}
-	data, err := collector.Collect(ssh)
+	data, err := collector.Collect(context.Background(), ssh)
 	if err != nil {
 		t.Fatalf("Collect failed: %v", err)
 	}
@@ -41,7 +42,7 @@ func TestConfigsApplierApply(t *testing.T) {
 
 	var progressMsgs []WSMessage
 	applier := &ConfigsApplier{}
-	err := applier.Apply(ssh, CategoryData{Type: "configs", Data: raw}, func(msg WSMessage) {
+	err := applier.Apply(context.Background(), ssh, CategoryData{Type: "configs", Data: raw}, func(msg WSMessage) {
 		progressMsgs = append(progressMsgs, msg)
 	})
 	if err != nil {
@@ -70,7 +71,7 @@ func TestConfigsApplierRollback(t *testing.T) {
 	raw, _ := json.Marshal(cb)
 
 	applier := &ConfigsApplier{}
-	err := applier.Rollback(ssh, BackupData{Type: "configs", Data: raw})
+	err := applier.Rollback(context.Background(), ssh, BackupData{Type: "configs", Data: raw})
 	if err != nil {
 		t.Fatalf("Rollback failed: %v", err)
 	}

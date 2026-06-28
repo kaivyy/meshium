@@ -114,7 +114,7 @@ func (p *Planner) Plan(ctx context.Context, req PlanRequest, onProgress StepCall
 			}
 		}
 
-		data, err := mod.Collector.Collect(sshClient)
+		data, err := mod.Collector.Collect(ctx, sshClient)
 		if err != nil {
 			onProgress(WSMessage{
 				Step:   "plan:" + catName,

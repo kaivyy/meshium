@@ -1,6 +1,7 @@
 package migration
 
 import (
+	"context"
 	"encoding/json"
 	"testing"
 )
@@ -11,7 +12,7 @@ func TestPackagesCollectorApt(t *testing.T) {
 	ssh.execOutput["dpkg -l"] = "ii  nginx    1.18.0-0ubuntu1   amd64   [installed]\nii  curl     7.81.0-1   amd64   [installed]\n"
 
 	collector := &PackagesCollector{}
-	data, err := collector.Collect(ssh)
+	data, err := collector.Collect(context.Background(), ssh)
 	if err != nil {
 		t.Fatalf("Collect failed: %v", err)
 	}
@@ -56,7 +57,7 @@ func TestPackagesApplierBackup(t *testing.T) {
 	ssh.execOutput["dpkg -l"] = "ii  curl     7.81.0-1   amd64\n"
 
 	applier := &PackagesApplier{}
-	backup, err := applier.Backup(ssh)
+	backup, err := applier.Backup(context.Background(), ssh)
 	if err != nil {
 		t.Fatalf("Backup failed: %v", err)
 	}
@@ -84,7 +85,7 @@ func TestPackagesApplierApply(t *testing.T) {
 
 	var progressMsgs []WSMessage
 	applier := &PackagesApplier{}
-	err := applier.Apply(ssh, CategoryData{Type: "packages", Data: raw}, func(msg WSMessage) {
+	err := applier.Apply(context.Background(), ssh, CategoryData{Type: "packages", Data: raw}, func(msg WSMessage) {
 		progressMsgs = append(progressMsgs, msg)
 	})
 	if err != nil {

@@ -1,6 +1,7 @@
 package migration
 
 import (
+	"context"
 	"encoding/json"
 	"testing"
 )
@@ -11,7 +12,7 @@ func TestServicesCollector(t *testing.T) {
 		"nginx.service      enabled\nssh.service        enabled\n"
 
 	collector := &ServicesCollector{}
-	data, err := collector.Collect(ssh)
+	data, err := collector.Collect(context.Background(), ssh)
 	if err != nil {
 		t.Fatalf("Collect failed: %v", err)
 	}
@@ -35,7 +36,7 @@ func TestServicesApplierBackup(t *testing.T) {
 		"nginx.service      enabled\n"
 
 	applier := &ServicesApplier{}
-	backup, err := applier.Backup(ssh)
+	backup, err := applier.Backup(context.Background(), ssh)
 	if err != nil {
 		t.Fatalf("Backup failed: %v", err)
 	}
@@ -58,7 +59,7 @@ func TestServicesApplierApply(t *testing.T) {
 
 	var progressMsgs []WSMessage
 	applier := &ServicesApplier{}
-	err := applier.Apply(ssh, CategoryData{Type: "services", Data: raw}, func(msg WSMessage) {
+	err := applier.Apply(context.Background(), ssh, CategoryData{Type: "services", Data: raw}, func(msg WSMessage) {
 		progressMsgs = append(progressMsgs, msg)
 	})
 	if err != nil {

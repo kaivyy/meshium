@@ -1,6 +1,7 @@
 package migration
 
 import (
+	"context"
 	"strings"
 	"testing"
 )
@@ -13,7 +14,7 @@ VERSION_ID="12"
 VERSION="12 (bookworm)"
 ID=debian
 VERSION_CODENAME=bookworm`
-	info, err := DetectDistro(ssh)
+	info, err := DetectDistro(context.Background(), ssh)
 	if err != nil {
 		t.Fatalf("DetectDistro failed: %v", err)
 	}
@@ -37,7 +38,7 @@ func TestDetectDistroUbuntu(t *testing.T) {
 NAME="Ubuntu"
 VERSION_ID="22.04"
 ID=ubuntu`
-	info, _ := DetectDistro(ssh)
+	info, _ := DetectDistro(context.Background(), ssh)
 	if info.Name != "ubuntu" || info.Family != "debian" || info.PackageManager != "apt" {
 		t.Errorf("ubuntu detection wrong: %+v", info)
 	}
@@ -48,7 +49,7 @@ func TestDetectDistroAlpine(t *testing.T) {
 	ssh.execOutput["cat /etc/os-release"] = `NAME="Alpine Linux"
 ID=alpine
 VERSION_ID=3.19.1`
-	info, _ := DetectDistro(ssh)
+	info, _ := DetectDistro(context.Background(), ssh)
 	if info.Name != "alpine" || info.Family != "alpine" || info.PackageManager != "apk" {
 		t.Errorf("alpine detection wrong: %+v", info)
 	}
@@ -59,7 +60,7 @@ func TestDetectDistroArch(t *testing.T) {
 	ssh.execOutput["cat /etc/os-release"] = `NAME="Arch Linux"
 ID=arch
 PRETTY_NAME="Arch Linux"`
-	info, _ := DetectDistro(ssh)
+	info, _ := DetectDistro(context.Background(), ssh)
 	if info.Name != "arch" || info.Family != "arch" || info.PackageManager != "pacman" {
 		t.Errorf("arch detection wrong: %+v", info)
 	}
@@ -70,7 +71,7 @@ func TestDetectDistroRHEL(t *testing.T) {
 	ssh.execOutput["cat /etc/os-release"] = `NAME="Red Hat Enterprise Linux"
 ID="rhel"
 VERSION_ID="9.3"`
-	info, _ := DetectDistro(ssh)
+	info, _ := DetectDistro(context.Background(), ssh)
 	if info.Name != "rhel" || info.Family != "rhel" || info.PackageManager != "dnf" {
 		t.Errorf("rhel detection wrong: %+v", info)
 	}

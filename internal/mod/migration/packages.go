@@ -1,6 +1,7 @@
 package migration
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"strings"
@@ -23,8 +24,8 @@ type PackagesBackup struct {
 type PackagesCollector struct{}
 
 // Collect detects the distro and runs the distro-specific list command.
-func (c *PackagesCollector) Collect(ssh SSHExecuter) (CategoryData, error) {
-	info, err := DetectDistro(ssh)
+func (c *PackagesCollector) Collect(ctx context.Context, ssh SSHExecuter) (CategoryData, error) {
+	info, err := DetectDistro(ctx, ssh)
 	if err != nil {
 		return CategoryData{}, err
 	}
@@ -34,7 +35,7 @@ func (c *PackagesCollector) Collect(ssh SSHExecuter) (CategoryData, error) {
 		Distro: adapter.PackageManager(),
 	}
 
-	stdout, _, _, err := ssh.Exec(adapter.ListPackages())
+	stdout, _, _, err := ssh.ExecContext(ctx, adapter.ListPackages())
 	if err != nil {
 		return CategoryData{}, err
 	}
@@ -107,14 +108,14 @@ func parsePackageList(stdout, pm string) []string {
 type PackagesApplier struct{}
 
 // Backup saves the target's current package list.
-func (a *PackagesApplier) Backup(ssh SSHExecuter) (BackupData, error) {
-	info, err := DetectDistro(ssh)
+func (a *PackagesApplier) Backup(ctx context.Context, ssh SSHExecuter) (BackupData, error) {
+	info, err := DetectDistro(ctx, ssh)
 	if err != nil {
 		return BackupData{}, err
 	}
 	adapter := GetAdapter(info)
 
-	stdout, _, _, err := ssh.Exec(adapter.ListPackages())
+	stdout, _, _, err := ssh.ExecContext(ctx, adapter.ListPackages())
 	if err != nil {
 		return BackupData{}, err
 	}
@@ -129,13 +130,13 @@ func (a *PackagesApplier) Backup(ssh SSHExecuter) (BackupData, error) {
 }
 
 // Apply installs packages on the target, skipping already-installed ones.
-func (a *PackagesApplier) Apply(ssh SSHExecuter, data CategoryData, onProgress StepCallback) error {
+func (a *PackagesApplier) Apply(ctx context.Context, ssh SSHExecuter, data CategoryData, onProgress StepCallback) error {
 	var pd PackagesData
 	if err := json.Unmarshal(data.Data, &pd); err != nil {
 		return err
 	}
 
-	info, err := DetectDistro(ssh)
+	info, err := DetectDistro(ctx, ssh)
 	if err != nil {
 		return err
 	}
@@ -143,7 +144,7 @@ func (a *PackagesApplier) Apply(ssh SSHExecuter, data CategoryData, onProgress S
 	targetPM := adapter.PackageManager()
 
 	// Get currently installed packages on target
-	stdout, _, _, _ := ssh.Exec(adapter.ListPackages())
+	stdout, _, _, _ := ssh.ExecContext(ctx, adapter.ListPackages())
 	installed := make(map[string]bool)
 	for _, pkg := range parsePackageList(stdout, targetPM) {
 		installed[pkg] = true
@@ -182,7 +183,7 @@ func (a *PackagesApplier) Apply(ssh SSHExecuter, data CategoryData, onProgress S
 		}
 		batch := packagesToInstall[i:end]
 		cmd := adapter.InstallPackages(batch)
-		_, stderr, exitCode, err := ssh.Exec(cmd)
+		_, stderr, exitCode, err := ssh.ExecContext(ctx, cmd)
 		if err != nil || exitCode != 0 {
 			if onProgress != nil {
 				onProgress(WSMessage{
@@ -214,19 +215,19 @@ func (a *PackagesApplier) Apply(ssh SSHExecuter, data CategoryData, onProgress S
 }
 
 // Rollback removes packages that were installed by the migration.
-func (a *PackagesApplier) Rollback(ssh SSHExecuter, backup BackupData) error {
+func (a *PackagesApplier) Rollback(ctx context.Context, ssh SSHExecuter, backup BackupData) error {
 	var pb PackagesBackup
 	if err := json.Unmarshal(backup.Data, &pb); err != nil {
 		return err
 	}
 
-	info, err := DetectDistro(ssh)
+	info, err := DetectDistro(ctx, ssh)
 	if err != nil {
 		return err
 	}
 	adapter := GetAdapter(info)
 
-	stdout, _, _, _ := ssh.Exec(adapter.ListPackages())
+	stdout, _, _, _ := ssh.ExecContext(ctx, adapter.ListPackages())
 	currentPackages := make(map[string]bool)
 	for _, pkg := range parsePackageList(stdout, adapter.PackageManager()) {
 		currentPackages[pkg] = true
@@ -245,7 +246,7 @@ func (a *PackagesApplier) Rollback(ssh SSHExecuter, backup BackupData) error {
 	}
 
 	cmd := adapter.RemovePackages(toRemove)
-	_, _, _, err = ssh.Exec(cmd)
+	_, _, _, err = ssh.ExecContext(ctx, cmd)
 	return err
 }
 

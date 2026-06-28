@@ -1,6 +1,7 @@
 package migration
 
 import (
+	"context"
 	"fmt"
 	"io"
 
@@ -34,6 +35,7 @@ const (
 // SSHExecuter extends discovery.SSHExecuter with SFTP operations.
 type SSHExecuter interface {
 	Exec(cmd string) (string, string, int, error)
+	ExecContext(ctx context.Context, cmd string) (string, string, int, error)
 	IsAlive() bool
 	Upload(src io.Reader, remotePath string) error
 	Download(remotePath string, dst io.Writer) error

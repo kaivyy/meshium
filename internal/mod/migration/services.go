@@ -1,6 +1,7 @@
 package migration
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"strings"
@@ -23,8 +24,8 @@ type ServicesBackup struct {
 type ServicesCollector struct{}
 
 // Collect runs systemctl list-unit-files to find enabled services.
-func (c *ServicesCollector) Collect(ssh SSHExecuter) (CategoryData, error) {
-	stdout, _, _, err := ssh.Exec("systemctl list-unit-files --type=service --state=enabled --no-legend 2>/dev/null || rc-update show 2>/dev/null")
+func (c *ServicesCollector) Collect(ctx context.Context, ssh SSHExecuter) (CategoryData, error) {
+	stdout, _, _, err := ssh.ExecContext(ctx, "systemctl list-unit-files --type=service --state=enabled --no-legend 2>/dev/null || rc-update show 2>/dev/null")
 	if err != nil {
 		return CategoryData{}, err
 	}
@@ -63,8 +64,8 @@ func (c *ServicesCollector) Collect(ssh SSHExecuter) (CategoryData, error) {
 type ServicesApplier struct{}
 
 // Backup saves the target's currently enabled services.
-func (a *ServicesApplier) Backup(ssh SSHExecuter) (BackupData, error) {
-	stdout, _, _, err := ssh.Exec("systemctl list-unit-files --type=service --state=enabled --no-legend 2>/dev/null")
+func (a *ServicesApplier) Backup(ctx context.Context, ssh SSHExecuter) (BackupData, error) {
+	stdout, _, _, err := ssh.ExecContext(ctx, "systemctl list-unit-files --type=service --state=enabled --no-legend 2>/dev/null")
 	if err != nil {
 		return BackupData{}, err
 	}
@@ -88,13 +89,13 @@ func (a *ServicesApplier) Backup(ssh SSHExecuter) (BackupData, error) {
 }
 
 // Apply enables and starts services on the target.
-func (a *ServicesApplier) Apply(ssh SSHExecuter, data CategoryData, onProgress StepCallback) error {
+func (a *ServicesApplier) Apply(ctx context.Context, ssh SSHExecuter, data CategoryData, onProgress StepCallback) error {
 	var sd ServicesData
 	if err := json.Unmarshal(data.Data, &sd); err != nil {
 		return err
 	}
 
-	info, err := DetectDistro(ssh)
+	info, err := DetectDistro(ctx, ssh)
 	if err != nil {
 		return err
 	}
@@ -110,7 +111,7 @@ func (a *ServicesApplier) Apply(ssh SSHExecuter, data CategoryData, onProgress S
 
 	for i, svc := range sd.Services {
 		// Enable the service
-		_, _, exitCode, err := ssh.Exec(adapter.EnableService(svc))
+		_, _, exitCode, err := ssh.ExecContext(ctx, adapter.EnableService(svc))
 		if err != nil || exitCode != 0 {
 			if onProgress != nil {
 				onProgress(WSMessage{
@@ -123,7 +124,7 @@ func (a *ServicesApplier) Apply(ssh SSHExecuter, data CategoryData, onProgress S
 		}
 
 		// Start the service
-		_, _, exitCode, _ = ssh.Exec(adapter.StartService(svc))
+		_, _, exitCode, _ = ssh.ExecContext(ctx, adapter.StartService(svc))
 		if exitCode != 0 {
 			if onProgress != nil {
 				onProgress(WSMessage{
@@ -156,14 +157,14 @@ func (a *ServicesApplier) Apply(ssh SSHExecuter, data CategoryData, onProgress S
 }
 
 // Rollback disables services that were enabled by the migration.
-func (a *ServicesApplier) Rollback(ssh SSHExecuter, backup BackupData) error {
+func (a *ServicesApplier) Rollback(ctx context.Context, ssh SSHExecuter, backup BackupData) error {
 	var sb ServicesBackup
 	if err := json.Unmarshal(backup.Data, &sb); err != nil {
 		return err
 	}
 
 	// Get currently enabled services
-	stdout, _, _, err := ssh.Exec("systemctl list-unit-files --type=service --state=enabled --no-legend 2>/dev/null")
+	stdout, _, _, err := ssh.ExecContext(ctx, "systemctl list-unit-files --type=service --state=enabled --no-legend 2>/dev/null")
 	if err != nil {
 		return err
 	}
@@ -181,7 +182,7 @@ func (a *ServicesApplier) Rollback(ssh SSHExecuter, backup BackupData) error {
 	// Disable services that are enabled now but weren't in the backup
 	for svc := range currentServices {
 		if !contains(sb.Services, svc) {
-			ssh.Exec(fmt.Sprintf("systemctl disable --now %s 2>/dev/null", shared.ShellQuote(svc)))
+			ssh.ExecContext(ctx, fmt.Sprintf("systemctl disable --now %s 2>/dev/null", shared.ShellQuote(svc)))
 		}
 	}
 

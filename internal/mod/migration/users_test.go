@@ -1,6 +1,7 @@
 package migration
 
 import (
+	"context"
 	"encoding/json"
 	"testing"
 )
@@ -13,7 +14,7 @@ func TestUsersCollector(t *testing.T) {
 	ssh.execOutput["iptables-save 2>/dev/null || ufw status 2>/dev/null"] = "*filter\n:INPUT ACCEPT [0:0]\nCOMMIT\n"
 
 	collector := &UsersCollector{}
-	data, err := collector.Collect(ssh)
+	data, err := collector.Collect(context.Background(), ssh)
 	if err != nil {
 		t.Fatalf("Collect failed: %v", err)
 	}
@@ -55,7 +56,7 @@ func TestUsersApplierBackup(t *testing.T) {
 	ssh.execOutput["cat /etc/shadow 2>/dev/null"] = "root:!:19000:0:99999:7:::\n"
 
 	applier := &UsersApplier{}
-	backup, err := applier.Backup(ssh)
+	backup, err := applier.Backup(context.Background(), ssh)
 	if err != nil {
 		t.Fatalf("Backup failed: %v", err)
 	}
@@ -88,7 +89,7 @@ func TestUsersApplierApply(t *testing.T) {
 
 	var progressMsgs []WSMessage
 	applier := &UsersApplier{}
-	err := applier.Apply(ssh, CategoryData{Type: "users", Data: raw}, func(msg WSMessage) {
+	err := applier.Apply(context.Background(), ssh, CategoryData{Type: "users", Data: raw}, func(msg WSMessage) {
 		progressMsgs = append(progressMsgs, msg)
 	})
 	if err != nil {

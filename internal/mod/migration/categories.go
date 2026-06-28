@@ -1,6 +1,7 @@
 package migration
 
 import (
+	"context"
 	"encoding/json"
 )
 
@@ -19,14 +20,14 @@ type BackupData struct {
 
 // Collector reads data from the source server.
 type Collector interface {
-	Collect(ssh SSHExecuter) (CategoryData, error)
+	Collect(ctx context.Context, ssh SSHExecuter) (CategoryData, error)
 }
 
 // Applier writes data to the target server.
 type Applier interface {
-	Backup(ssh SSHExecuter) (BackupData, error)
-	Apply(ssh SSHExecuter, data CategoryData, onProgress StepCallback) error
-	Rollback(ssh SSHExecuter, backup BackupData) error
+	Backup(ctx context.Context, ssh SSHExecuter) (BackupData, error)
+	Apply(ctx context.Context, ssh SSHExecuter, data CategoryData, onProgress StepCallback) error
+	Rollback(ctx context.Context, ssh SSHExecuter, backup BackupData) error
 }
 
 // CategoryModule pairs a collector with an applier.

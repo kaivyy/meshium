@@ -1,6 +1,7 @@
 package migration
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"strings"
@@ -29,13 +30,13 @@ type UsersBackup struct {
 type UsersCollector struct{}
 
 // Collect reads /etc/passwd, /etc/group, /etc/shadow, crontabs, and firewall rules.
-func (c *UsersCollector) Collect(ssh SSHExecuter) (CategoryData, error) {
+func (c *UsersCollector) Collect(ctx context.Context, ssh SSHExecuter) (CategoryData, error) {
 	data := UsersData{
 		CronJobs: make(map[string]string),
 	}
 
 	// Collect users from /etc/passwd (skip system users with UID < 1000)
-	stdout, _, _, err := ssh.Exec("cat /etc/passwd")
+	stdout, _, _, err := ssh.ExecContext(ctx, "cat /etc/passwd")
 	if err != nil {
 		return CategoryData{}, err
 	}
@@ -58,7 +59,7 @@ func (c *UsersCollector) Collect(ssh SSHExecuter) (CategoryData, error) {
 	}
 
 	// Collect groups from /etc/group
-	stdout, _, _, err = ssh.Exec("cat /etc/group")
+	stdout, _, _, err = ssh.ExecContext(ctx, "cat /etc/group")
 	if err == nil {
 		for _, line := range strings.Split(strings.TrimSpace(stdout), "\n") {
 			fields := strings.Split(line, ":")
@@ -78,14 +79,14 @@ func (c *UsersCollector) Collect(ssh SSHExecuter) (CategoryData, error) {
 
 	// Collect cron jobs for each user
 	for _, user := range data.Users {
-		stdout, _, exitCode, _ := ssh.Exec(fmt.Sprintf("crontab -u %s -l 2>/dev/null", shared.ShellQuote(user.Name)))
+		stdout, _, exitCode, _ := ssh.ExecContext(ctx, fmt.Sprintf("crontab -u %s -l 2>/dev/null", shared.ShellQuote(user.Name)))
 		if exitCode == 0 && strings.TrimSpace(stdout) != "" {
 			data.CronJobs[user.Name] = stdout
 		}
 	}
 
 	// Collect firewall rules
-	stdout, _, _, _ = ssh.Exec("iptables-save 2>/dev/null || ufw status 2>/dev/null")
+	stdout, _, _, _ = ssh.ExecContext(ctx, "iptables-save 2>/dev/null || ufw status 2>/dev/null")
 	if strings.TrimSpace(stdout) != "" {
 		data.Firewall = stdout
 	}
@@ -98,25 +99,25 @@ func (c *UsersCollector) Collect(ssh SSHExecuter) (CategoryData, error) {
 type UsersApplier struct{}
 
 // Backup saves the target's /etc/passwd, /etc/group, /etc/shadow, crontabs, and firewall rules.
-func (a *UsersApplier) Backup(ssh SSHExecuter) (BackupData, error) {
+func (a *UsersApplier) Backup(ctx context.Context, ssh SSHExecuter) (BackupData, error) {
 	backup := UsersBackup{
 		CronJobs: make(map[string]string),
 	}
 
-	stdout, _, _, err := ssh.Exec("cat /etc/passwd")
+	stdout, _, _, err := ssh.ExecContext(ctx, "cat /etc/passwd")
 	if err != nil {
 		return BackupData{}, err
 	}
 	backup.PasswdContent = stdout
 
-	stdout, _, _, _ = ssh.Exec("cat /etc/group")
+	stdout, _, _, _ = ssh.ExecContext(ctx, "cat /etc/group")
 	backup.GroupContent = stdout
 
-	stdout, _, _, _ = ssh.Exec("cat /etc/shadow 2>/dev/null")
+	stdout, _, _, _ = ssh.ExecContext(ctx, "cat /etc/shadow 2>/dev/null")
 	backup.ShadowContent = stdout
 
 	// Backup crontabs for non-system users
-	stdout, _, _, _ = ssh.Exec("cut -d: -f1 /etc/passwd | while read u; do crontab -u $u -l 2>/dev/null && echo \"---$u---\"; done")
+	stdout, _, _, _ = ssh.ExecContext(ctx, "cut -d: -f1 /etc/passwd | while read u; do crontab -u $u -l 2>/dev/null && echo \"---$u---\"; done")
 	for _, block := range strings.Split(stdout, "---") {
 		block = strings.TrimSpace(block)
 		if block == "" {
@@ -133,7 +134,7 @@ func (a *UsersApplier) Backup(ssh SSHExecuter) (BackupData, error) {
 	}
 
 	// Backup firewall rules
-	stdout, _, _, _ = ssh.Exec("iptables-save 2>/dev/null || ufw status 2>/dev/null")
+	stdout, _, _, _ = ssh.ExecContext(ctx, "iptables-save 2>/dev/null || ufw status 2>/dev/null")
 	backup.FirewallRules = stdout
 
 	raw, _ := json.Marshal(backup)
@@ -141,7 +142,7 @@ func (a *UsersApplier) Backup(ssh SSHExecuter) (BackupData, error) {
 }
 
 // Apply creates users, groups, cron jobs, and firewall rules on the target.
-func (a *UsersApplier) Apply(ssh SSHExecuter, data CategoryData, onProgress StepCallback) error {
+func (a *UsersApplier) Apply(ctx context.Context, ssh SSHExecuter, data CategoryData, onProgress StepCallback) error {
 	var ud UsersData
 	if err := json.Unmarshal(data.Data, &ud); err != nil {
 		return err
@@ -149,10 +150,10 @@ func (a *UsersApplier) Apply(ssh SSHExecuter, data CategoryData, onProgress Step
 
 	// Create groups first
 	for _, group := range ud.Groups {
-		_, _, exitCode, _ := ssh.Exec(fmt.Sprintf("groupadd -g %d %s 2>/dev/null", group.GID, shared.ShellQuote(group.Name)))
+		_, _, exitCode, _ := ssh.ExecContext(ctx, fmt.Sprintf("groupadd -g %d %s 2>/dev/null", group.GID, shared.ShellQuote(group.Name)))
 		if exitCode != 0 {
 			// Group may already exist, try to modify
-			ssh.Exec(fmt.Sprintf("groupmod -g %d %s 2>/dev/null", group.GID, shared.ShellQuote(group.Name)))
+			ssh.ExecContext(ctx, fmt.Sprintf("groupmod -g %d %s 2>/dev/null", group.GID, shared.ShellQuote(group.Name)))
 		}
 	}
 
@@ -168,7 +169,7 @@ func (a *UsersApplier) Apply(ssh SSHExecuter, data CategoryData, onProgress Step
 	for i, user := range ud.Users {
 		cmd := fmt.Sprintf("useradd -u %d -g %d -d %s -s %s -m %s 2>/dev/null",
 			user.UID, user.GID, shared.ShellQuote(user.HomeDir), shared.ShellQuote(user.Shell), shared.ShellQuote(user.Name))
-		_, _, exitCode, _ := ssh.Exec(cmd)
+		_, _, exitCode, _ := ssh.ExecContext(ctx, cmd)
 		if exitCode != 0 {
 			// User may already exist
 			if onProgress != nil {
@@ -192,13 +193,13 @@ func (a *UsersApplier) Apply(ssh SSHExecuter, data CategoryData, onProgress Step
 	// Install cron jobs
 	for user, crontab := range ud.CronJobs {
 		// Use base64 encoding to safely transfer crontab content without injection risk
-		ssh.Exec(fmt.Sprintf("%s | crontab -u %s - 2>/dev/null",
+		ssh.ExecContext(ctx, fmt.Sprintf("%s | crontab -u %s - 2>/dev/null",
 			shared.Base64EncodeForShell([]byte(crontab)), shared.ShellQuote(user)))
 	}
 
 	// Apply firewall rules
 	if ud.Firewall != "" {
-		ssh.Exec(fmt.Sprintf("%s | iptables-restore 2>/dev/null", shared.Base64EncodeForShell([]byte(ud.Firewall))))
+		ssh.ExecContext(ctx, fmt.Sprintf("%s | iptables-restore 2>/dev/null", shared.Base64EncodeForShell([]byte(ud.Firewall))))
 	}
 
 	if onProgress != nil {
@@ -213,7 +214,7 @@ func (a *UsersApplier) Apply(ssh SSHExecuter, data CategoryData, onProgress Step
 }
 
 // Rollback restores the target's original /etc/passwd, /etc/group, /etc/shadow, crontabs, and firewall.
-func (a *UsersApplier) Rollback(ssh SSHExecuter, backup BackupData) error {
+func (a *UsersApplier) Rollback(ctx context.Context, ssh SSHExecuter, backup BackupData) error {
 	var ub UsersBackup
 	if err := json.Unmarshal(backup.Data, &ub); err != nil {
 		return err
@@ -221,23 +222,23 @@ func (a *UsersApplier) Rollback(ssh SSHExecuter, backup BackupData) error {
 
 	// Restore /etc/passwd
 	if ub.PasswdContent != "" {
-		ssh.Exec("cp /etc/passwd /etc/passwd.migration_bak 2>/dev/null")
-		ssh.Exec(shared.Base64DecodeCommand("/etc/passwd", []byte(ub.PasswdContent)))
+		ssh.ExecContext(ctx, "cp /etc/passwd /etc/passwd.migration_bak 2>/dev/null")
+		ssh.ExecContext(ctx, shared.Base64DecodeCommand("/etc/passwd", []byte(ub.PasswdContent)))
 	}
 
 	// Restore /etc/group
 	if ub.GroupContent != "" {
-		ssh.Exec(shared.Base64DecodeCommand("/etc/group", []byte(ub.GroupContent)))
+		ssh.ExecContext(ctx, shared.Base64DecodeCommand("/etc/group", []byte(ub.GroupContent)))
 	}
 
 	// Restore /etc/shadow
 	if ub.ShadowContent != "" {
-		ssh.Exec(shared.Base64DecodeCommand("/etc/shadow", []byte(ub.ShadowContent)))
+		ssh.ExecContext(ctx, shared.Base64DecodeCommand("/etc/shadow", []byte(ub.ShadowContent)))
 	}
 
 	// Restore firewall rules
 	if ub.FirewallRules != "" {
-		ssh.Exec(fmt.Sprintf("%s | iptables-restore 2>/dev/null", shared.Base64EncodeForShell([]byte(ub.FirewallRules))))
+		ssh.ExecContext(ctx, fmt.Sprintf("%s | iptables-restore 2>/dev/null", shared.Base64EncodeForShell([]byte(ub.FirewallRules))))
 	}
 
 	return nil

@@ -1,6 +1,7 @@
 package discovery
 
 import (
+	"context"
 	"strings"
 	"testing"
 )
@@ -24,6 +25,10 @@ func (m *mockSSHClient) Exec(cmd string) (string, string, int, error) {
 		}
 	}
 	return "", "", 0, nil
+}
+
+func (m *mockSSHClient) ExecContext(ctx context.Context, cmd string) (string, string, int, error) {
+	return m.Exec(cmd)
 }
 
 func (m *mockSSHClient) IsAlive() bool {

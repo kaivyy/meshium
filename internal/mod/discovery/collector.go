@@ -1,6 +1,7 @@
 package discovery
 
 import (
+	"context"
 	"strconv"
 	"strings"
 )
@@ -8,6 +9,7 @@ import (
 // SSHExecuter is the interface required by the collector.
 type SSHExecuter interface {
 	Exec(cmd string) (string, string, int, error)
+	ExecContext(ctx context.Context, cmd string) (string, string, int, error)
 	IsAlive() bool
 }
 

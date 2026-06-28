@@ -99,7 +99,7 @@ func (e *Executor) DryRun(ctx context.Context, migrationID int, onProgress StepC
 			continue
 		}
 
-		changes := e.computeDryRunChanges(sshClient, step.Category, data, mod)
+		changes := e.computeDryRunChanges(ctx, sshClient, step.Category, data, mod)
 
 		result.Categories = append(result.Categories, DryRunCategory{
 			Category: step.Category,
@@ -137,36 +137,36 @@ func (e *Executor) DryRun(ctx context.Context, migrationID int, onProgress StepC
 }
 
 // computeDryRunChanges compares source data with target state for a category.
-func (e *Executor) computeDryRunChanges(ssh SSHExecuter, category string, data CategoryData, mod CategoryModule) []DryRunChange {
+func (e *Executor) computeDryRunChanges(ctx context.Context, ssh SSHExecuter, category string, data CategoryData, mod CategoryModule) []DryRunChange {
 	switch category {
 	case "packages":
-		return e.dryRunPackages(ssh, data)
+		return e.dryRunPackages(ctx, ssh, data)
 	case "configs":
-		return e.dryRunConfigs(ssh, data)
+		return e.dryRunConfigs(ctx, ssh, data)
 	case "services":
-		return e.dryRunServices(ssh, data)
+		return e.dryRunServices(ctx, ssh, data)
 	case "users":
-		return e.dryRunUsers(ssh, data)
+		return e.dryRunUsers(ctx, ssh, data)
 	case "docker":
-		return e.dryRunDocker(ssh, data)
+		return e.dryRunDocker(ctx, ssh, data)
 	default:
 		return nil
 	}
 }
 
-func (e *Executor) dryRunPackages(ssh SSHExecuter, data CategoryData) []DryRunChange {
+func (e *Executor) dryRunPackages(ctx context.Context, ssh SSHExecuter, data CategoryData) []DryRunChange {
 	var pd PackagesData
 	if err := json.Unmarshal(data.Data, &pd); err != nil {
 		return nil
 	}
 
-	info, err := DetectDistro(ssh)
+	info, err := DetectDistro(ctx, ssh)
 	if err != nil {
 		return nil
 	}
 	adapter := GetAdapter(info)
 
-	stdout, _, _, _ := ssh.Exec(adapter.ListPackages())
+	stdout, _, _, _ := ssh.ExecContext(ctx, adapter.ListPackages())
 	installed := make(map[string]bool)
 	for _, pkg := range parsePackageList(stdout, adapter.PackageManager()) {
 		installed[pkg] = true
@@ -185,7 +185,7 @@ func (e *Executor) dryRunPackages(ssh SSHExecuter, data CategoryData) []DryRunCh
 	return changes
 }
 
-func (e *Executor) dryRunConfigs(ssh SSHExecuter, data CategoryData) []DryRunChange {
+func (e *Executor) dryRunConfigs(ctx context.Context, ssh SSHExecuter, data CategoryData) []DryRunChange {
 	var cd ConfigsData
 	if err := json.Unmarshal(data.Data, &cd); err != nil {
 		return nil
@@ -214,13 +214,13 @@ func (e *Executor) dryRunConfigs(ssh SSHExecuter, data CategoryData) []DryRunCha
 	return changes
 }
 
-func (e *Executor) dryRunServices(ssh SSHExecuter, data CategoryData) []DryRunChange {
+func (e *Executor) dryRunServices(ctx context.Context, ssh SSHExecuter, data CategoryData) []DryRunChange {
 	var sd ServicesData
 	if err := json.Unmarshal(data.Data, &sd); err != nil {
 		return nil
 	}
 
-	stdout, _, _, _ := ssh.Exec("systemctl list-unit-files --type=service --state=enabled --no-legend 2>/dev/null")
+	stdout, _, _, _ := ssh.ExecContext(ctx, "systemctl list-unit-files --type=service --state=enabled --no-legend 2>/dev/null")
 	enabled := make(map[string]bool)
 	for _, line := range strings.Split(strings.TrimSpace(stdout), "\n") {
 		if strings.Contains(line, ".service") {
@@ -244,13 +244,13 @@ func (e *Executor) dryRunServices(ssh SSHExecuter, data CategoryData) []DryRunCh
 	return changes
 }
 
-func (e *Executor) dryRunUsers(ssh SSHExecuter, data CategoryData) []DryRunChange {
+func (e *Executor) dryRunUsers(ctx context.Context, ssh SSHExecuter, data CategoryData) []DryRunChange {
 	var ud UsersData
 	if err := json.Unmarshal(data.Data, &ud); err != nil {
 		return nil
 	}
 
-	stdout, _, _, _ := ssh.Exec("cat /etc/passwd")
+	stdout, _, _, _ := ssh.ExecContext(ctx, "cat /etc/passwd")
 	existingUsers := make(map[string]bool)
 	for _, line := range strings.Split(strings.TrimSpace(stdout), "\n") {
 		fields := strings.Split(line, ":")
@@ -272,14 +272,14 @@ func (e *Executor) dryRunUsers(ssh SSHExecuter, data CategoryData) []DryRunChang
 	return changes
 }
 
-func (e *Executor) dryRunDocker(ssh SSHExecuter, data CategoryData) []DryRunChange {
+func (e *Executor) dryRunDocker(ctx context.Context, ssh SSHExecuter, data CategoryData) []DryRunChange {
 	var dd DockerData
 	if err := json.Unmarshal(data.Data, &dd); err != nil {
 		return nil
 	}
 
 	// Check if Docker is installed
-	stdout, _, exitCode, _ := ssh.Exec("which docker 2>/dev/null")
+	stdout, _, exitCode, _ := ssh.ExecContext(ctx, "which docker 2>/dev/null")
 	if exitCode != 0 || strings.TrimSpace(stdout) == "" {
 		return []DryRunChange{
 			{
@@ -291,7 +291,7 @@ func (e *Executor) dryRunDocker(ssh SSHExecuter, data CategoryData) []DryRunChan
 	}
 
 	// Get existing images on target
-	stdout, _, _, _ = ssh.Exec("docker images --format '{{.Repository}}:{{.Tag}}' 2>/dev/null")
+	stdout, _, _, _ = ssh.ExecContext(ctx, "docker images --format '{{.Repository}}:{{.Tag}}' 2>/dev/null")
 	existingImages := make(map[string]bool)
 	for _, line := range strings.Split(strings.TrimSpace(stdout), "\n") {
 		line = strings.TrimSpace(line)
@@ -312,7 +312,7 @@ func (e *Executor) dryRunDocker(ssh SSHExecuter, data CategoryData) []DryRunChan
 	}
 
 	// Get existing containers
-	stdout, _, _, _ = ssh.Exec("docker ps -a --format '{{.Names}}' 2>/dev/null")
+	stdout, _, _, _ = ssh.ExecContext(ctx, "docker ps -a --format '{{.Names}}' 2>/dev/null")
 	existingContainers := make(map[string]bool)
 	for _, line := range strings.Split(strings.TrimSpace(stdout), "\n") {
 		line = strings.TrimSpace(line)

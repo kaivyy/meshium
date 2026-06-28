@@ -1,6 +1,7 @@
 package migration
 
 import (
+	"context"
 	"encoding/json"
 	"io"
 	"strings"
@@ -39,7 +40,7 @@ func TestDockerCommandInjectionPrevention(t *testing.T) {
 		execCommands: &execCommands,
 	}
 
-	err := applier.Apply(mockSSH, CategoryData{Type: "docker", Data: raw}, nil)
+	err := applier.Apply(context.Background(), mockSSH, CategoryData{Type: "docker", Data: raw}, nil)
 	if err != nil {
 		// Docker not installed is expected in test
 		if !strings.Contains(err.Error(), "docker is not installed") {
@@ -91,7 +92,7 @@ func TestUsersCommandInjectionPrevention(t *testing.T) {
 		execCommands: &execCommands,
 	}
 
-	err := applier.Apply(mockSSH, CategoryData{Type: "users", Data: raw}, nil)
+	err := applier.Apply(context.Background(), mockSSH, CategoryData{Type: "users", Data: raw}, nil)
 	if err != nil {
 		t.Fatalf("Apply failed: %v", err)
 	}
@@ -172,7 +173,7 @@ echo 'pwned' > /tmp/hacked`
 		execCommands: &execCommands,
 	}
 
-	err := applier.Apply(mockSSH, CategoryData{Type: "users", Data: raw}, nil)
+	err := applier.Apply(context.Background(), mockSSH, CategoryData{Type: "users", Data: raw}, nil)
 	if err != nil {
 		t.Fatalf("Apply failed: %v", err)
 	}
@@ -205,6 +206,10 @@ func (m *injectionTestSSH) Exec(cmd string) (string, string, int, error) {
 		return "", "", 1, nil
 	}
 	return "", "", 0, nil
+}
+
+func (m *injectionTestSSH) ExecContext(ctx context.Context, cmd string) (string, string, int, error) {
+	return m.Exec(cmd)
 }
 
 func (m *injectionTestSSH) IsAlive() bool { return true }

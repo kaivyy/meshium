@@ -70,7 +70,7 @@ func (e *Executor) PreFlight(ctx context.Context, migrationID int, onProgress St
 
 	// Check SSH connectivity with a simple command.
 	onProgress(WSMessage{Step: "preflight:ssh", Status: "progress", Value: "Verifying SSH connectivity..."})
-	stdout, stderr, exitCode, err := targetSSH.Exec("echo ok")
+	stdout, stderr, exitCode, err := targetSSH.ExecContext(ctx, "echo ok")
 	if err != nil || exitCode != 0 || strings.TrimSpace(stdout) != "ok" {
 		msg := "SSH connectivity check failed"
 		if err != nil {
@@ -86,7 +86,7 @@ func (e *Executor) PreFlight(ctx context.Context, migrationID int, onProgress St
 
 	// Check target disk space.
 	onProgress(WSMessage{Step: "preflight:disk", Status: "progress", Value: "Checking target disk space..."})
-	stdout, stderr, exitCode, err = targetSSH.Exec("df -h /")
+	stdout, stderr, exitCode, err = targetSSH.ExecContext(ctx, "df -h /")
 	if err != nil || exitCode != 0 {
 		msg := "failed to check target disk space"
 		if err != nil {
@@ -107,7 +107,7 @@ func (e *Executor) PreFlight(ctx context.Context, migrationID int, onProgress St
 	// Check OS compatibility using cached/stored source info and the live target distro.
 	onProgress(WSMessage{Step: "preflight:os", Status: "progress", Value: "Checking OS compatibility..."})
 	sourceInfo, sourceOK := e.loadStoredDistroInfo(migration.SourceID, migration, steps, "source")
-	targetInfo, targetOK := detectTargetDistroInfo(targetSSH)
+	targetInfo, targetOK := detectTargetDistroInfo(ctx, targetSSH)
 	if !targetOK {
 		addWarning("could not detect target distro")
 	} else {
@@ -126,7 +126,7 @@ func (e *Executor) PreFlight(ctx context.Context, migrationID int, onProgress St
 	var categories []string
 	if err := json.Unmarshal([]byte(migration.Categories), &categories); err == nil && contains(categories, "docker") {
 		onProgress(WSMessage{Step: "preflight:docker", Status: "progress", Value: "Checking Docker availability..."})
-		stdout, stderr, exitCode, err = targetSSH.Exec("which docker")
+		stdout, stderr, exitCode, err = targetSSH.ExecContext(ctx, "which docker")
 		if err != nil || exitCode != 0 || strings.TrimSpace(stdout) == "" {
 			msg := "docker is not installed on the target server"
 			if err != nil {
@@ -173,8 +173,8 @@ func (e *Executor) loadStoredDistroInfo(serverID int, migration *Migration, step
 	return DistroInfo{}, false
 }
 
-func detectTargetDistroInfo(ssh SSHExecuter) (DistroInfo, bool) {
-	info, err := DetectDistro(ssh)
+func detectTargetDistroInfo(ctx context.Context, ssh SSHExecuter) (DistroInfo, bool) {
+	info, err := DetectDistro(ctx, ssh)
 	if err != nil {
 		return DistroInfo{}, false
 	}

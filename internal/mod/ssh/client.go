@@ -47,7 +47,16 @@ func (c *Client) LastUsed() time.Time {
 	return c.lastUsed
 }
 
-const commandTimeout = 30 * time.Second
+const (
+	// commandTimeout is the default timeout for a single SSH command.
+	// Long enough for most discovery commands but short enough to catch
+	// hung sessions. Use ExecWithTimeout or ExecContextWithTimeout for
+	// commands that may take longer (e.g. docker pull, apt-get install).
+	commandTimeout = 30 * time.Second
+
+	// defaultExecTimeout is the fallback timeout when none is specified.
+	defaultExecTimeout = 5 * time.Minute
+)
 
 // connect establishes an SSH connection.
 // If a bastion config is provided, the connection is tunneled through the bastion.
@@ -165,11 +174,40 @@ func dialBastion(b *BastionConfig) (*ssh.Client, error) {
 	return ssh.Dial("tcp", bastionAddr, bastionConfig)
 }
 
-// Exec runs a command and returns stdout, stderr, and exit code.
+// Exec runs a command with the default timeout and returns stdout, stderr,
+// and exit code. It is a backward-compatible wrapper around ExecContextWithTimeout.
 func (c *Client) Exec(cmd string) (string, string, int, error) {
+	return c.ExecContextWithTimeout(context.Background(), cmd, commandTimeout)
+}
+
+// ExecContext runs a command with the supplied parent context for cancellation.
+// The default command timeout (commandTimeout) is applied in addition to the
+// parent context — whichever fires first wins.
+func (c *Client) ExecContext(ctx context.Context, cmd string) (string, string, int, error) {
+	return c.ExecContextWithTimeout(ctx, cmd, commandTimeout)
+}
+
+// ExecWithTimeout runs a command with a custom timeout. The parent context
+// is background, so only the timeout can cancel the command.
+func (c *Client) ExecWithTimeout(cmd string, timeout time.Duration) (string, string, int, error) {
+	return c.ExecContextWithTimeout(context.Background(), cmd, timeout)
+}
+
+// ExecContextWithTimeout is the primary command execution method. It combines
+// a parent context (for caller-driven cancellation) with a per-command timeout
+// (for hung-session protection). Whichever fires first cancels the command.
+// A timeout of 0 means no explicit timeout — only the parent context applies.
+func (c *Client) ExecContextWithTimeout(ctx context.Context, cmd string, timeout time.Duration) (string, string, int, error) {
 	c.touch()
 
-	ctx, cancel := context.WithTimeout(context.Background(), commandTimeout)
+	var execCtx context.Context
+	var cancel context.CancelFunc
+
+	if timeout > 0 {
+		execCtx, cancel = context.WithTimeout(ctx, timeout)
+	} else {
+		execCtx, cancel = context.WithCancel(ctx)
+	}
 	defer cancel()
 
 	session, err := c.conn.NewSession()
@@ -189,7 +227,7 @@ func (c *Client) Exec(cmd string) (string, string, int, error) {
 	defer close(done)
 	go func() {
 		select {
-		case <-ctx.Done():
+		case <-execCtx.Done():
 			closeSession()
 		case <-done:
 		}
@@ -200,8 +238,8 @@ func (c *Client) Exec(cmd string) (string, string, int, error) {
 	session.Stderr = &stderr
 
 	err = session.Run(cmd)
-	if ctx.Err() != nil {
-		return stdout.String(), stderr.String(), -1, ctx.Err()
+	if execCtx.Err() != nil {
+		return stdout.String(), stderr.String(), -1, execCtx.Err()
 	}
 	if err == nil {
 		return stdout.String(), stderr.String(), 0, nil
@@ -215,10 +253,36 @@ func (c *Client) Exec(cmd string) (string, string, int, error) {
 }
 
 // ExecStream runs a command and calls onOutput for each stdout line.
+// It uses the default command timeout.
 func (c *Client) ExecStream(cmd string, onOutput func(line string)) error {
+	return c.ExecStreamContext(context.Background(), cmd, onOutput)
+}
+
+// ExecStreamContext runs a command with the supplied parent context for
+// cancellation and calls onOutput for each stdout line.
+func (c *Client) ExecStreamContext(ctx context.Context, cmd string, onOutput func(line string)) error {
+	return c.ExecStreamContextWithTimeout(ctx, cmd, commandTimeout, onOutput)
+}
+
+// ExecStreamWithTimeout runs a command with a custom timeout and calls
+// onOutput for each stdout line.
+func (c *Client) ExecStreamWithTimeout(cmd string, timeout time.Duration, onOutput func(line string)) error {
+	return c.ExecStreamContextWithTimeout(context.Background(), cmd, timeout, onOutput)
+}
+
+// ExecStreamContextWithTimeout is the primary streaming execution method.
+// It combines a parent context with a per-command timeout.
+func (c *Client) ExecStreamContextWithTimeout(ctx context.Context, cmd string, timeout time.Duration, onOutput func(line string)) error {
 	c.touch()
 
-	ctx, cancel := context.WithTimeout(context.Background(), commandTimeout)
+	var execCtx context.Context
+	var cancel context.CancelFunc
+
+	if timeout > 0 {
+		execCtx, cancel = context.WithTimeout(ctx, timeout)
+	} else {
+		execCtx, cancel = context.WithCancel(ctx)
+	}
 	defer cancel()
 
 	session, err := c.conn.NewSession()
@@ -238,7 +302,7 @@ func (c *Client) ExecStream(cmd string, onOutput func(line string)) error {
 	defer close(done)
 	go func() {
 		select {
-		case <-ctx.Done():
+		case <-execCtx.Done():
 			closeSession()
 		case <-done:
 		}
@@ -250,8 +314,8 @@ func (c *Client) ExecStream(cmd string, onOutput func(line string)) error {
 	}
 
 	if err := session.Start(cmd); err != nil {
-		if ctx.Err() != nil {
-			return ctx.Err()
+		if execCtx.Err() != nil {
+			return execCtx.Err()
 		}
 		return err
 	}
@@ -260,8 +324,8 @@ func (c *Client) ExecStream(cmd string, onOutput func(line string)) error {
 	for scanner.Scan() {
 		onOutput(scanner.Text())
 	}
-	if ctx.Err() != nil {
-		return ctx.Err()
+	if execCtx.Err() != nil {
+		return execCtx.Err()
 	}
 	if err := scanner.Err(); err != nil {
 		return err

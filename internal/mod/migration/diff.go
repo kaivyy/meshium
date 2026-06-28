@@ -109,11 +109,11 @@ func (d *DiffService) Diff(ctx context.Context, sourceID, targetID int, categori
 		})
 
 		// Collect from both source and target
-		sourceData, err := mod.Collector.Collect(sourceSSH)
+		sourceData, err := mod.Collector.Collect(ctx, sourceSSH)
 		if err != nil {
 			continue
 		}
-		targetData, err := mod.Collector.Collect(targetSSH)
+		targetData, err := mod.Collector.Collect(ctx, targetSSH)
 		if err != nil {
 			continue
 		}

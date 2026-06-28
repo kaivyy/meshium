@@ -2,6 +2,7 @@ package migration
 
 import (
 	"bytes"
+	"context"
 	"io"
 	"strings"
 )
@@ -44,6 +45,10 @@ func (m *mockSSH) Exec(cmd string) (string, string, int, error) {
 		}
 	}
 	return "", "", 0, nil
+}
+
+func (m *mockSSH) ExecContext(ctx context.Context, cmd string) (string, string, int, error) {
+	return m.Exec(cmd)
 }
 
 func (m *mockSSH) IsAlive() bool { return m.alive }

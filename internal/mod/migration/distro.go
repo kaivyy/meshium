@@ -1,6 +1,7 @@
 package migration
 
 import (
+	"context"
 	"fmt"
 	"strings"
 
@@ -17,7 +18,7 @@ type DistroInfo struct {
 
 // DistroAdapter abstracts package and service management across distros.
 type DistroAdapter interface {
-	Detect(ssh SSHExecuter) (DistroInfo, error)
+	Detect(ctx context.Context, ssh SSHExecuter) (DistroInfo, error)
 	PackageManager() string
 	ListPackages() string
 	InstallPackages(pkgs []string) string
@@ -27,8 +28,8 @@ type DistroAdapter interface {
 }
 
 // DetectDistro reads /etc/os-release and returns DistroInfo.
-func DetectDistro(ssh SSHExecuter) (DistroInfo, error) {
-	stdout, _, _, err := ssh.Exec("cat /etc/os-release")
+func DetectDistro(ctx context.Context, ssh SSHExecuter) (DistroInfo, error) {
+	stdout, _, _, err := ssh.ExecContext(ctx, "cat /etc/os-release")
 	if err != nil {
 		return DistroInfo{}, fmt.Errorf("failed to read /etc/os-release: %w", err)
 	}
@@ -110,8 +111,8 @@ func GetAdapter(info DistroInfo) DistroAdapter {
 
 type aptAdapter struct{}
 
-func (a *aptAdapter) Detect(ssh SSHExecuter) (DistroInfo, error) {
-	return DetectDistro(ssh)
+func (a *aptAdapter) Detect(ctx context.Context, ssh SSHExecuter) (DistroInfo, error) {
+	return DetectDistro(ctx, ssh)
 }
 func (a *aptAdapter) PackageManager() string { return "apt" }
 func (a *aptAdapter) ListPackages() string {
@@ -134,8 +135,8 @@ func (a *aptAdapter) StartService(name string) string {
 
 type dnfAdapter struct{}
 
-func (a *dnfAdapter) Detect(ssh SSHExecuter) (DistroInfo, error) {
-	return DetectDistro(ssh)
+func (a *dnfAdapter) Detect(ctx context.Context, ssh SSHExecuter) (DistroInfo, error) {
+	return DetectDistro(ctx, ssh)
 }
 func (a *dnfAdapter) PackageManager() string { return "dnf" }
 func (a *dnfAdapter) ListPackages() string {
@@ -158,8 +159,8 @@ func (a *dnfAdapter) StartService(name string) string {
 
 type pacmanAdapter struct{}
 
-func (a *pacmanAdapter) Detect(ssh SSHExecuter) (DistroInfo, error) {
-	return DetectDistro(ssh)
+func (a *pacmanAdapter) Detect(ctx context.Context, ssh SSHExecuter) (DistroInfo, error) {
+	return DetectDistro(ctx, ssh)
 }
 func (a *pacmanAdapter) PackageManager() string { return "pacman" }
 func (a *pacmanAdapter) ListPackages() string {
@@ -182,8 +183,8 @@ func (a *pacmanAdapter) StartService(name string) string {
 
 type apkAdapter struct{}
 
-func (a *apkAdapter) Detect(ssh SSHExecuter) (DistroInfo, error) {
-	return DetectDistro(ssh)
+func (a *apkAdapter) Detect(ctx context.Context, ssh SSHExecuter) (DistroInfo, error) {
+	return DetectDistro(ctx, ssh)
 }
 func (a *apkAdapter) PackageManager() string { return "apk" }
 func (a *apkAdapter) ListPackages() string {
@@ -206,8 +207,8 @@ func (a *apkAdapter) StartService(name string) string {
 
 type zypperAdapter struct{}
 
-func (a *zypperAdapter) Detect(ssh SSHExecuter) (DistroInfo, error) {
-	return DetectDistro(ssh)
+func (a *zypperAdapter) Detect(ctx context.Context, ssh SSHExecuter) (DistroInfo, error) {
+	return DetectDistro(ctx, ssh)
 }
 func (a *zypperAdapter) PackageManager() string { return "zypper" }
 func (a *zypperAdapter) ListPackages() string {
