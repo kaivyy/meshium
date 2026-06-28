@@ -81,7 +81,7 @@ func TestKnownHostsHostKeyCallback(t *testing.T) {
 		t.Fatalf("Save failed: %v", err)
 	}
 
-	callback := store.MakeHostKeyCallback()
+	callback := store.MakeHostKeyCallback(9)
 	if err := callback("example.com", &net.TCPAddr{IP: net.ParseIP("127.0.0.1"), Port: 2222}, pubKey); err != nil {
 		t.Fatalf("callback rejected matching host key: %v", err)
 	}
@@ -91,7 +91,8 @@ func TestKnownHostsHostKeyCallback(t *testing.T) {
 		t.Fatal("expected callback to reject mismatched host key")
 	}
 
-	if err := callback("unknown.example.com", &net.TCPAddr{IP: net.ParseIP("127.0.0.1"), Port: 22}, pubKey); err == nil {
-		t.Fatal("expected callback to reject unknown host")
+	// Unknown host should be auto-accepted (not rejected)
+	if err := callback("unknown.example.com", &net.TCPAddr{IP: net.ParseIP("127.0.0.1"), Port: 22}, pubKey); err != nil {
+		t.Fatalf("expected callback to auto-accept unknown host, got error: %v", err)
 	}
 }

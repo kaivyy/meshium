@@ -80,6 +80,6 @@ func getSSHClientForServer(serverID int, srv *server.Server, srvRepo server.Repo
 		return nil, err
 	}
 
-	hostKeyCallback := hosts.MakeHostKeyCallback()
+	hostKeyCallback := hosts.MakeHostKeyCallback(serverID)
 	return pool.Get(serverID, sshConfig, hostKeyCallback)
 }

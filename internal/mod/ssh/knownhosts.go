@@ -65,8 +65,10 @@ func (s *KnownHostsStore) Save(host string, port int, key string, serverID int) 
 }
 
 // MakeHostKeyCallback returns an ssh.HostKeyCallback that validates the remote key
-// against the database-backed known hosts store.
-func (s *KnownHostsStore) MakeHostKeyCallback() ssh.HostKeyCallback {
+// against the database-backed known hosts store. If the host key is not yet known,
+// it is automatically accepted and saved (like ssh -o StrictHostKeyChecking=accept-new).
+// The serverID associates the host key with the server record.
+func (s *KnownHostsStore) MakeHostKeyCallback(serverID int) ssh.HostKeyCallback {
 	return func(hostname string, remote net.Addr, key ssh.PublicKey) error {
 		port := 22
 		if tcpAddr, ok := remote.(*net.TCPAddr); ok {
@@ -77,8 +79,14 @@ func (s *KnownHostsStore) MakeHostKeyCallback() ssh.HostKeyCallback {
 		if err != nil {
 			return err
 		}
+
+		// Auto-accept new host keys on first connection
 		if !known {
-			return errors.New("host key not found — needs verification")
+			keyStr := string(ssh.MarshalAuthorizedKey(key))
+			if saveErr := s.Save(hostname, port, keyStr, serverID); saveErr != nil {
+				return saveErr
+			}
+			return nil
 		}
 
 		storedPubKey, _, _, _, err := ssh.ParseAuthorizedKey([]byte(storedKey))

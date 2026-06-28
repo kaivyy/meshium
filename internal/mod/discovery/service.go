@@ -26,7 +26,7 @@ type ConnectionPool interface {
 
 // HostKeyStore provides host key verification callbacks.
 type HostKeyStore interface {
-	MakeHostKeyCallback() xssh.HostKeyCallback
+	MakeHostKeyCallback(serverID int) xssh.HostKeyCallback
 }
 
 type poolAdapter struct {
@@ -257,7 +257,7 @@ func (s *Service) RunConnectionTest(ctx context.Context, serverID int, onStep St
 	}
 
 	start := time.Now()
-	hostKeyCallback := s.hosts.MakeHostKeyCallback()
+	hostKeyCallback := s.hosts.MakeHostKeyCallback(serverID)
 	client, err := s.pool.Get(serverID, sshConfig, hostKeyCallback)
 	latency := time.Since(start)
 	if err != nil {
