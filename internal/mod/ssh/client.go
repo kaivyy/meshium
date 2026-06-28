@@ -64,7 +64,7 @@ func connect(cfg ServerConfig, hostKeyCallback ssh.HostKeyCallback) (*Client, er
 	}
 
 	var authMethods []ssh.AuthMethod
-	if cfg.PrivateKey != nil {
+	if len(cfg.PrivateKey) > 0 {
 		var signer ssh.Signer
 		var err error
 		if cfg.Passphrase != "" {
@@ -147,7 +147,7 @@ func dialBastion(b *BastionConfig) (*ssh.Client, error) {
 	}
 
 	var authMethods []ssh.AuthMethod
-	if b.PrivateKey != nil {
+	if len(b.PrivateKey) > 0 {
 		var signer ssh.Signer
 		var err error
 		if b.Passphrase != "" {
