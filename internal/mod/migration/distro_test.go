@@ -97,21 +97,23 @@ func TestGetAdapter(t *testing.T) {
 
 func TestAptAdapterCommands(t *testing.T) {
 	a := &aptAdapter{}
-	if !strings.Contains(a.InstallPackages([]string{"nginx", "redis"}), "nginx redis") {
-		t.Error("apt install command should contain package names")
+	// Shell-quoted: 'nginx' 'redis'
+	installCmd := a.InstallPackages([]string{"nginx", "redis"})
+	if !strings.Contains(installCmd, "'nginx'") || !strings.Contains(installCmd, "'redis'") {
+		t.Errorf("apt install command should contain shell-quoted package names, got: %s", installCmd)
 	}
-	if !strings.Contains(a.EnableService("nginx"), "systemctl enable nginx") {
-		t.Error("apt enable service command wrong")
+	if !strings.Contains(a.EnableService("nginx"), "systemctl enable 'nginx'") {
+		t.Error("apt enable service command should shell-quote service name")
 	}
 }
 
 func TestApkAdapterCommands(t *testing.T) {
 	a := &apkAdapter{}
-	if !strings.Contains(a.EnableService("sshd"), "rc-update add sshd") {
-		t.Error("apk enable service should use rc-update")
+	if !strings.Contains(a.EnableService("sshd"), "rc-update add 'sshd'") {
+		t.Error("apk enable service should use rc-update with shell-quoted name")
 	}
-	if !strings.Contains(a.StartService("sshd"), "rc-service sshd start") {
-		t.Error("apk start service should use rc-service")
+	if !strings.Contains(a.StartService("sshd"), "rc-service 'sshd' start") {
+		t.Error("apk start service should use rc-service with shell-quoted name")
 	}
 }
 

@@ -3,6 +3,8 @@ package migration
 import (
 	"fmt"
 	"strings"
+
+	"meshium/internal/shared"
 )
 
 // DistroInfo holds detected distribution information.
@@ -116,16 +118,16 @@ func (a *aptAdapter) ListPackages() string {
 	return "dpkg -l | awk 'NR>5 {print $2}'"
 }
 func (a *aptAdapter) InstallPackages(pkgs []string) string {
-	return fmt.Sprintf("apt-get install -y %s", strings.Join(pkgs, " "))
+	return fmt.Sprintf("apt-get install -y %s", shared.ShellQuoteArgs(pkgs))
 }
 func (a *aptAdapter) RemovePackages(pkgs []string) string {
-	return fmt.Sprintf("apt-get remove -y %s", strings.Join(pkgs, " "))
+	return fmt.Sprintf("apt-get remove -y %s", shared.ShellQuoteArgs(pkgs))
 }
 func (a *aptAdapter) EnableService(name string) string {
-	return fmt.Sprintf("systemctl enable %s", name)
+	return fmt.Sprintf("systemctl enable %s", shared.ShellQuote(name))
 }
 func (a *aptAdapter) StartService(name string) string {
-	return fmt.Sprintf("systemctl start %s", name)
+	return fmt.Sprintf("systemctl start %s", shared.ShellQuote(name))
 }
 
 // --- dnf/yum (RHEL/CentOS) ---
@@ -140,16 +142,16 @@ func (a *dnfAdapter) ListPackages() string {
 	return "rpm -qa --qf '%{NAME}\\n'"
 }
 func (a *dnfAdapter) InstallPackages(pkgs []string) string {
-	return fmt.Sprintf("dnf install -y %s", strings.Join(pkgs, " "))
+	return fmt.Sprintf("dnf install -y %s", shared.ShellQuoteArgs(pkgs))
 }
 func (a *dnfAdapter) RemovePackages(pkgs []string) string {
-	return fmt.Sprintf("dnf remove -y %s", strings.Join(pkgs, " "))
+	return fmt.Sprintf("dnf remove -y %s", shared.ShellQuoteArgs(pkgs))
 }
 func (a *dnfAdapter) EnableService(name string) string {
-	return fmt.Sprintf("systemctl enable %s", name)
+	return fmt.Sprintf("systemctl enable %s", shared.ShellQuote(name))
 }
 func (a *dnfAdapter) StartService(name string) string {
-	return fmt.Sprintf("systemctl start %s", name)
+	return fmt.Sprintf("systemctl start %s", shared.ShellQuote(name))
 }
 
 // --- pacman (Arch) ---
@@ -164,16 +166,16 @@ func (a *pacmanAdapter) ListPackages() string {
 	return "pacman -Q --qf '%n\\n'"
 }
 func (a *pacmanAdapter) InstallPackages(pkgs []string) string {
-	return fmt.Sprintf("pacman -S --noconfirm %s", strings.Join(pkgs, " "))
+	return fmt.Sprintf("pacman -S --noconfirm %s", shared.ShellQuoteArgs(pkgs))
 }
 func (a *pacmanAdapter) RemovePackages(pkgs []string) string {
-	return fmt.Sprintf("pacman -Rns --noconfirm %s", strings.Join(pkgs, " "))
+	return fmt.Sprintf("pacman -Rns --noconfirm %s", shared.ShellQuoteArgs(pkgs))
 }
 func (a *pacmanAdapter) EnableService(name string) string {
-	return fmt.Sprintf("systemctl enable %s", name)
+	return fmt.Sprintf("systemctl enable %s", shared.ShellQuote(name))
 }
 func (a *pacmanAdapter) StartService(name string) string {
-	return fmt.Sprintf("systemctl start %s", name)
+	return fmt.Sprintf("systemctl start %s", shared.ShellQuote(name))
 }
 
 // --- apk (Alpine) ---
@@ -188,16 +190,16 @@ func (a *apkAdapter) ListPackages() string {
 	return "apk info -v | awk '{print $1}'"
 }
 func (a *apkAdapter) InstallPackages(pkgs []string) string {
-	return fmt.Sprintf("apk add %s", strings.Join(pkgs, " "))
+	return fmt.Sprintf("apk add %s", shared.ShellQuoteArgs(pkgs))
 }
 func (a *apkAdapter) RemovePackages(pkgs []string) string {
-	return fmt.Sprintf("apk del %s", strings.Join(pkgs, " "))
+	return fmt.Sprintf("apk del %s", shared.ShellQuoteArgs(pkgs))
 }
 func (a *apkAdapter) EnableService(name string) string {
-	return fmt.Sprintf("rc-update add %s", name)
+	return fmt.Sprintf("rc-update add %s", shared.ShellQuote(name))
 }
 func (a *apkAdapter) StartService(name string) string {
-	return fmt.Sprintf("rc-service %s start", name)
+	return fmt.Sprintf("rc-service %s start", shared.ShellQuote(name))
 }
 
 // --- zypper (SUSE) ---
@@ -212,16 +214,16 @@ func (a *zypperAdapter) ListPackages() string {
 	return "zypper se --installed-only | awk 'NR>2 {print $3}'"
 }
 func (a *zypperAdapter) InstallPackages(pkgs []string) string {
-	return fmt.Sprintf("zypper install -y %s", strings.Join(pkgs, " "))
+	return fmt.Sprintf("zypper install -y %s", shared.ShellQuoteArgs(pkgs))
 }
 func (a *zypperAdapter) RemovePackages(pkgs []string) string {
-	return fmt.Sprintf("zypper remove -y %s", strings.Join(pkgs, " "))
+	return fmt.Sprintf("zypper remove -y %s", shared.ShellQuoteArgs(pkgs))
 }
 func (a *zypperAdapter) EnableService(name string) string {
-	return fmt.Sprintf("systemctl enable %s", name)
+	return fmt.Sprintf("systemctl enable %s", shared.ShellQuote(name))
 }
 func (a *zypperAdapter) StartService(name string) string {
-	return fmt.Sprintf("systemctl start %s", name)
+	return fmt.Sprintf("systemctl start %s", shared.ShellQuote(name))
 }
 
 // --- Package name mapping ---

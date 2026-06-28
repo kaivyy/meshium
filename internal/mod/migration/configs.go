@@ -5,6 +5,8 @@ import (
 	"encoding/json"
 	"fmt"
 	"strings"
+
+	"meshium/internal/shared"
 )
 
 // configExclusions is a list of file paths and directory prefixes that must
@@ -79,7 +81,7 @@ func (c *ConfigsCollector) Collect(ssh SSHExecuter) (CategoryData, error) {
 
 	for _, path := range paths {
 		// List files in the directory
-		stdout, _, _, err := ssh.Exec(fmt.Sprintf("find %s -type f 2>/dev/null", strings.TrimRight(path, "/")))
+		stdout, _, _, err := ssh.Exec(fmt.Sprintf("find %s -type f 2>/dev/null", shared.ShellQuote(strings.TrimRight(path, "/"))))
 		if err != nil {
 			continue // non-fatal
 		}

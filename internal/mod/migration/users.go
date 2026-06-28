@@ -4,6 +4,8 @@ import (
 	"encoding/json"
 	"fmt"
 	"strings"
+
+	"meshium/internal/shared"
 )
 
 // UsersData holds collected users, groups, cron jobs, and firewall rules.
@@ -76,7 +78,7 @@ func (c *UsersCollector) Collect(ssh SSHExecuter) (CategoryData, error) {
 
 	// Collect cron jobs for each user
 	for _, user := range data.Users {
-		stdout, _, exitCode, _ := ssh.Exec(fmt.Sprintf("crontab -u %s -l 2>/dev/null", user.Name))
+		stdout, _, exitCode, _ := ssh.Exec(fmt.Sprintf("crontab -u %s -l 2>/dev/null", shared.ShellQuote(user.Name)))
 		if exitCode == 0 && strings.TrimSpace(stdout) != "" {
 			data.CronJobs[user.Name] = stdout
 		}
@@ -147,10 +149,10 @@ func (a *UsersApplier) Apply(ssh SSHExecuter, data CategoryData, onProgress Step
 
 	// Create groups first
 	for _, group := range ud.Groups {
-		_, _, exitCode, _ := ssh.Exec(fmt.Sprintf("groupadd -g %d %s 2>/dev/null", group.GID, group.Name))
+		_, _, exitCode, _ := ssh.Exec(fmt.Sprintf("groupadd -g %d %s 2>/dev/null", group.GID, shared.ShellQuote(group.Name)))
 		if exitCode != 0 {
 			// Group may already exist, try to modify
-			ssh.Exec(fmt.Sprintf("groupmod -g %d %s 2>/dev/null", group.GID, group.Name))
+			ssh.Exec(fmt.Sprintf("groupmod -g %d %s 2>/dev/null", group.GID, shared.ShellQuote(group.Name)))
 		}
 	}
 
@@ -165,7 +167,7 @@ func (a *UsersApplier) Apply(ssh SSHExecuter, data CategoryData, onProgress Step
 	// Create users
 	for i, user := range ud.Users {
 		cmd := fmt.Sprintf("useradd -u %d -g %d -d %s -s %s -m %s 2>/dev/null",
-			user.UID, user.GID, user.HomeDir, user.Shell, user.Name)
+			user.UID, user.GID, shared.ShellQuote(user.HomeDir), shared.ShellQuote(user.Shell), shared.ShellQuote(user.Name))
 		_, _, exitCode, _ := ssh.Exec(cmd)
 		if exitCode != 0 {
 			// User may already exist
@@ -189,14 +191,14 @@ func (a *UsersApplier) Apply(ssh SSHExecuter, data CategoryData, onProgress Step
 
 	// Install cron jobs
 	for user, crontab := range ud.CronJobs {
-		// Write crontab to a temp file and install
-		ssh.Exec(fmt.Sprintf("echo '%s' | crontab -u %s - 2>/dev/null",
-			strings.ReplaceAll(crontab, "'", "'\\''"), user))
+		// Use base64 encoding to safely transfer crontab content without injection risk
+		ssh.Exec(fmt.Sprintf("%s | crontab -u %s - 2>/dev/null",
+			shared.Base64EncodeForShell([]byte(crontab)), shared.ShellQuote(user)))
 	}
 
 	// Apply firewall rules
 	if ud.Firewall != "" {
-		ssh.Exec("iptables-restore 2>/dev/null << 'EOF'\n" + ud.Firewall + "\nEOF")
+		ssh.Exec(fmt.Sprintf("%s | iptables-restore 2>/dev/null", shared.Base64EncodeForShell([]byte(ud.Firewall))))
 	}
 
 	if onProgress != nil {
@@ -220,22 +222,22 @@ func (a *UsersApplier) Rollback(ssh SSHExecuter, backup BackupData) error {
 	// Restore /etc/passwd
 	if ub.PasswdContent != "" {
 		ssh.Exec("cp /etc/passwd /etc/passwd.migration_bak 2>/dev/null")
-		ssh.Exec(fmt.Sprintf("cat > /etc/passwd << 'PASSWD_EOF'\n%s\nPASSWD_EOF", ub.PasswdContent))
+		ssh.Exec(shared.Base64DecodeCommand("/etc/passwd", []byte(ub.PasswdContent)))
 	}
 
 	// Restore /etc/group
 	if ub.GroupContent != "" {
-		ssh.Exec(fmt.Sprintf("cat > /etc/group << 'GROUP_EOF'\n%s\nGROUP_EOF", ub.GroupContent))
+		ssh.Exec(shared.Base64DecodeCommand("/etc/group", []byte(ub.GroupContent)))
 	}
 
 	// Restore /etc/shadow
 	if ub.ShadowContent != "" {
-		ssh.Exec(fmt.Sprintf("cat > /etc/shadow << 'SHADOW_EOF'\n%s\nSHADOW_EOF", ub.ShadowContent))
+		ssh.Exec(shared.Base64DecodeCommand("/etc/shadow", []byte(ub.ShadowContent)))
 	}
 
 	// Restore firewall rules
 	if ub.FirewallRules != "" {
-		ssh.Exec("iptables-restore 2>/dev/null << 'EOF'\n" + ub.FirewallRules + "\nEOF")
+		ssh.Exec(fmt.Sprintf("%s | iptables-restore 2>/dev/null", shared.Base64EncodeForShell([]byte(ub.FirewallRules))))
 	}
 
 	return nil
