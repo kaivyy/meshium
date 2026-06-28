@@ -1,6 +1,7 @@
 package discovery
 
 import (
+	"context"
 	"strconv"
 	"strings"
 
@@ -31,16 +32,16 @@ func NewCollector(client SSHExecuter) *Collector {
 	return &Collector{client: client}
 }
 
-func (c *Collector) runCommand(name, cmd string) StepResult {
-	stdout, _, _, err := c.client.Exec(cmd)
+func (c *Collector) runCommand(ctx context.Context, name, cmd string) StepResult {
+	stdout, _, _, err := c.client.ExecContext(ctx, cmd)
 	if err != nil {
 		return StepResult{Name: name, Error: err}
 	}
 	return StepResult{Name: name, Value: strings.TrimSpace(stdout)}
 }
 
-func (c *Collector) runIntCommand(name, cmd string) StepResult {
-	stdout, _, _, err := c.client.Exec(cmd)
+func (c *Collector) runIntCommand(ctx context.Context, name, cmd string) StepResult {
+	stdout, _, _, err := c.client.ExecContext(ctx, cmd)
 	if err != nil {
 		return StepResult{Name: name, Error: err}
 	}
@@ -53,8 +54,8 @@ func (c *Collector) runIntCommand(name, cmd string) StepResult {
 	return StepResult{Name: name, IntValue: value}
 }
 
-func (c *Collector) runFloatCommand(name, cmd string) StepResult {
-	stdout, _, _, err := c.client.Exec(cmd)
+func (c *Collector) runFloatCommand(ctx context.Context, name, cmd string) StepResult {
+	stdout, _, _, err := c.client.ExecContext(ctx, cmd)
 	if err != nil {
 		return StepResult{Name: name, Error: err}
 	}
@@ -71,12 +72,22 @@ func (c *Collector) runFloatCommand(name, cmd string) StepResult {
 
 // CollectHostname collects the host name.
 func (c *Collector) CollectHostname() StepResult {
-	return c.runCommand("hostname", "hostname")
+	return c.CollectHostnameContext(context.Background())
+}
+
+// CollectHostnameContext is the context-aware variant of CollectHostname.
+func (c *Collector) CollectHostnameContext(ctx context.Context) StepResult {
+	return c.runCommand(ctx, "hostname", "hostname")
 }
 
 // CollectOS collects the operating system pretty name.
 func (c *Collector) CollectOS() StepResult {
-	stdout, _, _, err := c.client.Exec(`cat /etc/os-release | grep PRETTY_NAME`)
+	return c.CollectOSContext(context.Background())
+}
+
+// CollectOSContext is the context-aware variant of CollectOS.
+func (c *Collector) CollectOSContext(ctx context.Context) StepResult {
+	stdout, _, _, err := c.client.ExecContext(ctx, `cat /etc/os-release | grep PRETTY_NAME`)
 	if err != nil {
 		return StepResult{Name: "os", Error: err}
 	}
@@ -92,17 +103,32 @@ func (c *Collector) CollectOS() StepResult {
 
 // CollectKernel collects the kernel release.
 func (c *Collector) CollectKernel() StepResult {
-	return c.runCommand("kernel", "uname -r")
+	return c.CollectKernelContext(context.Background())
+}
+
+// CollectKernelContext is the context-aware variant of CollectKernel.
+func (c *Collector) CollectKernelContext(ctx context.Context) StepResult {
+	return c.runCommand(ctx, "kernel", "uname -r")
 }
 
 // CollectArchitecture collects the CPU architecture.
 func (c *Collector) CollectArchitecture() StepResult {
-	return c.runCommand("architecture", "uname -m")
+	return c.CollectArchitectureContext(context.Background())
+}
+
+// CollectArchitectureContext is the context-aware variant of CollectArchitecture.
+func (c *Collector) CollectArchitectureContext(ctx context.Context) StepResult {
+	return c.runCommand(ctx, "architecture", "uname -m")
 }
 
 // CollectCPUModel collects the CPU model name.
 func (c *Collector) CollectCPUModel() StepResult {
-	stdout, _, _, err := c.client.Exec(`lscpu | grep "Model name"`)
+	return c.CollectCPUModelContext(context.Background())
+}
+
+// CollectCPUModelContext is the context-aware variant of CollectCPUModel.
+func (c *Collector) CollectCPUModelContext(ctx context.Context) StepResult {
+	stdout, _, _, err := c.client.ExecContext(ctx, `lscpu | grep "Model name"`)
 	if err != nil {
 		return StepResult{Name: "cpu_model", Error: err}
 	}
@@ -118,12 +144,22 @@ func (c *Collector) CollectCPUModel() StepResult {
 
 // CollectCPUCores collects the number of CPU cores.
 func (c *Collector) CollectCPUCores() StepResult {
-	return c.runIntCommand("cpu_cores", "nproc")
+	return c.CollectCPUCoresContext(context.Background())
+}
+
+// CollectCPUCoresContext is the context-aware variant of CollectCPUCores.
+func (c *Collector) CollectCPUCoresContext(ctx context.Context) StepResult {
+	return c.runIntCommand(ctx, "cpu_cores", "nproc")
 }
 
 // CollectRAM collects total RAM in megabytes.
 func (c *Collector) CollectRAM() StepResult {
-	stdout, _, _, err := c.client.Exec("free -m")
+	return c.CollectRAMContext(context.Background())
+}
+
+// CollectRAMContext is the context-aware variant of CollectRAM.
+func (c *Collector) CollectRAMContext(ctx context.Context) StepResult {
+	stdout, _, _, err := c.client.ExecContext(ctx, "free -m")
 	if err != nil {
 		return StepResult{Name: "ram_total_mb", Error: err}
 	}
@@ -163,12 +199,22 @@ func (c *Collector) CollectRAM() StepResult {
 
 // CollectDisk collects the total root disk size in gigabytes.
 func (c *Collector) CollectDisk() StepResult {
-	return c.runFloatCommand("disk_total_gb", `df -BG / | awk 'NR==2{print $2}'`)
+	return c.CollectDiskContext(context.Background())
+}
+
+// CollectDiskContext is the context-aware variant of CollectDisk.
+func (c *Collector) CollectDiskContext(ctx context.Context) StepResult {
+	return c.runFloatCommand(ctx, "disk_total_gb", `df -BG / | awk 'NR==2{print $2}'`)
 }
 
 // CollectVirtualization collects the virtualization type.
 func (c *Collector) CollectVirtualization() StepResult {
-	stdout, _, _, err := c.client.Exec("systemd-detect-virt 2>/dev/null || echo none")
+	return c.CollectVirtualizationContext(context.Background())
+}
+
+// CollectVirtualizationContext is the context-aware variant of CollectVirtualization.
+func (c *Collector) CollectVirtualizationContext(ctx context.Context) StepResult {
+	stdout, _, _, err := c.client.ExecContext(ctx, "systemd-detect-virt 2>/dev/null || echo none")
 	if err != nil {
 		return StepResult{Name: "virtualization", Error: err}
 	}
@@ -178,7 +224,12 @@ func (c *Collector) CollectVirtualization() StepResult {
 
 // CollectPublicIP collects the public IP address.
 func (c *Collector) CollectPublicIP() StepResult {
-	stdout, _, _, err := c.client.Exec("curl -s --max-time 5 ifconfig.me")
+	return c.CollectPublicIPContext(context.Background())
+}
+
+// CollectPublicIPContext is the context-aware variant of CollectPublicIP.
+func (c *Collector) CollectPublicIPContext(ctx context.Context) StepResult {
+	stdout, _, _, err := c.client.ExecContext(ctx, "curl -s --max-time 5 ifconfig.me")
 	if err != nil {
 		return StepResult{Name: "public_ip", Error: err}
 	}
@@ -188,7 +239,12 @@ func (c *Collector) CollectPublicIP() StepResult {
 
 // CollectPrivateIP collects the first private IP address.
 func (c *Collector) CollectPrivateIP() StepResult {
-	stdout, _, _, err := c.client.Exec(`hostname -I | awk '{print $1}'`)
+	return c.CollectPrivateIPContext(context.Background())
+}
+
+// CollectPrivateIPContext is the context-aware variant of CollectPrivateIP.
+func (c *Collector) CollectPrivateIPContext(ctx context.Context) StepResult {
+	stdout, _, _, err := c.client.ExecContext(ctx, `hostname -I | awk '{print $1}'`)
 	if err != nil {
 		return StepResult{Name: "private_ip", Error: err}
 	}
@@ -198,7 +254,12 @@ func (c *Collector) CollectPrivateIP() StepResult {
 
 // CollectTimezone collects the current timezone.
 func (c *Collector) CollectTimezone() StepResult {
-	stdout, _, _, err := c.client.Exec(`timedatectl | grep "Time zone"`)
+	return c.CollectTimezoneContext(context.Background())
+}
+
+// CollectTimezoneContext is the context-aware variant of CollectTimezone.
+func (c *Collector) CollectTimezoneContext(ctx context.Context) StepResult {
+	stdout, _, _, err := c.client.ExecContext(ctx, `timedatectl | grep "Time zone"`)
 	if err != nil {
 		return StepResult{Name: "timezone", Error: err}
 	}
@@ -214,7 +275,12 @@ func (c *Collector) CollectTimezone() StepResult {
 
 // CollectProvider identifies the cloud provider when metadata is available.
 func (c *Collector) CollectProvider() StepResult {
-	stdout, _, _, err := c.client.Exec("curl -s --max-time 2 http://169.254.169.254/latest/meta-data/instance-id || echo unknown")
+	return c.CollectProviderContext(context.Background())
+}
+
+// CollectProviderContext is the context-aware variant of CollectProvider.
+func (c *Collector) CollectProviderContext(ctx context.Context) StepResult {
+	stdout, _, _, err := c.client.ExecContext(ctx, "curl -s --max-time 2 http://169.254.169.254/latest/meta-data/instance-id || echo unknown")
 	if err != nil {
 		if c.client != nil && !c.client.IsAlive() {
 			return StepResult{Name: "provider", Error: err}
@@ -232,19 +298,25 @@ func (c *Collector) CollectProvider() StepResult {
 
 // CollectAll runs all collection steps and returns results.
 func (c *Collector) CollectAll() []StepResult {
+	return c.CollectAllContext(context.Background())
+}
+
+// CollectAllContext runs all collection steps with the provided context
+// for cancellation and returns results.
+func (c *Collector) CollectAllContext(ctx context.Context) []StepResult {
 	return []StepResult{
-		c.CollectHostname(),
-		c.CollectOS(),
-		c.CollectKernel(),
-		c.CollectArchitecture(),
-		c.CollectCPUModel(),
-		c.CollectCPUCores(),
-		c.CollectRAM(),
-		c.CollectDisk(),
-		c.CollectVirtualization(),
-		c.CollectPublicIP(),
-		c.CollectPrivateIP(),
-		c.CollectTimezone(),
-		c.CollectProvider(),
+		c.CollectHostnameContext(ctx),
+		c.CollectOSContext(ctx),
+		c.CollectKernelContext(ctx),
+		c.CollectArchitectureContext(ctx),
+		c.CollectCPUModelContext(ctx),
+		c.CollectCPUCoresContext(ctx),
+		c.CollectRAMContext(ctx),
+		c.CollectDiskContext(ctx),
+		c.CollectVirtualizationContext(ctx),
+		c.CollectPublicIPContext(ctx),
+		c.CollectPrivateIPContext(ctx),
+		c.CollectTimezoneContext(ctx),
+		c.CollectProviderContext(ctx),
 	}
 }

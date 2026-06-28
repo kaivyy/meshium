@@ -3,8 +3,12 @@ package discovery
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
+	"io"
+	"net"
 	"strings"
+	"syscall"
 	"time"
 
 	"meshium/internal/mod/server"
@@ -151,6 +155,25 @@ func isSSHDisconnectError(err error) bool {
 		return false
 	}
 
+	// Check for standard library typed errors that indicate a
+	// disconnected or broken SSH connection.
+	if errors.Is(err, io.EOF) || errors.Is(err, io.ErrUnexpectedEOF) {
+		return true
+	}
+	if errors.Is(err, syscall.ECONNRESET) {
+		return true
+	}
+	if errors.Is(err, syscall.EPIPE) {
+		return true
+	}
+	// Check for net.Error with Timeout (connection timed out)
+	var netErr net.Error
+	if errors.As(err, &netErr) && netErr.Timeout() {
+		return true
+	}
+
+	// Fall back to string matching for SSH library errors that don't
+	// unwrap to standard library types.
 	msg := strings.ToLower(err.Error())
 	for _, needle := range []string{
 		"eof",
@@ -169,21 +192,21 @@ func isSSHDisconnectError(err error) bool {
 	return false
 }
 
-func collectorSteps(c *Collector) []func() StepResult {
-	return []func() StepResult{
-		c.CollectHostname,
-		c.CollectOS,
-		c.CollectKernel,
-		c.CollectArchitecture,
-		c.CollectCPUModel,
-		c.CollectCPUCores,
-		c.CollectRAM,
-		c.CollectDisk,
-		c.CollectVirtualization,
-		c.CollectPublicIP,
-		c.CollectPrivateIP,
-		c.CollectTimezone,
-		c.CollectProvider,
+func collectorSteps(c *Collector) []func(ctx context.Context) StepResult {
+	return []func(ctx context.Context) StepResult{
+		c.CollectHostnameContext,
+		c.CollectOSContext,
+		c.CollectKernelContext,
+		c.CollectArchitectureContext,
+		c.CollectCPUModelContext,
+		c.CollectCPUCoresContext,
+		c.CollectRAMContext,
+		c.CollectDiskContext,
+		c.CollectVirtualizationContext,
+		c.CollectPublicIPContext,
+		c.CollectPrivateIPContext,
+		c.CollectTimezoneContext,
+		c.CollectProviderContext,
 	}
 }
 
@@ -241,9 +264,18 @@ func (s *Service) RunConnectionTest(ctx context.Context, serverID int, onStep St
 	if srv.BastionID > 0 {
 		bastion, err := s.repo.GetByID(srv.BastionID)
 		if err == nil {
-			bPassword, _ := decryptCredential(aesKey, bastion.Password)
-			bSSHKey, _ := decryptCredential(aesKey, bastion.SSHKey)
-			bPassphrase, _ := decryptCredential(aesKey, bastion.Passphrase)
+			bPassword, err := decryptCredential(aesKey, bastion.Password)
+			if err != nil {
+				return fmt.Errorf("failed to decrypt bastion password: %w", err)
+			}
+			bSSHKey, err := decryptCredential(aesKey, bastion.SSHKey)
+			if err != nil {
+				return fmt.Errorf("failed to decrypt bastion SSH key: %w", err)
+			}
+			bPassphrase, err := decryptCredential(aesKey, bastion.Passphrase)
+			if err != nil {
+				return fmt.Errorf("failed to decrypt bastion passphrase: %w", err)
+			}
 			bPort := bastion.Port
 			if bPort == 0 {
 				bPort = 22
@@ -265,7 +297,7 @@ func (s *Service) RunConnectionTest(ctx context.Context, serverID int, onStep St
 
 	start := time.Now()
 	hostKeyCallback := s.hosts.MakeHostKeyCallback(serverID)
-	client, err := s.pool.Get(serverID, sshConfig, hostKeyCallback)
+	client, err := s.pool.GetContext(ctx, serverID, sshConfig, hostKeyCallback)
 	latency := time.Since(start)
 	if err != nil {
 		onStep(WSMessage{
@@ -298,7 +330,7 @@ func (s *Service) RunConnectionTest(ctx context.Context, serverID int, onStep St
 			return ctx.Err()
 		}
 
-		result := collect()
+		result := collect(ctx)
 		if result.Error != nil {
 			if client == nil || isSSHDisconnectError(result.Error) || !client.IsAlive() {
 				onStep(WSMessage{Step: "ssh", Status: "error", Error: "SSH connection lost"})
