@@ -339,9 +339,9 @@ func TestPoolCloseAllStopsKeepalive(t *testing.T) {
 	pool.StartKeepalive()
 	pool.CloseAll()
 
-	// After CloseAll, keepaliveStop should be nil
-	if pool.keepaliveStop != nil {
-		t.Fatal("expected keepaliveStop to be nil after CloseAll")
+	// After CloseAll, keepalive should not be running
+	if pool.keepaliveRunning {
+		t.Fatal("expected keepaliveRunning to be false after CloseAll")
 	}
 }
 

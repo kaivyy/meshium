@@ -23,6 +23,7 @@ type Client struct {
 	bastionConn *ssh.Client // non-nil if connection is via bastion
 	createdAt   time.Time
 	timeouts    TimeoutConfig
+	closed      bool // protected by mu
 	mu          sync.Mutex
 	lastUsed    time.Time
 }
@@ -467,10 +468,19 @@ func (c *Client) HasBastion() bool {
 
 // Close closes the SSH connection and any associated bastion connection.
 // The target connection is closed first, then the bastion tunnel.
+// It is safe to call Close multiple times — subsequent calls are no-ops.
 func (c *Client) Close() error {
 	if c == nil || c.conn == nil {
 		return nil
 	}
+
+	c.mu.Lock()
+	if c.closed {
+		c.mu.Unlock()
+		return nil
+	}
+	c.closed = true
+	c.mu.Unlock()
 
 	// Close the target connection first
 	targetErr := c.conn.Close()

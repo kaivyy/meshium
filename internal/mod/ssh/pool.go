@@ -22,12 +22,13 @@ type PoolConfig struct {
 type Pool struct {
 	mu          sync.RWMutex
 	connections map[int]*poolEntry
-	pending     map[int]chan struct{}
+	pending     map[int]chan struct{} // deduplicates concurrent connection attempts
 	config      PoolConfig
 	semaphore   chan struct{}
 
-	keepaliveStop chan struct{}
-	keepaliveOnce sync.Once
+	keepaliveMu     sync.Mutex
+	keepaliveStop   chan struct{}
+	keepaliveRunning bool
 }
 
 type poolEntry struct {
@@ -61,8 +62,11 @@ func NewPool(cfg PoolConfig) *Pool {
 // Get returns a cached connection for the server if it is still valid,
 // otherwise it establishes a new SSH connection. If the connection fails
 // and MaxRetries is configured, it retries with exponential backoff.
+// Concurrent calls for the same serverID are deduplicated — only one
+// goroutine establishes the connection while others wait.
 func (p *Pool) Get(serverID int, cfg ServerConfig, hostKeyCallback func(hostname string, remote net.Addr, key ssh.PublicKey) error) (*Client, error) {
 	p.mu.Lock()
+	// Check for a valid cached connection
 	if entry, ok := p.connections[serverID]; ok {
 		now := time.Now()
 		if p.isEntryValid(entry, now) {
@@ -75,7 +79,28 @@ func (p *Pool) Get(serverID int, cfg ServerConfig, hostKeyCallback func(hostname
 		_ = entry.client.Close()
 		delete(p.connections, serverID)
 	}
+
+	// Check if another goroutine is already connecting for this serverID
+	if waitCh, ok := p.pending[serverID]; ok {
+		p.mu.Unlock()
+		// Wait for the other goroutine to finish connecting
+		<-waitCh
+		// Try again to get the cached connection
+		return p.Get(serverID, cfg, hostKeyCallback)
+	}
+
+	// Register our intent to connect
+	waitCh := make(chan struct{})
+	p.pending[serverID] = waitCh
 	p.mu.Unlock()
+
+	// Ensure we clean up the pending entry and signal waiters
+	defer func() {
+		p.mu.Lock()
+		delete(p.pending, serverID)
+		p.mu.Unlock()
+		close(waitCh)
+	}()
 
 	if p.semaphore != nil {
 		p.semaphore <- struct{}{}
@@ -108,6 +133,8 @@ func (p *Pool) Get(serverID int, cfg ServerConfig, hostKeyCallback func(hostname
 
 		now := time.Now()
 		p.mu.Lock()
+		// Check if another valid connection was stored while we were connecting
+		// (possible if the pending dedup missed due to timing)
 		if entry, ok := p.connections[serverID]; ok {
 			if p.isEntryValid(entry, now) {
 				_ = client.Close()
@@ -158,30 +185,49 @@ func isTransientError(err error) bool {
 // StartKeepalive launches a background goroutine that periodically sends
 // keepalive probes to all pooled connections. This prevents NAT/firewall
 // timeouts from silently dropping idle connections. Call StopKeepalive
-// to stop the goroutine. It is safe to call multiple times — only the
-// first call starts the goroutine.
+// to stop the goroutine. It is safe to call multiple times, and can be
+// called again after StopKeepalive to restart the keepalive loop.
 func (p *Pool) StartKeepalive() {
-	p.keepaliveOnce.Do(func() {
-		p.keepaliveStop = make(chan struct{})
-		go p.keepaliveLoop()
-	})
+	p.keepaliveMu.Lock()
+	defer p.keepaliveMu.Unlock()
+
+	if p.keepaliveRunning {
+		return
+	}
+
+	p.keepaliveStop = make(chan struct{})
+	p.keepaliveRunning = true
+	go p.keepaliveLoop()
 }
 
 // StopKeepalive stops the background keepalive goroutine.
+// It is safe to call multiple times.
 func (p *Pool) StopKeepalive() {
-	if p.keepaliveStop != nil {
-		close(p.keepaliveStop)
-		p.keepaliveStop = nil
+	p.keepaliveMu.Lock()
+	defer p.keepaliveMu.Unlock()
+
+	if !p.keepaliveRunning {
+		return
 	}
+
+	close(p.keepaliveStop)
+	p.keepaliveStop = nil
+	p.keepaliveRunning = false
 }
 
 func (p *Pool) keepaliveLoop() {
+	// Capture the stop channel before the loop starts so we don't
+	// race with StopKeepalive setting it to nil.
+	p.keepaliveMu.Lock()
+	stopCh := p.keepaliveStop
+	p.keepaliveMu.Unlock()
+
 	ticker := time.NewTicker(p.config.KeepaliveInterval)
 	defer ticker.Stop()
 
 	for {
 		select {
-		case <-p.keepaliveStop:
+		case <-stopCh:
 			return
 		case <-ticker.C:
 			p.sendKeepalives()
@@ -190,38 +236,57 @@ func (p *Pool) keepaliveLoop() {
 }
 
 // sendKeepalives probes all pooled connections and removes dead ones.
+// It copies the entry list under a read lock, probes each connection
+// outside the lock (to avoid blocking writers during network I/O),
+// then removes dead entries under a write lock.
 func (p *Pool) sendKeepalives() {
-	p.mu.RLock()
-	type deadEntry struct {
+	// Snapshot the entries under a read lock.
+	type probeEntry struct {
 		serverID int
-		entry    *poolEntry
+		client   *Client
 	}
-	var dead []deadEntry
+	p.mu.RLock()
+	entries := make([]probeEntry, 0, len(p.connections))
 	for serverID, entry := range p.connections {
 		if entry == nil || entry.client == nil {
 			continue
 		}
-		if !entry.client.IsAlive() {
-			dead = append(dead, deadEntry{serverID, entry})
-		}
+		entries = append(entries, probeEntry{serverID, entry.client})
 	}
 	p.mu.RUnlock()
+
+	if len(entries) == 0 {
+		return
+	}
+
+	// Probe each connection outside the lock.
+	type deadEntry struct {
+		serverID int
+		client   *Client
+	}
+	var dead []deadEntry
+	for _, pe := range entries {
+		if !pe.client.IsAlive() {
+			dead = append(dead, deadEntry{pe.serverID, pe.client})
+		}
+	}
 
 	if len(dead) == 0 {
 		return
 	}
 
-	// Remove dead connections from the pool and close them
+	// Remove dead connections from the pool under a write lock.
 	p.mu.Lock()
 	for _, d := range dead {
-		if existing, ok := p.connections[d.serverID]; ok && existing == d.entry {
+		if entry, ok := p.connections[d.serverID]; ok && entry.client == d.client {
 			delete(p.connections, d.serverID)
 		}
 	}
 	p.mu.Unlock()
 
+	// Close dead connections outside the lock.
 	for _, d := range dead {
-		_ = d.entry.client.Close()
+		_ = d.client.Close()
 	}
 }
 
