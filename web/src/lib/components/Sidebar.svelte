@@ -1,10 +1,15 @@
 <script lang="ts">
+  import { onMount } from 'svelte';
   import { page } from '$app/stores';
   import { lock } from '$lib/stores/auth';
   import { Server, ArrowRightLeft, Settings, LogOut, X } from 'lucide-svelte';
 
   export let isOpen = false;
   export let onClose = () => {};
+
+  // Disable transitions on initial render to prevent flash
+  let mounted = false;
+  onMount(() => { mounted = true; });
 
   const navItems = [
     { href: '/', label: 'Servers', icon: Server },
@@ -28,9 +33,11 @@
 {/if}
 
 <aside
-  class="w-60 bg-white border-r border-slate-200 h-screen flex flex-col shrink-0 z-40
-    fixed md:static inset-y-0 left-0 transition-transform duration-200
-    {isOpen ? 'translate-x-0' : '-translate-x-full md:translate-x-0'}"
+  class="w-60 bg-white border-r border-slate-200 flex flex-col shrink-0 z-40
+    fixed md:static inset-y-0 left-0
+    {mounted ? 'transition-transform duration-200' : ''}
+    {isOpen ? 'translate-x-0' : '-translate-x-full'}
+    md:translate-x-0"
 >
   <div class="p-4 border-b border-slate-200 flex items-center justify-between">
     <a href="/" class="text-lg font-bold flex items-center gap-2 text-slate-900" on:click={handleNav}>
