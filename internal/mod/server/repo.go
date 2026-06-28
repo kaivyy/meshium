@@ -97,7 +97,7 @@ func (r *sqliteRepo) List(filter ListFilter) ([]Server, error) {
 	}
 	defer rows.Close()
 
-	var servers []Server
+	servers := make([]Server, 0)
 	for rows.Next() {
 		var s Server
 		var tagsJSON string

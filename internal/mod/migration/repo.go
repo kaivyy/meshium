@@ -78,7 +78,7 @@ func (r *sqliteRepo) ListMigrations() ([]Migration, error) {
 	}
 	defer rows.Close()
 
-	var migrations []Migration
+	migrations := make([]Migration, 0)
 	for rows.Next() {
 		var m Migration
 		var categoriesJSON string
@@ -163,7 +163,7 @@ func (r *sqliteRepo) GetSteps(migrationID int) ([]MigrationStep, error) {
 	}
 	defer rows.Close()
 
-	var steps []MigrationStep
+	steps := make([]MigrationStep, 0)
 	for rows.Next() {
 		var s MigrationStep
 		var data, errMsg, startedAt, completedAt sql.NullString
@@ -211,7 +211,7 @@ func (r *sqliteRepo) GetBackups(migrationID int) ([]MigrationBackup, error) {
 	}
 	defer rows.Close()
 
-	var backups []MigrationBackup
+	backups := make([]MigrationBackup, 0)
 	for rows.Next() {
 		var b MigrationBackup
 		if err := rows.Scan(&b.ID, &b.MigrationID, &b.ServerID, &b.Category, &b.Data, &b.CreatedAt); err != nil {
