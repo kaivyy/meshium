@@ -7,6 +7,87 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [1.1.0] — 2026-06-28
+
+### Migration Engine Enhancements
+
+#### Added — Docker Migration
+- **Docker Category** — Full collector, applier, backup, and rollback for Docker state
+  - Collects running containers (with env vars and labels), images, volumes, and compose files from source
+  - Pulls images, creates volumes, uploads compose files, and recreates containers on target
+  - Falls back to `docker run` for containers without compose files
+  - Rollback removes containers, images, and volumes that were added by the migration
+
+#### Added — Dry Run Mode
+- **Dry Run** — Preview what a migration would change without applying anything
+  - Compares collected source data with the target's current state
+  - Reports per-category changes: add, modify, remove with resource names and descriptions
+  - Summary with total/add/modify/remove counts
+  - REST endpoint: `GET /api/migrations/{id}/dryrun`
+  - WebSocket endpoint: `ws://host/ws/dryrun/{id}` with live progress
+
+#### Added — Diff View
+- **Server Diff** — Bidirectional comparison between source and target servers
+  - Collects from both servers and compares per category
+  - Reports: only-in-source, only-in-target, different, same count
+  - Supports all 5 categories: packages, configs, services, users, docker
+  - REST endpoint: `POST /api/diff`
+  - WebSocket endpoint: `ws://host/ws/diff` with live progress
+
+#### Added — SSH Bastion / Jump Host
+- **Bastion Support** — Tunnel SSH connections through a bastion/jump host
+  - Per-server bastion configuration via `bastionId` field
+  - Bastion connection tunneled via `ssh.Dial` through bastion, then `NewClientConn` to target
+  - Resolves bastion credentials from encrypted server records
+  - Shared helper `getSSHClientForServer()` used by executor, rollback, diff, and dry run
+
+#### Added — Pre-Flight Validation
+- **Pre-Flight Checks** — Validate migration readiness before execution
+  - SSH connectivity test to target server
+  - Target disk space check (`df -h /`) with warning if < 1GB available
+  - OS compatibility check (source vs target distro family)
+  - Docker availability check if docker category is selected
+  - REST endpoint: `GET /api/migrations/{id}/preflight`
+  - Returns `PreFlightResult` with errors, warnings, and OK status
+
+#### Added — Config Exclusion List
+- **OS-Critical File Protection** — 20 paths excluded from config migration
+  - Protected: `/etc/fstab`, `/etc/hostname`, `/etc/machine-id`, `/etc/hosts`, `/etc/shadow`, `/etc/passwd`, `/etc/group`, `/etc/subuid`, `/etc/subgid`, `/etc/resolv.conf`, `/etc/network/`, `/etc/netplan/`, `/etc/sysconfig/network-scripts/`, `/etc/udev/`, `/etc/crypttab`, `/etc/mdadm.conf`, `/etc/dracut.conf`, `/etc/kernel/`, `/etc/grub.d/`, `/etc/default/grub`
+  - Enforced in Collect (skip download), Backup (skip backup), and Apply (safety net with warning)
+
+#### Added — Export Migration Plan
+- **Export** — Download migration plan as JSON
+  - REST endpoint: `GET /api/migrations/{id}/export`
+  - Returns migration record and all steps as downloadable JSON attachment
+
+### Infrastructure Enhancements
+
+#### Added — GitHub Actions CI
+- **CI Workflow** — Automated testing on push and pull request
+  - Go tests with module caching (`go test ./... -count=1`)
+  - Frontend build verification (`npm ci && npm run build`)
+  - Test results uploaded as artifacts
+
+#### Added — SSH Pool Concurrency
+- **MaxConcurrent** — Configurable concurrent connection limit (default: 10)
+  - Semaphore-based gating in `Get()` prevents connection storms
+  - `CloseIdle()` method prunes connections idle longer than `MaxIdle`
+  - Pending map prevents duplicate connections for the same server ID
+
+### Frontend Enhancements
+
+#### Added
+- **Dry Run UI** — Purple dry run button on migration detail page, results display with summary and per-category changes
+- **Export Button** — Download migration plan as JSON from migration detail page
+- **Bastion Selector** — Dropdown on server edit page to choose bastion/jump host from existing servers
+- **Server Interface** — Added optional `bastionId` field to Server type
+
+### Changed
+- **SSH Helper Refactor** — Shared `getSSHClientForServer()` replaces duplicated SSH connection code in planner, rollback, and diff
+- **Migration Runner Interface** — Added `DryRun()`, `Diff()`, and `PreFlight()` methods
+
+---
+
 ## [1.0.0] — 2026-06-27
 
 ### Initial Release
@@ -82,4 +163,5 @@ The first complete release of Meshium — a self-hosted server migration engine 
 
 | Version | Date | Highlights |
 |---------|------|------------|
+| 1.1.0 | 2026-06-28 | Docker migration, dry run, diff view, bastion/jump host, pre-flight validation, config exclusion, CI/CD, SSH pool concurrency |
 | 1.0.0 | 2026-06-27 | Initial release — full migration engine, web UI, 85 tests |
