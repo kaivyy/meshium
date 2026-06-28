@@ -2,6 +2,7 @@ package migration
 
 import (
 	"context"
+	"fmt"
 	"testing"
 )
 
@@ -241,4 +242,30 @@ func TestCompositeRunnerHasResumeAndRecover(t *testing.T) {
 
 	// If we get here, the methods exist
 	_ = runner
+}
+
+// TestIsMigrationNotFound verifies that IsMigrationNotFound correctly
+// identifies the typed error.
+func TestIsMigrationNotFound(t *testing.T) {
+	// Direct error
+	if !IsMigrationNotFound(ErrMigrationNotFound) {
+		t.Fatal("expected IsMigrationNotFound to return true for ErrMigrationNotFound")
+	}
+
+	// Wrapped error
+	wrapped := fmt.Errorf("wrapper: %w", ErrMigrationNotFound)
+	if !IsMigrationNotFound(wrapped) {
+		t.Fatal("expected IsMigrationNotFound to return true for wrapped ErrMigrationNotFound")
+	}
+
+	// Unrelated error
+	unrelated := fmt.Errorf("some other error")
+	if IsMigrationNotFound(unrelated) {
+		t.Fatal("expected IsMigrationNotFound to return false for unrelated error")
+	}
+
+	// Nil error
+	if IsMigrationNotFound(nil) {
+		t.Fatal("expected IsMigrationNotFound to return false for nil")
+	}
 }

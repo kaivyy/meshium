@@ -4,8 +4,17 @@ import (
 	"database/sql"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"strings"
 )
+
+// ErrMigrationNotFound is a typed error returned when a migration is not found.
+var ErrMigrationNotFound = errors.New("migration not found")
+
+// IsMigrationNotFound returns true if err is or wraps ErrMigrationNotFound.
+func IsMigrationNotFound(err error) bool {
+	return errors.Is(err, ErrMigrationNotFound)
+}
 
 type Repo interface {
 	CreateMigration(sourceID, targetID int, categories []string) (int, error)
@@ -35,7 +44,10 @@ func NewRepo(db *sql.DB) Repo {
 }
 
 func (r *sqliteRepo) CreateMigration(sourceID, targetID int, categories []string) (int, error) {
-	cats, _ := json.Marshal(categories)
+	cats, err := json.Marshal(categories)
+	if err != nil {
+		return 0, fmt.Errorf("marshal categories: %w", err)
+	}
 	res, err := r.db.Exec(
 		`INSERT INTO migrations (source_id, target_id, categories, status) VALUES (?, ?, ?, 'planned')`,
 		sourceID, targetID, string(cats),
@@ -56,12 +68,14 @@ func (r *sqliteRepo) GetMigration(id int) (*Migration, error) {
 		 FROM migrations WHERE id = ?`, id,
 	).Scan(&m.ID, &m.SourceID, &m.TargetID, &categoriesJSON, &m.Status, &planJSON, &m.Error, &m.CreatedAt, &completedAt)
 	if errors.Is(err, sql.ErrNoRows) {
-		return nil, errors.New("migration not found")
+		return nil, ErrMigrationNotFound
 	}
 	if err != nil {
 		return nil, err
 	}
-	json.Unmarshal([]byte(categoriesJSON), &m.Categories)
+	if err := json.Unmarshal([]byte(categoriesJSON), &m.Categories); err != nil {
+		return nil, fmt.Errorf("unmarshal migration categories: %w", err)
+	}
 	m.Plan = planJSON
 	if completedAt.Valid {
 		m.CompletedAt = completedAt.String
@@ -87,7 +101,9 @@ func (r *sqliteRepo) ListMigrations() ([]Migration, error) {
 		if err := rows.Scan(&m.ID, &m.SourceID, &m.TargetID, &categoriesJSON, &m.Status, &m.Error, &m.CreatedAt, &completedAt); err != nil {
 			return nil, err
 		}
-		json.Unmarshal([]byte(categoriesJSON), &m.Categories)
+		if err := json.Unmarshal([]byte(categoriesJSON), &m.Categories); err != nil {
+			return nil, fmt.Errorf("unmarshal migration categories: %w", err)
+		}
 		if completedAt.Valid {
 			m.CompletedAt = completedAt.String
 		}
@@ -105,8 +121,11 @@ func (r *sqliteRepo) UpdateMigrationStatus(id int, status, errMsg string) error 
 }
 
 func (r *sqliteRepo) SetMigrationPlan(id int, plan MigrationPlan) error {
-	planJSON, _ := json.Marshal(plan)
-	_, err := r.db.Exec("UPDATE migrations SET plan = ? WHERE id = ?", string(planJSON), id)
+	planJSON, err := json.Marshal(plan)
+	if err != nil {
+		return fmt.Errorf("marshal migration plan: %w", err)
+	}
+	_, err = r.db.Exec("UPDATE migrations SET plan = ? WHERE id = ?", string(planJSON), id)
 	return err
 }
 
@@ -125,9 +144,12 @@ func (r *sqliteRepo) DeleteMigration(id int) error {
 	if err != nil {
 		return err
 	}
-	rows, _ := res.RowsAffected()
+	rows, err := res.RowsAffected()
+	if err != nil {
+		return fmt.Errorf("get rows affected: %w", err)
+	}
 	if rows == 0 {
-		return errors.New("migration not found")
+		return ErrMigrationNotFound
 	}
 	return nil
 }
@@ -249,13 +271,15 @@ func (r *sqliteRepo) GetAppliedCategories(migrationID int) ([]string, error) {
 }
 
 // Helper: parse categories from JSON string to slice
-func parseCategories(s string) []string {
+func parseCategories(s string) ([]string, error) {
 	var cats []string
-	json.Unmarshal([]byte(s), &cats)
+	if err := json.Unmarshal([]byte(s), &cats); err != nil {
+		return nil, fmt.Errorf("parse categories: %w", err)
+	}
 	if cats == nil {
 		cats = []string{}
 	}
-	return cats
+	return cats, nil
 }
 
 // Helper: check if a string is in a slice

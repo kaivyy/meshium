@@ -174,7 +174,7 @@ func (h *Handler) handleCreate(w http.ResponseWriter, r *http.Request) {
 func (h *Handler) handleGet(w http.ResponseWriter, r *http.Request, id int) {
 	migration, err := h.repo.GetMigration(id)
 	if err != nil {
-		if strings.Contains(err.Error(), "not found") {
+		if IsMigrationNotFound(err) {
 			shared.WriteError(w, http.StatusNotFound, "migration not found", "MIGRATION_NOT_FOUND")
 			return
 		}
@@ -186,7 +186,7 @@ func (h *Handler) handleGet(w http.ResponseWriter, r *http.Request, id int) {
 
 func (h *Handler) handleDelete(w http.ResponseWriter, r *http.Request, id int) {
 	if err := h.repo.DeleteMigration(id); err != nil {
-		if strings.Contains(err.Error(), "not found") {
+		if IsMigrationNotFound(err) {
 			shared.WriteError(w, http.StatusNotFound, "migration not found", "MIGRATION_NOT_FOUND")
 			return
 		}

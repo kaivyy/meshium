@@ -118,7 +118,10 @@ func (d *DiffService) Diff(ctx context.Context, sourceID, targetID int, categori
 			continue
 		}
 
-		diff := d.computeDiff(catName, sourceData, targetData)
+		diff, err := d.computeDiff(catName, sourceData, targetData)
+		if err != nil {
+			return nil, fmt.Errorf("failed to compute %s diff: %w", catName, err)
+		}
 		result.Categories = append(result.Categories, diff)
 
 		onProgress(WSMessage{
@@ -132,7 +135,7 @@ func (d *DiffService) Diff(ctx context.Context, sourceID, targetID int, categori
 	return result, nil
 }
 
-func (d *DiffService) computeDiff(category string, source, target CategoryData) DiffCategory {
+func (d *DiffService) computeDiff(category string, source, target CategoryData) (DiffCategory, error) {
 	switch category {
 	case "packages":
 		return d.diffPackages(source, target)
@@ -145,14 +148,18 @@ func (d *DiffService) computeDiff(category string, source, target CategoryData) 
 	case "docker":
 		return d.diffDocker(source, target)
 	default:
-		return DiffCategory{Category: category}
+		return DiffCategory{Category: category}, nil
 	}
 }
 
-func (d *DiffService) diffPackages(source, target CategoryData) DiffCategory {
+func (d *DiffService) diffPackages(source, target CategoryData) (DiffCategory, error) {
 	var sd, td PackagesData
-	json.Unmarshal(source.Data, &sd)
-	json.Unmarshal(target.Data, &td)
+	if err := json.Unmarshal(source.Data, &sd); err != nil {
+		return DiffCategory{}, fmt.Errorf("failed to unmarshal source packages data: %w", err)
+	}
+	if err := json.Unmarshal(target.Data, &td); err != nil {
+		return DiffCategory{}, fmt.Errorf("failed to unmarshal target packages data: %w", err)
+	}
 
 	sourcePkgs := make(map[string]bool)
 	for _, p := range sd.Packages {
@@ -186,13 +193,17 @@ func (d *DiffService) diffPackages(source, target CategoryData) DiffCategory {
 		OnlyInSource: onlySource,
 		OnlyInTarget: onlyTarget,
 		Same:         same,
-	}
+	}, nil
 }
 
-func (d *DiffService) diffConfigs(source, target CategoryData) DiffCategory {
+func (d *DiffService) diffConfigs(source, target CategoryData) (DiffCategory, error) {
 	var sd, td ConfigsData
-	json.Unmarshal(source.Data, &sd)
-	json.Unmarshal(target.Data, &td)
+	if err := json.Unmarshal(source.Data, &sd); err != nil {
+		return DiffCategory{}, fmt.Errorf("failed to unmarshal source configs data: %w", err)
+	}
+	if err := json.Unmarshal(target.Data, &td); err != nil {
+		return DiffCategory{}, fmt.Errorf("failed to unmarshal target configs data: %w", err)
+	}
 
 	var onlySource, onlyTarget, different []string
 	same := 0
@@ -224,13 +235,17 @@ func (d *DiffService) diffConfigs(source, target CategoryData) DiffCategory {
 		OnlyInTarget: onlyTarget,
 		Different:    different,
 		Same:         same,
-	}
+	}, nil
 }
 
-func (d *DiffService) diffServices(source, target CategoryData) DiffCategory {
+func (d *DiffService) diffServices(source, target CategoryData) (DiffCategory, error) {
 	var sd, td ServicesData
-	json.Unmarshal(source.Data, &sd)
-	json.Unmarshal(target.Data, &td)
+	if err := json.Unmarshal(source.Data, &sd); err != nil {
+		return DiffCategory{}, fmt.Errorf("failed to unmarshal source services data: %w", err)
+	}
+	if err := json.Unmarshal(target.Data, &td); err != nil {
+		return DiffCategory{}, fmt.Errorf("failed to unmarshal target services data: %w", err)
+	}
 
 	sourceSvc := make(map[string]bool)
 	for _, s := range sd.Services {
@@ -264,13 +279,17 @@ func (d *DiffService) diffServices(source, target CategoryData) DiffCategory {
 		OnlyInSource: onlySource,
 		OnlyInTarget: onlyTarget,
 		Same:         same,
-	}
+	}, nil
 }
 
-func (d *DiffService) diffUsers(source, target CategoryData) DiffCategory {
+func (d *DiffService) diffUsers(source, target CategoryData) (DiffCategory, error) {
 	var sd, td UsersData
-	json.Unmarshal(source.Data, &sd)
-	json.Unmarshal(target.Data, &td)
+	if err := json.Unmarshal(source.Data, &sd); err != nil {
+		return DiffCategory{}, fmt.Errorf("failed to unmarshal source users data: %w", err)
+	}
+	if err := json.Unmarshal(target.Data, &td); err != nil {
+		return DiffCategory{}, fmt.Errorf("failed to unmarshal target users data: %w", err)
+	}
 
 	sourceUsers := make(map[string]bool)
 	for _, u := range sd.Users {
@@ -304,13 +323,17 @@ func (d *DiffService) diffUsers(source, target CategoryData) DiffCategory {
 		OnlyInSource: onlySource,
 		OnlyInTarget: onlyTarget,
 		Same:         same,
-	}
+	}, nil
 }
 
-func (d *DiffService) diffDocker(source, target CategoryData) DiffCategory {
+func (d *DiffService) diffDocker(source, target CategoryData) (DiffCategory, error) {
 	var sd, td DockerData
-	json.Unmarshal(source.Data, &sd)
-	json.Unmarshal(target.Data, &td)
+	if err := json.Unmarshal(source.Data, &sd); err != nil {
+		return DiffCategory{}, fmt.Errorf("failed to unmarshal source docker data: %w", err)
+	}
+	if err := json.Unmarshal(target.Data, &td); err != nil {
+		return DiffCategory{}, fmt.Errorf("failed to unmarshal target docker data: %w", err)
+	}
 
 	sourceContainers := make(map[string]bool)
 	for _, c := range sd.Containers {
@@ -367,7 +390,7 @@ func (d *DiffService) diffDocker(source, target CategoryData) DiffCategory {
 		OnlyInSource: onlySource,
 		OnlyInTarget: onlyTarget,
 		Same:         same,
-	}
+	}, nil
 }
 
 // getSSHClient obtains an SSH connection for the given server.

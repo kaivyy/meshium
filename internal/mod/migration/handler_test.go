@@ -1,7 +1,6 @@
 package migration
 
 import (
-	"errors"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -33,7 +32,7 @@ func (m *mockRepo) GetMigration(id int) (*Migration, error) {
 			return &p, nil
 		}
 	}
-	return nil, errors.New("migration not found")
+	return nil, ErrMigrationNotFound
 }
 
 func (m *mockRepo) ListMigrations() ([]Migration, error) {
@@ -48,7 +47,7 @@ func (m *mockRepo) UpdateMigrationStatus(id int, status, errMsg string) error {
 			return nil
 		}
 	}
-	return errors.New("migration not found")
+	return ErrMigrationNotFound
 }
 
 func (m *mockRepo) SetMigrationPlan(id int, plan MigrationPlan) error { return nil }
@@ -62,7 +61,7 @@ func (m *mockRepo) DeleteMigration(id int) error {
 			return nil
 		}
 	}
-	return errors.New("migration not found")
+	return ErrMigrationNotFound
 }
 
 func (m *mockRepo) CreateStep(migrationID int, category, action, data string) (int, error) {

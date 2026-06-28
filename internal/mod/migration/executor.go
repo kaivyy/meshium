@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"log"
 	"time"
 
 	"meshium/internal/mod/server"
@@ -103,7 +104,9 @@ func (e *Executor) Resume(ctx context.Context, migrationID int, onProgress StepC
 		Value:  fmt.Sprintf("Resuming migration (skipping %d already-applied categories)...", len(appliedCats)),
 	})
 
-	e.repo.UpdateMigrationStatus(migrationID, StatusResuming, "")
+	if err := e.repo.UpdateMigrationStatus(migrationID, StatusResuming, ""); err != nil {
+		log.Printf("failed to update migration %d status to resuming: %v", migrationID, err)
+	}
 
 	return e.executeWithSkip(ctx, migrationID, onProgress, skip)
 }
@@ -152,14 +155,18 @@ func (e *Executor) executeWithSkip(ctx context.Context, migrationID int, onProgr
 	}
 
 	// 2. Update status to running
-	e.repo.UpdateMigrationStatus(migrationID, StatusRunning, "")
+	if err := e.repo.UpdateMigrationStatus(migrationID, StatusRunning, ""); err != nil {
+		log.Printf("failed to update migration %d status to running: %v", migrationID, err)
+	}
 	onProgress(WSMessage{Step: "execute", Status: "progress", Value: "Starting migration..."})
 
 	// 3. Get SSH connection to target
 	targetServer, err := e.srvRepo.GetByID(migration.TargetID)
 	if err != nil {
 		sendError(onProgress, "execute", "target server not found")
-		e.repo.UpdateMigrationStatus(migrationID, StatusFailed, "target server not found")
+		if err := e.repo.UpdateMigrationStatus(migrationID, StatusFailed, "target server not found"); err != nil {
+			log.Printf("failed to update migration %d status to failed: %v", migrationID, err)
+		}
 		return fmt.Errorf("target server not found: %w", err)
 	}
 
@@ -168,7 +175,9 @@ func (e *Executor) executeWithSkip(ctx context.Context, migrationID int, onProgr
 	sshClient, err := e.getSSHClient(migration.TargetID, targetServer)
 	if err != nil {
 		sendError(onProgress, "execute", "failed to connect to target: "+err.Error())
-		e.repo.UpdateMigrationStatus(migrationID, StatusFailed, "SSH connection failed")
+		if err := e.repo.UpdateMigrationStatus(migrationID, StatusFailed, "SSH connection failed"); err != nil {
+			log.Printf("failed to update migration %d status to failed: %v", migrationID, err)
+		}
 		return fmt.Errorf("target SSH connection failed: %w", err)
 	}
 
@@ -178,13 +187,17 @@ func (e *Executor) executeWithSkip(ctx context.Context, migrationID int, onProgr
 	steps, err := e.repo.GetSteps(migrationID)
 	if err != nil {
 		sendError(onProgress, "execute", "failed to load migration steps")
-		e.repo.UpdateMigrationStatus(migrationID, StatusFailed, "failed to load steps")
+		if err := e.repo.UpdateMigrationStatus(migrationID, StatusFailed, "failed to load steps"); err != nil {
+			log.Printf("failed to update migration %d status to failed: %v", migrationID, err)
+		}
 		return err
 	}
 
 	// Parse categories from migration
 	var categories []string
-	json.Unmarshal([]byte(migration.Categories), &categories)
+	if err := json.Unmarshal([]byte(migration.Categories), &categories); err != nil {
+		return fmt.Errorf("failed to parse migration categories: %w", err)
+	}
 
 	// 5. Backup phase: backup each category on target (MANDATORY)
 	//    If any backup fails, the migration is aborted — no apply without backup.
@@ -193,7 +206,9 @@ func (e *Executor) executeWithSkip(ctx context.Context, migrationID int, onProgr
 	backups := make(map[string]BackupData)
 	for _, catName := range categories {
 		if ctx.Err() != nil {
-			e.repo.UpdateMigrationStatus(migrationID, StatusFailed, "cancelled")
+			if err := e.repo.UpdateMigrationStatus(migrationID, StatusFailed, "cancelled"); err != nil {
+				log.Printf("failed to update migration %d status to failed: %v", migrationID, err)
+			}
 			return ctx.Err()
 		}
 
@@ -222,14 +237,19 @@ func (e *Executor) executeWithSkip(ctx context.Context, migrationID int, onProgr
 				Status: "error",
 				Error:  fmt.Sprintf("backup failed (aborting migration): %v", err),
 			})
-			e.repo.UpdateMigrationStatus(migrationID, StatusFailed,
-				fmt.Sprintf("backup failed for %s: %v", catName, err))
+			if err := e.repo.UpdateMigrationStatus(migrationID, StatusFailed,
+				fmt.Sprintf("backup failed for %s: %v", catName, err)); err != nil {
+				log.Printf("failed to update migration %d status to failed: %v", migrationID, err)
+			}
 			return fmt.Errorf("backup failed for %s (migration aborted — no apply without backup): %w", catName, err)
 		}
 
 		backups[catName] = backup
 		// Save backup to DB
-		rawBackup, _ := json.Marshal(backup)
+		rawBackup, err := json.Marshal(backup)
+		if err != nil {
+			log.Printf("failed to marshal backup for migration %d category %s: %v", migrationID, catName, err)
+		}
 		e.repo.CreateBackup(migrationID, migration.TargetID, catName, string(rawBackup))
 
 		onProgress(WSMessage{
@@ -246,7 +266,9 @@ func (e *Executor) executeWithSkip(ctx context.Context, migrationID int, onProgr
 	for _, step := range steps {
 		if ctx.Err() != nil {
 			// Mark as interrupted so it can be resumed later
-			e.repo.UpdateMigrationStatus(migrationID, StatusInterrupted, "cancelled by context")
+			if err := e.repo.UpdateMigrationStatus(migrationID, StatusInterrupted, "cancelled by context"); err != nil {
+				log.Printf("failed to update migration %d status to interrupted: %v", migrationID, err)
+			}
 			return ctx.Err()
 		}
 
@@ -298,12 +320,16 @@ func (e *Executor) executeWithSkip(ctx context.Context, migrationID int, onProgr
 			// This ensures the target is restored to its pre-migration state.
 			e.rollbackAll(ctx, migrationID, sshClient, appliedOrder, backups, onProgress)
 
-			e.repo.UpdateMigrationStatus(migrationID, StatusFailed, step.Category+" apply failed")
+			if err := e.repo.UpdateMigrationStatus(migrationID, StatusFailed, step.Category+" apply failed"); err != nil {
+				log.Printf("failed to update migration %d status to failed: %v", migrationID, err)
+			}
 			return fmt.Errorf("apply failed for %s: %w", step.Category, err)
 		}
 
 		// Checkpoint: mark this step as applied so it can be skipped on resume
-		e.repo.UpdateStepStatus(step.ID, StepStatusApplied, "")
+		if err := e.repo.UpdateStepStatus(step.ID, StepStatusApplied, ""); err != nil {
+			log.Printf("failed to update step %d status to applied: %v", step.ID, err)
+		}
 		appliedOrder = append(appliedOrder, step.Category)
 
 		onProgress(WSMessage{
@@ -315,7 +341,9 @@ func (e *Executor) executeWithSkip(ctx context.Context, migrationID int, onProgr
 
 	// 7. Update status to completed
 	now := time.Now().Format(time.RFC3339)
-	e.repo.UpdateMigrationStatus(migrationID, StatusCompleted, "")
+	if err := e.repo.UpdateMigrationStatus(migrationID, StatusCompleted, ""); err != nil {
+		log.Printf("failed to update migration %d status to completed: %v", migrationID, err)
+	}
 	e.repo.SetMigrationCompletedAt(migrationID, now)
 
 	onProgress(WSMessage{Step: "execute", Status: "complete", Value: "Migration completed successfully"})
@@ -347,7 +375,10 @@ func (e *Executor) rollbackAll(ctx context.Context, migrationID int, sshClient S
 			if err == nil {
 				for _, dbb := range dbBackups {
 					if dbb.Category == catName {
-						json.Unmarshal([]byte(dbb.Data), &backup)
+						if err := json.Unmarshal([]byte(dbb.Data), &backup); err != nil {
+							log.Printf("failed to unmarshal backup data for migration %d category %s: %v", migrationID, catName, err)
+							continue
+						}
 						ok = true
 						break
 					}
@@ -381,7 +412,9 @@ func (e *Executor) rollbackAll(ctx context.Context, migrationID int, sshClient S
 			if steps, err := e.repo.GetSteps(migrationID); err == nil {
 				for _, s := range steps {
 					if s.Category == catName && s.Status == StepStatusApplied {
-						e.repo.UpdateStepStatus(s.ID, StepStatusCompleted, "rolled back")
+						if err := e.repo.UpdateStepStatus(s.ID, StepStatusCompleted, "rolled back"); err != nil {
+							log.Printf("failed to update step %d status to completed after rollback: %v", s.ID, err)
+						}
 					}
 				}
 			}
