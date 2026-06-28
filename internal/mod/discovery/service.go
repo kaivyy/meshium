@@ -9,25 +9,20 @@ import (
 
 	"meshium/internal/mod/server"
 	modssh "meshium/internal/mod/ssh"
+	"meshium/internal/mod/transport"
 	"meshium/internal/shared"
 
 	xssh "golang.org/x/crypto/ssh"
 )
 
 // AESKeyProvider exposes the AES key needed to decrypt stored credentials.
-type AESKeyProvider interface {
-	GetAESKey() []byte
-}
+type AESKeyProvider = transport.AESKeyProvider
 
 // ConnectionPool provides SSH clients for a server.
-type ConnectionPool interface {
-	Get(serverID int, cfg modssh.ServerConfig, hostKeyCallback xssh.HostKeyCallback) (SSHExecuter, error)
-}
+type ConnectionPool = transport.ConnectionPool
 
 // HostKeyStore provides host key verification callbacks.
-type HostKeyStore interface {
-	MakeHostKeyCallback(serverID int) xssh.HostKeyCallback
-}
+type HostKeyStore = transport.HostKeyStore
 
 type poolAdapter struct {
 	pool *modssh.Pool

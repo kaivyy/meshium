@@ -1,12 +1,11 @@
 package migration
 
 import (
-	"context"
 	"fmt"
-	"io"
 
 	"meshium/internal/mod/discovery"
 	modssh "meshium/internal/mod/ssh"
+	"meshium/internal/mod/transport"
 
 	xssh "golang.org/x/crypto/ssh"
 )
@@ -35,14 +34,9 @@ const (
 
 // --- SSH and progress types ---
 
-// SSHExecuter extends discovery.SSHExecuter with SFTP operations.
-type SSHExecuter interface {
-	Exec(cmd string) (string, string, int, error)
-	ExecContext(ctx context.Context, cmd string) (string, string, int, error)
-	IsAlive() bool
-	Upload(src io.Reader, remotePath string) error
-	Download(remotePath string, dst io.Writer) error
-}
+// SSHExecuter is the interface for executing commands and transferring
+// files over an SSH connection. It is an alias for transport.SSHExecuter.
+type SSHExecuter = transport.SSHExecuter
 
 // StepCallback is called for each step result during migration.
 type StepCallback func(msg WSMessage)
@@ -157,17 +151,14 @@ type MigrationResponse struct {
 	Steps       []MigrationStep `json:"steps,omitempty"`
 }
 
-// --- Interfaces (reused from discovery) ---
+// --- Interfaces (reused from transport) ---
 
 // ConnectionPool provides SSH clients for a server.
-// This is a migration-specific interface that returns SSHExecuter with SFTP support.
-type ConnectionPool interface {
-	Get(serverID int, cfg modssh.ServerConfig, hostKeyCallback xssh.HostKeyCallback) (SSHExecuter, error)
-}
+type ConnectionPool = transport.ConnectionPool
 
-// PoolAdapter wraps a discovery.ConnectionPool to satisfy migration.ConnectionPool.
+// PoolAdapter wraps a transport.ConnectionPool to satisfy migration.ConnectionPool.
 type PoolAdapter struct {
-	Inner discovery.ConnectionPool
+	Inner transport.ConnectionPool
 }
 
 func (a *PoolAdapter) Get(serverID int, cfg modssh.ServerConfig, hostKeyCallback xssh.HostKeyCallback) (SSHExecuter, error) {
@@ -183,10 +174,10 @@ func (a *PoolAdapter) Get(serverID int, cfg modssh.ServerConfig, hostKeyCallback
 }
 
 // AESKeyProvider exposes the AES key needed to decrypt stored credentials.
-type AESKeyProvider = discovery.AESKeyProvider
+type AESKeyProvider = transport.AESKeyProvider
 
 // HostKeyStore provides host key verification callbacks.
-type HostKeyStore = discovery.HostKeyStore
+type HostKeyStore = transport.HostKeyStore
 
 // Collector and Applier interfaces are defined in categories.go
 // to avoid circular dependency with CategoryData/BackupData types.

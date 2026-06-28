@@ -1,17 +1,17 @@
 package discovery
 
 import (
-	"context"
 	"strconv"
 	"strings"
+
+	"meshium/internal/mod/transport"
 )
 
 // SSHExecuter is the interface required by the collector.
-type SSHExecuter interface {
-	Exec(cmd string) (string, string, int, error)
-	ExecContext(ctx context.Context, cmd string) (string, string, int, error)
-	IsAlive() bool
-}
+// It is an alias for transport.SSHExecuter, which includes Upload/Download
+// methods that discovery doesn't use but migration does. The real *ssh.Client
+// satisfies the full interface.
+type SSHExecuter = transport.SSHExecuter
 
 // Command defines a single discovery command.
 type Command struct {

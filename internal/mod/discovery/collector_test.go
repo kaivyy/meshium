@@ -2,6 +2,7 @@ package discovery
 
 import (
 	"context"
+	"io"
 	"strings"
 	"testing"
 )
@@ -33,6 +34,14 @@ func (m *mockSSHClient) ExecContext(ctx context.Context, cmd string) (string, st
 
 func (m *mockSSHClient) IsAlive() bool {
 	return m.alive
+}
+
+func (m *mockSSHClient) Upload(src io.Reader, remotePath string) error {
+	return nil
+}
+
+func (m *mockSSHClient) Download(remotePath string, dst io.Writer) error {
+	return nil
 }
 
 func TestCollectHostname(t *testing.T) {
