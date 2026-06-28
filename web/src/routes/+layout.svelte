@@ -5,9 +5,6 @@
   import { onMount } from 'svelte';
   import { authStore, checkStatus } from '$lib/stores/auth';
   import Sidebar from '$lib/components/Sidebar.svelte';
-  import { Menu } from 'lucide-svelte';
-
-  let sidebarOpen = false;
 
   onMount(() => {
     checkStatus();
@@ -36,16 +33,9 @@
   <slot />
 {:else}
   <div class="flex h-screen overflow-hidden">
-    <Sidebar isOpen={sidebarOpen} onClose={() => sidebarOpen = false} />
+    <Sidebar />
     <div class="flex-1 flex flex-col overflow-hidden">
-      <!-- Mobile top bar -->
-      <div class="md:hidden flex items-center gap-3 bg-white border-b border-slate-200 px-4 py-3 shrink-0">
-        <button on:click={() => sidebarOpen = true} class="text-slate-600 hover:text-slate-900">
-          <Menu size={22} />
-        </button>
-        <span class="font-bold text-slate-900">Meshium</span>
-      </div>
-      <main class="flex-1 overflow-auto bg-slate-50">
+      <main class="flex-1 overflow-auto bg-slate-50 pb-16 md:pb-0">
         <slot />
       </main>
     </div>
