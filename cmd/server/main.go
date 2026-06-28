@@ -72,9 +72,11 @@ func main() {
 	migrationHandler.RegisterRoutes(mux)
 	mux.Handle("/", staticHandler())
 
-	// Wrap the mux with authentication middleware
-	// This protects all API endpoints with session token validation
-	protectedMux := authMiddleware.RequireAuth(mux)
+	// Wrap the mux with middleware layers (outermost to innermost):
+	// 1. CORS + security headers
+	// 2. CSRF (Content-Type validation for state-changing methods)
+	// 3. Authentication (session token validation)
+	protectedMux := shared.CORSMiddleware(shared.CSRFMiddleware(authMiddleware.RequireAuth(mux)))
 
 	addr := ":" + cfg.ServerPort
 	fmt.Printf("Meshium server starting on %s\n", addr)
