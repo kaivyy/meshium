@@ -14,6 +14,8 @@ type RateLimiter struct {
 	visitors map[string]*visitorInfo
 	maxRequests int
 	window      time.Duration
+
+	stopCh chan struct{} // closed by Stop to signal the cleanup goroutine to exit
 }
 
 type visitorInfo struct {
@@ -81,15 +83,36 @@ func (rl *RateLimiter) Cleanup() {
 	}
 }
 
-// StartCleanup starts a background goroutine that periodically cleans up expired entries.
+// StartCleanup starts a background goroutine that periodically cleans up
+// expired entries. Call Stop to terminate the goroutine. It is safe to
+// call StartCleanup only once per RateLimiter instance.
 func (rl *RateLimiter) StartCleanup(interval time.Duration) {
+	rl.stopCh = make(chan struct{})
 	go func() {
 		ticker := time.NewTicker(interval)
 		defer ticker.Stop()
-		for range ticker.C {
-			rl.Cleanup()
+		for {
+			select {
+			case <-rl.stopCh:
+				return
+			case <-ticker.C:
+				rl.Cleanup()
+			}
 		}
 	}()
+}
+
+// Stop terminates the cleanup goroutine started by StartCleanup.
+// It is safe to call multiple times or when StartCleanup was not called.
+func (rl *RateLimiter) Stop() {
+	if rl.stopCh != nil {
+		select {
+		case <-rl.stopCh:
+			// already closed
+		default:
+			close(rl.stopCh)
+		}
+	}
 }
 
 // RateLimitMiddleware returns HTTP middleware that rate limits requests by IP.

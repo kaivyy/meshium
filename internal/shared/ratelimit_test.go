@@ -128,6 +128,30 @@ func TestRateLimitMiddlewareDifferentIPs(t *testing.T) {
 	}
 }
 
+// TestRateLimiterStop verifies that Stop terminates the cleanup goroutine.
+func TestRateLimiterStop(t *testing.T) {
+	rl := NewRateLimiter(5, time.Minute)
+	rl.StartCleanup(10 * time.Millisecond)
+
+	// Stop the cleanup goroutine
+	rl.Stop()
+
+	// Should be safe to call Stop again
+	rl.Stop()
+
+	// Verify the limiter still works after Stop
+	if !rl.Allow("10.0.0.1") {
+		t.Error("Allow should return true after Stop")
+	}
+}
+
+// TestRateLimiterStopWithoutStart verifies that Stop is safe to call
+// even when StartCleanup was never called.
+func TestRateLimiterStopWithoutStart(t *testing.T) {
+	rl := NewRateLimiter(5, time.Minute)
+	rl.Stop() // should not panic
+}
+
 func TestExtractIP(t *testing.T) {
 	tests := []struct {
 		name       string
