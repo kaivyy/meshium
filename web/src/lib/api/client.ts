@@ -8,15 +8,46 @@ export class APIError extends Error {
   }
 }
 
+function getSessionToken(): string | null {
+  if (typeof localStorage === 'undefined') return null;
+  return localStorage.getItem('meshium_session_token');
+}
+
+export function setSessionToken(token: string) {
+  if (typeof localStorage === 'undefined') return;
+  localStorage.setItem('meshium_session_token', token);
+}
+
+export function clearSessionToken() {
+  if (typeof localStorage === 'undefined') return;
+  localStorage.removeItem('meshium_session_token');
+}
+
 async function request<T>(method: string, path: string, body?: unknown): Promise<T> {
+  const token = getSessionToken();
+  const headers: Record<string, string> = {};
+  if (body) {
+    headers['Content-Type'] = 'application/json';
+  }
+  if (token) {
+    headers['Authorization'] = `Bearer ${token}`;
+  }
+
   const res = await fetch(`${BASE}${path}`, {
     method,
-    headers: body ? { 'Content-Type': 'application/json' } : {},
+    headers,
     body: body ? JSON.stringify(body) : undefined
   });
 
   if (!res.ok) {
     const err = await res.json().catch(() => ({ error: 'Unknown error', code: 'UNKNOWN' }));
+    // On 401 or 403 (locked), clear the stale session token and redirect to login
+    if (res.status === 401 || (res.status === 403 && err.code === 'LOCKED')) {
+      clearSessionToken();
+      if (typeof window !== 'undefined' && !window.location.pathname.startsWith('/login') && !window.location.pathname.startsWith('/setup')) {
+        window.location.href = '/login';
+      }
+    }
     throw new APIError(err.error, err.code);
   }
 

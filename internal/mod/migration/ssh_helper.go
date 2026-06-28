@@ -20,10 +20,6 @@ func resolveBastion(srv *server.Server, srvRepo server.Repo, aesKey []byte, host
 		return nil
 	}
 
-	bPassword, _ := shared.Decrypt(aesKey, []byte(bastion.Password))
-	bSSHKey, _ := shared.Decrypt(aesKey, []byte(bastion.SSHKey))
-	bPassphrase, _ := shared.Decrypt(aesKey, []byte(bastion.Passphrase))
-
 	bastionPort := bastion.Port
 	if bastionPort == 0 {
 		bastionPort = 22
@@ -33,12 +29,30 @@ func resolveBastion(srv *server.Server, srvRepo server.Repo, aesKey []byte, host
 		Host:            bastion.Host,
 		Port:            bastionPort,
 		Username:        bastion.Username,
-		Password:        string(bPassword),
-		Passphrase:      string(bPassphrase),
 		HostKeyCallback: hosts.MakeHostKeyCallback(bastion.ID),
 	}
-	if len(bSSHKey) > 0 {
+
+	// Decrypt bastion credentials — skip empty fields
+	if bastion.Password != "" {
+		bPassword, err := shared.Decrypt(aesKey, []byte(bastion.Password))
+		if err != nil {
+			return nil
+		}
+		cfg.Password = string(bPassword)
+	}
+	if bastion.SSHKey != "" {
+		bSSHKey, err := shared.Decrypt(aesKey, []byte(bastion.SSHKey))
+		if err != nil {
+			return nil
+		}
 		cfg.PrivateKey = bSSHKey
+	}
+	if bastion.Passphrase != "" {
+		bPassphrase, err := shared.Decrypt(aesKey, []byte(bastion.Passphrase))
+		if err != nil {
+			return nil
+		}
+		cfg.Passphrase = string(bPassphrase)
 	}
 
 	return cfg
@@ -46,20 +60,34 @@ func resolveBastion(srv *server.Server, srvRepo server.Repo, aesKey []byte, host
 
 // buildSSHConfig creates an SSH config for a server, including bastion support if configured.
 func buildSSHConfig(srv *server.Server, srvRepo server.Repo, aesKey []byte, hosts HostKeyStore) (modssh.ServerConfig, error) {
-	password, _ := shared.Decrypt(aesKey, []byte(srv.Password))
-	sshKey, _ := shared.Decrypt(aesKey, []byte(srv.SSHKey))
-	passphrase, _ := shared.Decrypt(aesKey, []byte(srv.Passphrase))
-
 	sshConfig := modssh.ServerConfig{
-		ID:         srv.ID,
-		Host:       srv.Host,
-		Port:       srv.Port,
-		Username:   srv.Username,
-		Password:   string(password),
-		Passphrase: string(passphrase),
+		ID:       srv.ID,
+		Host:     srv.Host,
+		Port:     srv.Port,
+		Username: srv.Username,
 	}
-	if len(sshKey) > 0 {
+
+	// Decrypt credentials — skip empty fields (test servers may not have them)
+	if srv.Password != "" {
+		password, err := shared.Decrypt(aesKey, []byte(srv.Password))
+		if err != nil {
+			return modssh.ServerConfig{}, fmt.Errorf("decrypt password: %w", err)
+		}
+		sshConfig.Password = string(password)
+	}
+	if srv.SSHKey != "" {
+		sshKey, err := shared.Decrypt(aesKey, []byte(srv.SSHKey))
+		if err != nil {
+			return modssh.ServerConfig{}, fmt.Errorf("decrypt ssh key: %w", err)
+		}
 		sshConfig.PrivateKey = sshKey
+	}
+	if srv.Passphrase != "" {
+		passphrase, err := shared.Decrypt(aesKey, []byte(srv.Passphrase))
+		if err != nil {
+			return modssh.ServerConfig{}, fmt.Errorf("decrypt passphrase: %w", err)
+		}
+		sshConfig.Passphrase = string(passphrase)
 	}
 
 	// Add bastion if configured

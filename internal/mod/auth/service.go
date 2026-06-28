@@ -87,11 +87,7 @@ func (s *Service) Setup(password string) error {
 		return err
 	}
 
-	if err := s.repo.SetupAll(hash, string(encryptedPrivateKey), string(publicSSH)); err != nil {
-		return err
-	}
-	// Store the salt separately so it can be retrieved during unlock
-	if err := s.repo.SetConfigValue("pbkdf2_salt", saltB64); err != nil {
+	if err := s.repo.SetupAll(hash, string(encryptedPrivateKey), string(publicSSH), saltB64); err != nil {
 		return err
 	}
 
@@ -174,9 +170,15 @@ func (s *Service) Unlock(password string) (string, error) {
 	if err != nil {
 		return "", err
 	}
+	if saltB64 == "" {
+		return "", errors.New("setup corruption: pbkdf2_salt missing from database — re-setup required")
+	}
 	salt, err := base64.StdEncoding.DecodeString(saltB64)
 	if err != nil {
 		return "", err
+	}
+	if len(salt) == 0 {
+		return "", errors.New("setup corruption: pbkdf2_salt is empty — re-setup required")
 	}
 
 	s.aesKey = shared.DeriveKey(password, salt)

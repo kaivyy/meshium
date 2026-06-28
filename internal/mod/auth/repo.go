@@ -15,7 +15,7 @@ type Repo interface {
 	GetSSHPublicKey() (string, error)
 	SetSSHPublicKey(key string) error
 	SetSSHKeyPair(encryptedPrivateKey, publicKey string) error
-	SetupAll(masterHash string, encryptedPrivateKey string, publicKey string) error
+	SetupAll(masterHash string, encryptedPrivateKey string, publicKey string, salt string) error
 }
 
 type sqliteRepo struct {
@@ -88,7 +88,7 @@ func (r *sqliteRepo) SetSSHKeyPair(encryptedPrivateKey, publicKey string) error 
 	return tx.Commit()
 }
 
-func (r *sqliteRepo) SetupAll(masterHash string, encryptedPrivateKey string, publicKey string) error {
+func (r *sqliteRepo) SetupAll(masterHash string, encryptedPrivateKey string, publicKey string, salt string) error {
 	tx, err := r.db.Begin()
 	if err != nil {
 		return err
@@ -102,6 +102,9 @@ func (r *sqliteRepo) SetupAll(masterHash string, encryptedPrivateKey string, pub
 		return err
 	}
 	if err := setConfigValueTx(tx, "ssh_key_public", publicKey); err != nil {
+		return err
+	}
+	if err := setConfigValueTx(tx, "pbkdf2_salt", salt); err != nil {
 		return err
 	}
 
