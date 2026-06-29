@@ -8,6 +8,8 @@ import (
 type Repo interface {
 	GetConfigValue(key string) (string, error)
 	SetConfigValue(key, value string) error
+	GetSalt() (string, error)
+	SetSalt(salt string) error
 	HasMasterPassword() (bool, error)
 	SetMasterPassword(hash string) error
 	GetEncryptedSSHKey() (string, error)
@@ -41,6 +43,14 @@ func (r *sqliteRepo) SetConfigValue(key, value string) error {
 		key, value, value,
 	)
 	return err
+}
+
+func (r *sqliteRepo) GetSalt() (string, error) {
+	return r.GetConfigValue("aes_salt")
+}
+
+func (r *sqliteRepo) SetSalt(salt string) error {
+	return r.SetConfigValue("aes_salt", salt)
 }
 
 func (r *sqliteRepo) HasMasterPassword() (bool, error) {

@@ -2,8 +2,13 @@ package shared
 
 import (
 	"bytes"
+	"encoding/base64"
+	"net/http"
+	"net/http/httptest"
 	"strings"
 	"testing"
+
+	"golang.org/x/crypto/bcrypt"
 )
 
 func TestEncryptDecryptRoundTrip(t *testing.T) {
@@ -56,8 +61,8 @@ func TestHashAndVerifyPassword(t *testing.T) {
 		t.Fatalf("HashPassword failed: %v", err)
 	}
 
-	if !strings.HasPrefix(hash, "$2a$14$") {
-		t.Fatalf("expected bcrypt hash with cost 14, got %q", hash)
+	if !strings.HasPrefix(hash, "argon2id$v=19$m=65536,t=3,p=2$") {
+		t.Fatalf("expected argon2id hash with embedded parameters, got %q", hash)
 	}
 
 	if !VerifyPassword(password, hash) {
@@ -65,6 +70,20 @@ func TestHashAndVerifyPassword(t *testing.T) {
 	}
 	if VerifyPassword("wrong-password", hash) {
 		t.Error("VerifyPassword should return false for wrong password")
+	}
+
+	legacyBcrypt, err := bcrypt.GenerateFromPassword([]byte(password), 14)
+	if err != nil {
+		t.Fatalf("GenerateFromPassword failed: %v", err)
+	}
+	if !VerifyPassword(password, string(legacyBcrypt)) {
+		t.Error("VerifyPassword should accept legacy bcrypt hashes")
+	}
+
+	salt := []byte("0123456789abcdef")
+	legacyPBKDF2 := "pbkdf2-sha256$600000$" + base64.RawStdEncoding.EncodeToString(salt) + "$" + base64.RawStdEncoding.EncodeToString(DeriveKey(password, salt))
+	if !VerifyPassword(password, legacyPBKDF2) {
+		t.Error("VerifyPassword should accept legacy PBKDF2 hashes")
 	}
 }
 
@@ -82,5 +101,29 @@ func TestDeriveKey(t *testing.T) {
 	key2 := DeriveKey(password, salt)
 	if !bytes.Equal(key, key2) {
 		t.Error("DeriveKey should be deterministic")
+	}
+}
+
+func TestCheckWebSocketOrigin(t *testing.T) {
+	req := httptest.NewRequest(http.MethodGet, "http://example.com/ws", nil)
+	req.Host = "example.com"
+
+	if !CheckWebSocketOrigin(req) {
+		t.Fatal("expected missing Origin header to be allowed")
+	}
+
+	req.Header.Set("Origin", "http://example.com")
+	if !CheckWebSocketOrigin(req) {
+		t.Fatal("expected same-origin websocket request to be allowed")
+	}
+
+	req.Header.Set("Origin", "http://evil.example")
+	if CheckWebSocketOrigin(req) {
+		t.Fatal("expected cross-origin websocket request to be rejected")
+	}
+
+	req.Header.Set("Origin", "http://[")
+	if CheckWebSocketOrigin(req) {
+		t.Fatal("expected malformed origin to be rejected")
 	}
 }

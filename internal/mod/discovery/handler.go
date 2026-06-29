@@ -6,14 +6,15 @@ import (
 	"net/http"
 	"strconv"
 	"strings"
+	"time"
+
+	"meshium/internal/shared"
 
 	"github.com/gorilla/websocket"
 )
 
 var upgrader = websocket.Upgrader{
-	CheckOrigin: func(r *http.Request) bool {
-		return true
-	},
+	CheckOrigin: shared.CheckWebSocketOrigin,
 }
 
 // ConnectionRunner runs a connection test and streams step results.
@@ -65,7 +66,7 @@ func (h *Handler) handleConnect(w http.ResponseWriter, r *http.Request) {
 	defer cancel()
 
 	if err := h.svc.RunConnectionTest(ctx, serverID, func(msg WSMessage) {
-		if err := conn.WriteJSON(msg); err != nil {
+		if err := writeJSONWithDeadline(conn, msg); err != nil {
 			log.Printf("websocket write failed: %v", err)
 			_ = conn.Close()
 			cancel()
@@ -73,4 +74,11 @@ func (h *Handler) handleConnect(w http.ResponseWriter, r *http.Request) {
 	}); err != nil {
 		log.Printf("connection test failed for server %d: %v", serverID, err)
 	}
+}
+
+func writeJSONWithDeadline(conn *websocket.Conn, msg interface{}) error {
+	if err := conn.SetWriteDeadline(time.Now().Add(10 * time.Second)); err != nil {
+		return err
+	}
+	return conn.WriteJSON(msg)
 }

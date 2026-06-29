@@ -1,15 +1,15 @@
-import { api } from '$lib/api/client';
+import { api, getSessionToken } from '$lib/api/client';
 
 export interface MigrationPlan {
   id: number;
-  sourceServerId: number;
-  targetServerId: number;
+  sourceId: number;
+  targetId: number;
   status: string;
   categories: string[];
-  errorMessage: string;
+  error?: string;
   createdAt: string;
-  completedAt: string;
-  rolledBackAt: string;
+  completedAt?: string;
+  rolledBackAt?: string;
 }
 
 export interface MigrationStep {
@@ -46,8 +46,15 @@ export const migrationApi = {
   rollback: (id: number) => api.post(`/migrations/${id}/rollback`, {}),
 };
 
+function wsUrl(path: string): string {
+  const proto = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+  const token = getSessionToken();
+  const tokenParam = token ? `?token=${encodeURIComponent(token)}` : '';
+  return `${proto}//${window.location.host}${path}${tokenParam}`;
+}
+
 export function wsPlan(req: PlanRequest, onMessage: (msg: WSMessage) => void, onClose?: () => void, onError?: () => void): WebSocket {
-  const ws = new WebSocket(`ws://${window.location.host}/ws/plan`);
+  const ws = new WebSocket(wsUrl('/ws/plan'));
   ws.onopen = () => {
     ws.send(JSON.stringify(req));
   };
@@ -61,7 +68,7 @@ export function wsPlan(req: PlanRequest, onMessage: (msg: WSMessage) => void, on
 }
 
 export function wsExecute(migrationId: number, onMessage: (msg: WSMessage) => void, onClose?: () => void, onError?: () => void): WebSocket {
-  const ws = new WebSocket(`ws://${window.location.host}/ws/migrate/${migrationId}`);
+  const ws = new WebSocket(wsUrl(`/ws/migrate/${migrationId}`));
   ws.onmessage = (event) => {
     const msg = JSON.parse(event.data) as WSMessage;
     onMessage(msg);
@@ -72,7 +79,7 @@ export function wsExecute(migrationId: number, onMessage: (msg: WSMessage) => vo
 }
 
 export function wsRollback(migrationId: number, onMessage: (msg: WSMessage) => void, onClose?: () => void, onError?: () => void): WebSocket {
-  const ws = new WebSocket(`ws://${window.location.host}/ws/migrate/${migrationId}/rollback`);
+  const ws = new WebSocket(wsUrl(`/ws/migrate/${migrationId}/rollback`));
   ws.onmessage = (event) => {
     const msg = JSON.parse(event.data) as WSMessage;
     onMessage(msg);

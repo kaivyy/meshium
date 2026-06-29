@@ -1,6 +1,6 @@
 <script lang="ts">
   import { onMount } from 'svelte';
-  import { ArrowLeft, Check, Copy, Lock } from 'lucide-svelte';
+  import { ArrowLeft, Check, Copy, Lock, KeyRound, Shield, SlidersHorizontal, Gauge } from 'lucide-svelte';
   import { api } from '$lib/api/client';
   import { lock } from '$lib/stores/auth';
 
@@ -10,6 +10,7 @@
   let regenerating = false;
   let loadError = '';
   let regenerateError = '';
+  let selectedKeyType = 'rsa';
 
   onMount(async () => {
     try {
@@ -40,7 +41,7 @@
     regenerateError = '';
 
     try {
-      const res = (await api.post('/ssh-key/regenerate')) as { publicKey: string };
+      const res = (await api.post('/ssh-key/regenerate', { keyType: selectedKeyType })) as { publicKey: string };
       publicKey = res.publicKey;
       loadError = '';
     } catch (e) {
@@ -71,7 +72,31 @@
     </div>
   </header>
 
-  <main class="mx-auto w-full max-w-3xl p-6">
+  <main class="mx-auto w-full max-w-3xl p-6 space-y-6">
+    <!-- SSH Quick Links -->
+    <section class="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm">
+      <h2 class="text-lg font-semibold text-slate-900 mb-4">SSH Management</h2>
+      <div class="grid grid-cols-2 gap-3 sm:grid-cols-4">
+        <a href="/ssh" class="flex flex-col items-center gap-2 rounded-lg border border-slate-200 p-4 transition hover:border-blue-300 hover:bg-blue-50">
+          <Gauge size={20} class="text-blue-600" />
+          <span class="text-sm font-medium text-slate-700">Dashboard</span>
+        </a>
+        <a href="/ssh/known-hosts" class="flex flex-col items-center gap-2 rounded-lg border border-slate-200 p-4 transition hover:border-blue-300 hover:bg-blue-50">
+          <Shield size={20} class="text-blue-600" />
+          <span class="text-sm font-medium text-slate-700">Known Hosts</span>
+        </a>
+        <a href="/ssh/profiles" class="flex flex-col items-center gap-2 rounded-lg border border-slate-200 p-4 transition hover:border-blue-300 hover:bg-blue-50">
+          <SlidersHorizontal size={20} class="text-blue-600" />
+          <span class="text-sm font-medium text-slate-700">Profiles</span>
+        </a>
+        <a href="/ssh/auth-priority" class="flex flex-col items-center gap-2 rounded-lg border border-slate-200 p-4 transition hover:border-blue-300 hover:bg-blue-50">
+          <KeyRound size={20} class="text-blue-600" />
+          <span class="text-sm font-medium text-slate-700">Auth Priority</span>
+        </a>
+      </div>
+    </section>
+
+    <!-- SSH Key Management -->
     <section class="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm">
       <div class="mb-4">
         <h2 class="text-lg font-semibold text-slate-900">SSH Public Key</h2>
@@ -110,6 +135,25 @@
             <pre class="overflow-x-auto whitespace-pre-wrap break-all rounded-lg bg-white p-3 font-mono text-xs text-slate-700">{publicKey || 'No SSH public key has been generated yet.'}</pre>
           </div>
         {/if}
+
+        <!-- Key Type Selector -->
+        <div class="mt-4">
+          <label class="block text-sm font-medium text-slate-700 mb-2">Key Type for Regeneration</label>
+          <div class="flex gap-3">
+            <label class="flex items-center gap-2 cursor-pointer">
+              <input type="radio" bind:group={selectedKeyType} value="rsa" class="text-blue-600" />
+              <span class="text-sm text-slate-700">RSA 4096</span>
+            </label>
+            <label class="flex items-center gap-2 cursor-pointer">
+              <input type="radio" bind:group={selectedKeyType} value="ed25519" class="text-blue-600" />
+              <span class="text-sm text-slate-700">ED25519</span>
+            </label>
+            <label class="flex items-center gap-2 cursor-pointer">
+              <input type="radio" bind:group={selectedKeyType} value="ecdsa" class="text-blue-600" />
+              <span class="text-sm text-slate-700">ECDSA P-256</span>
+            </label>
+          </div>
+        </div>
 
         <div class="mt-4 flex flex-col gap-3">
           <button

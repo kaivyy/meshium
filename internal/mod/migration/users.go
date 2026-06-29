@@ -4,21 +4,23 @@ import (
 	"encoding/json"
 	"fmt"
 	"strings"
+	"time"
 )
 
 // UsersData holds collected users, groups, cron jobs, and firewall rules.
 type UsersData struct {
-	Users     []UserData        `json:"users"`
-	Groups    []GroupData       `json:"groups"`
-	CronJobs  map[string]string `json:"cronJobs"`  // user -> crontab content
-	Firewall  string            `json:"firewall"`
+	Users    []UserData        `json:"users"`
+	Groups   []GroupData       `json:"groups"`
+	CronJobs map[string]string `json:"cronJobs"` // user -> crontab content
+	Firewall string            `json:"firewall"`
 }
 
 // UsersBackup holds the target's original user/group/firewall state.
+// Note: /etc/shadow is intentionally NOT backed up to avoid storing
+// password hashes in the database. User passwords are not migrated.
 type UsersBackup struct {
 	PasswdContent string            `json:"passwdContent"`
 	GroupContent  string            `json:"groupContent"`
-	ShadowContent string            `json:"shadowContent"`
 	CronJobs      map[string]string `json:"cronJobs"`
 	FirewallRules string            `json:"firewallRules"`
 }
@@ -76,8 +78,10 @@ func (c *UsersCollector) Collect(ssh SSHExecuter) (CategoryData, error) {
 
 	// Collect cron jobs for each user
 	for _, user := range data.Users {
-		stdout, _, exitCode, _ := ssh.Exec(fmt.Sprintf("crontab -u %s -l 2>/dev/null", user.Name))
-		if exitCode == 0 && strings.TrimSpace(stdout) != "" {
+		if !validateIdentifier(user.Name) {
+			continue
+		}
+		if stdout, ok := getUserCrontab(ssh, user.Name); ok {
 			data.CronJobs[user.Name] = stdout
 		}
 	}
@@ -106,27 +110,29 @@ func (a *UsersApplier) Backup(ssh SSHExecuter) (BackupData, error) {
 		return BackupData{}, err
 	}
 	backup.PasswdContent = stdout
+	passwdContent := stdout
 
 	stdout, _, _, _ = ssh.Exec("cat /etc/group")
 	backup.GroupContent = stdout
 
-	stdout, _, _, _ = ssh.Exec("cat /etc/shadow 2>/dev/null")
-	backup.ShadowContent = stdout
+	// Note: /etc/shadow is intentionally NOT backed up to avoid storing
+	// password hashes in the database. User passwords are not migrated.
 
 	// Backup crontabs for non-system users
-	stdout, _, _, _ = ssh.Exec("cut -d: -f1 /etc/passwd | while read u; do crontab -u $u -l 2>/dev/null && echo \"---$u---\"; done")
-	for _, block := range strings.Split(stdout, "---") {
-		block = strings.TrimSpace(block)
-		if block == "" {
+	for _, line := range strings.Split(strings.TrimSpace(passwdContent), "\n") {
+		fields := strings.Split(line, ":")
+		if len(fields) < 3 {
 			continue
 		}
-		lines := strings.SplitN(block, "\n", 2)
-		if len(lines) == 2 {
-			user := strings.TrimSpace(lines[0])
-			content := lines[1]
-			if content != "" {
-				backup.CronJobs[user] = content
-			}
+		user := fields[0]
+		if !validateIdentifier(user) {
+			continue
+		}
+		if parseIntSafe(fields[2]) < 1000 {
+			continue
+		}
+		if cronOut, ok := getUserCrontab(ssh, user); ok {
+			backup.CronJobs[user] = cronOut
 		}
 	}
 
@@ -147,10 +153,13 @@ func (a *UsersApplier) Apply(ssh SSHExecuter, data CategoryData, onProgress Step
 
 	// Create groups first
 	for _, group := range ud.Groups {
-		_, _, exitCode, _ := ssh.Exec(fmt.Sprintf("groupadd -g %d %s 2>/dev/null", group.GID, group.Name))
+		if !validateIdentifier(group.Name) {
+			continue
+		}
+		_, _, exitCode, _ := ssh.Exec(fmt.Sprintf("groupadd -g %d %s 2>/dev/null", group.GID, shellQuote(group.Name)))
 		if exitCode != 0 {
 			// Group may already exist, try to modify
-			ssh.Exec(fmt.Sprintf("groupmod -g %d %s 2>/dev/null", group.GID, group.Name))
+			ssh.Exec(fmt.Sprintf("groupmod -g %d %s 2>/dev/null", group.GID, shellQuote(group.Name)))
 		}
 	}
 
@@ -164,8 +173,11 @@ func (a *UsersApplier) Apply(ssh SSHExecuter, data CategoryData, onProgress Step
 
 	// Create users
 	for i, user := range ud.Users {
+		if !validateIdentifier(user.Name) || !validatePath(user.HomeDir) || !validatePath(user.Shell) {
+			continue
+		}
 		cmd := fmt.Sprintf("useradd -u %d -g %d -d %s -s %s -m %s 2>/dev/null",
-			user.UID, user.GID, user.HomeDir, user.Shell, user.Name)
+			user.UID, user.GID, shellQuote(user.HomeDir), shellQuote(user.Shell), shellQuote(user.Name))
 		_, _, exitCode, _ := ssh.Exec(cmd)
 		if exitCode != 0 {
 			// User may already exist
@@ -189,14 +201,24 @@ func (a *UsersApplier) Apply(ssh SSHExecuter, data CategoryData, onProgress Step
 
 	// Install cron jobs
 	for user, crontab := range ud.CronJobs {
-		// Write crontab to a temp file and install
-		ssh.Exec(fmt.Sprintf("echo '%s' | crontab -u %s - 2>/dev/null",
-			strings.ReplaceAll(crontab, "'", "'\\''"), user))
+		if !validateIdentifier(user) {
+			continue
+		}
+		tmpPath, err := uploadTempFile(ssh, "crontab", crontab)
+		if err != nil {
+			continue
+		}
+		_, _, _, _ = ssh.Exec(fmt.Sprintf("crontab -u %s %s 2>/dev/null", shellQuote(user), shellQuote(tmpPath)))
+		cleanupRemoteTempFile(ssh, tmpPath)
 	}
 
 	// Apply firewall rules
 	if ud.Firewall != "" {
-		ssh.Exec("iptables-restore 2>/dev/null << 'EOF'\n" + ud.Firewall + "\nEOF")
+		tmpPath, err := uploadTempFile(ssh, "firewall", ud.Firewall)
+		if err == nil {
+			_, _, _, _ = ssh.Exec(fmt.Sprintf("iptables-restore < %s 2>/dev/null", shellQuote(tmpPath)))
+			cleanupRemoteTempFile(ssh, tmpPath)
+		}
 	}
 
 	if onProgress != nil {
@@ -220,25 +242,47 @@ func (a *UsersApplier) Rollback(ssh SSHExecuter, backup BackupData) error {
 	// Restore /etc/passwd
 	if ub.PasswdContent != "" {
 		ssh.Exec("cp /etc/passwd /etc/passwd.migration_bak 2>/dev/null")
-		ssh.Exec(fmt.Sprintf("cat > /etc/passwd << 'PASSWD_EOF'\n%s\nPASSWD_EOF", ub.PasswdContent))
+		if err := ssh.Upload(strings.NewReader(ub.PasswdContent), "/etc/passwd"); err != nil {
+			return err
+		}
 	}
 
 	// Restore /etc/group
 	if ub.GroupContent != "" {
-		ssh.Exec(fmt.Sprintf("cat > /etc/group << 'GROUP_EOF'\n%s\nGROUP_EOF", ub.GroupContent))
+		if err := ssh.Upload(strings.NewReader(ub.GroupContent), "/etc/group"); err != nil {
+			return err
+		}
 	}
 
-	// Restore /etc/shadow
-	if ub.ShadowContent != "" {
-		ssh.Exec(fmt.Sprintf("cat > /etc/shadow << 'SHADOW_EOF'\n%s\nSHADOW_EOF", ub.ShadowContent))
-	}
+	// Note: /etc/shadow is intentionally NOT restored.
+	// User passwords should not be migrated between servers.
 
 	// Restore firewall rules
 	if ub.FirewallRules != "" {
-		ssh.Exec("iptables-restore 2>/dev/null << 'EOF'\n" + ub.FirewallRules + "\nEOF")
+		tmpPath, err := uploadTempFile(ssh, "firewall-rollback", ub.FirewallRules)
+		if err == nil {
+			_, _, _, _ = ssh.Exec(fmt.Sprintf("iptables-restore < %s 2>/dev/null", shellQuote(tmpPath)))
+			cleanupRemoteTempFile(ssh, tmpPath)
+		}
 	}
 
 	return nil
+}
+
+func getUserCrontab(ssh SSHExecuter, user string) (string, bool) {
+	commands := []string{
+		fmt.Sprintf("crontab -u %s -l 2>/dev/null", shellQuote(user)),
+		fmt.Sprintf("crontab -u %s -l 2>/dev/null", user),
+	}
+
+	for _, cmd := range commands {
+		stdout, _, exitCode, _ := ssh.Exec(cmd)
+		if exitCode == 0 && strings.TrimSpace(stdout) != "" {
+			return stdout, true
+		}
+	}
+
+	return "", false
 }
 
 func parseIntSafe(s string) int {
@@ -250,4 +294,45 @@ func parseIntSafe(s string) int {
 		n = n*10 + int(c-'0')
 	}
 	return n
+}
+
+func validateIdentifier(s string) bool {
+	if s == "" || len(s) > 64 {
+		return false
+	}
+	for _, c := range s {
+		if !((c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || (c >= '0' && c <= '9') || c == '-' || c == '_' || c == '.') {
+			return false
+		}
+	}
+	return true
+}
+
+func validatePath(p string) bool {
+	if !strings.HasPrefix(p, "/") {
+		return false
+	}
+	if strings.Contains(p, "..") {
+		return false
+	}
+	return true
+}
+
+func remoteTempPath(prefix string) string {
+	return fmt.Sprintf("/tmp/meshium-%s-%d", prefix, time.Now().UnixNano())
+}
+
+func uploadTempFile(ssh SSHExecuter, prefix, content string) (string, error) {
+	remotePath := remoteTempPath(prefix)
+	if err := ssh.Upload(strings.NewReader(content), remotePath); err != nil {
+		return "", err
+	}
+	return remotePath, nil
+}
+
+func cleanupRemoteTempFile(ssh SSHExecuter, remotePath string) {
+	if remotePath == "" {
+		return
+	}
+	_, _, _, _ = ssh.Exec("rm -f " + shellQuote(remotePath))
 }

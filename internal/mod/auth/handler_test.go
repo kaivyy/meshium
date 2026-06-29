@@ -14,7 +14,8 @@ func TestSetupEndpoint(t *testing.T) {
 
 	repo := NewRepo(d)
 	svc := NewService(repo)
-	h := NewHandler(svc)
+	sm := NewSessionManager()
+	h := NewHandler(svc, sm)
 
 	// GET /api/auth/status — should show setup=false
 	req := httptest.NewRequest("GET", "/api/auth/status", nil)
@@ -60,9 +61,12 @@ func TestUnlockLockEndpoints(t *testing.T) {
 
 	repo := NewRepo(d)
 	svc := NewService(repo)
-	h := NewHandler(svc)
+	sm := NewSessionManager()
+	h := NewHandler(svc, sm)
 
-	svc.Setup("test-password")
+	if err := svc.Setup("test-password"); err != nil {
+		t.Fatalf("Setup failed: %v", err)
+	}
 	svc.Lock()
 
 	// POST /api/auth/unlock — wrong password
@@ -85,13 +89,28 @@ func TestUnlockLockEndpoints(t *testing.T) {
 		t.Errorf("expected 200, got %d", w.Code)
 	}
 
+	var resp map[string]string
+	if err := json.NewDecoder(w.Body).Decode(&resp); err != nil {
+		t.Fatalf("decode unlock response: %v", err)
+	}
+	if resp["sessionToken"] == "" {
+		t.Fatal("expected session token in unlock response")
+	}
+	if !sm.ValidateSession(resp["sessionToken"]) {
+		t.Fatal("expected unlock token to be tracked by session manager")
+	}
+
 	// POST /api/auth/lock
 	req = httptest.NewRequest("POST", "/api/auth/lock", nil)
+	req.Header.Set("X-Session-Token", resp["sessionToken"])
 	w = httptest.NewRecorder()
 	h.handleLock(w, req)
 
 	if w.Code != http.StatusOK {
 		t.Errorf("expected 200, got %d", w.Code)
+	}
+	if sm.ValidateSession(resp["sessionToken"]) {
+		t.Fatal("expected session to be removed after lock")
 	}
 }
 
@@ -101,7 +120,8 @@ func TestSSHKeyEndpoints(t *testing.T) {
 
 	repo := NewRepo(d)
 	svc := NewService(repo)
-	h := NewHandler(svc)
+	sm := NewSessionManager()
+	h := NewHandler(svc, sm)
 
 	if err := svc.Setup("test-password"); err != nil {
 		t.Fatalf("Setup failed: %v", err)

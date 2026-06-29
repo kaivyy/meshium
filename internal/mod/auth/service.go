@@ -1,6 +1,8 @@
 package auth
 
 import (
+	"crypto/rand"
+	"encoding/hex"
 	"errors"
 	"sync"
 
@@ -61,6 +63,21 @@ func (s *Service) Setup(password string) error {
 		return errors.New("master password already set")
 	}
 
+	salt := make([]byte, 32)
+	if _, err := rand.Read(salt); err != nil {
+		return err
+	}
+	saltHex := hex.EncodeToString(salt)
+	if err := s.repo.SetSalt(saltHex); err != nil {
+		return err
+	}
+	cleanupSalt := true
+	defer func() {
+		if cleanupSalt {
+			_ = s.repo.SetSalt("")
+		}
+	}()
+
 	privatePEM, publicSSH, err := ssh.GenerateKeyPair()
 	if err != nil {
 		return err
@@ -71,7 +88,6 @@ func (s *Service) Setup(password string) error {
 		return err
 	}
 
-	salt := []byte("meshium-salt-v1")
 	aesKey := shared.DeriveKey(password, salt)
 	encryptedPrivateKey, err := shared.Encrypt(aesKey, privatePEM)
 	if err != nil {
@@ -82,6 +98,7 @@ func (s *Service) Setup(password string) error {
 		return err
 	}
 
+	cleanupSalt = false
 	s.aesKey = aesKey
 	s.locked = false
 	return nil
@@ -155,7 +172,19 @@ func (s *Service) Unlock(password string) error {
 		return errors.New("invalid password")
 	}
 
-	salt := []byte("meshium-salt-v1")
+	saltHex, err := s.repo.GetSalt()
+	if err != nil {
+		return err
+	}
+	if saltHex == "" {
+		return errors.New("aes salt not set")
+	}
+
+	salt, err := hex.DecodeString(saltHex)
+	if err != nil {
+		return err
+	}
+
 	s.aesKey = shared.DeriveKey(password, salt)
 	s.locked = false
 	return nil

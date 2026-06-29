@@ -95,15 +95,16 @@ type PlanStep struct {
 
 // Migration is the DB model for a migration record.
 type Migration struct {
-	ID          int    `json:"id"`
-	SourceID    int    `json:"sourceId"`
-	TargetID    int    `json:"targetId"`
-	Categories  string `json:"categories"`        // JSON array
-	Status      string `json:"status"`
-	Plan        string `json:"plan,omitempty"`    // JSON MigrationPlan
-	Error       string `json:"error,omitempty"`
-	CreatedAt   string `json:"createdAt"`
-	CompletedAt string `json:"completedAt,omitempty"`
+	ID           int            `json:"id"`
+	SourceID     int            `json:"sourceId"`
+	TargetID     int            `json:"targetId"`
+	Categories   []string       `json:"categories"`
+	Status       string         `json:"status"`
+	Plan         *MigrationPlan `json:"plan,omitempty"`
+	Error        string         `json:"error,omitempty"`
+	CreatedAt    string         `json:"createdAt"`
+	CompletedAt  string         `json:"completedAt,omitempty"`
+	RolledBackAt string         `json:"rolledBackAt,omitempty"`
 }
 
 // MigrationStep is the DB model for a migration step.

@@ -1,7 +1,6 @@
 package migration
 
 import (
-	"strings"
 	"testing"
 )
 
@@ -95,23 +94,35 @@ func TestGetAdapter(t *testing.T) {
 	}
 }
 
+func TestOtherAdapterCommandsQuoteValues(t *testing.T) {
+	if got, want := (&dnfAdapter{}).InstallPackages([]string{"pkg1", "pkg2"}), "dnf install -y 'pkg1' 'pkg2'"; got != want {
+		t.Fatalf("dnf install mismatch:\nwant %q\n got %q", want, got)
+	}
+	if got, want := (&pacmanAdapter{}).RemovePackages([]string{"pkg1"}), "pacman -Rns --noconfirm 'pkg1'"; got != want {
+		t.Fatalf("pacman remove mismatch:\nwant %q\n got %q", want, got)
+	}
+	if got, want := (&zypperAdapter{}).EnableService("sshd.service"), "systemctl enable 'sshd.service'"; got != want {
+		t.Fatalf("zypper enable mismatch:\nwant %q\n got %q", want, got)
+	}
+}
+
 func TestAptAdapterCommands(t *testing.T) {
 	a := &aptAdapter{}
-	if !strings.Contains(a.InstallPackages([]string{"nginx", "redis"}), "nginx redis") {
-		t.Error("apt install command should contain package names")
+	if got, want := a.InstallPackages([]string{"nginx", "redis"}), "apt-get install -y 'nginx' 'redis'"; got != want {
+		t.Fatalf("apt install command mismatch:\nwant %q\n got %q", want, got)
 	}
-	if !strings.Contains(a.EnableService("nginx"), "systemctl enable nginx") {
-		t.Error("apt enable service command wrong")
+	if got, want := a.EnableService("nginx"), "systemctl enable 'nginx'"; got != want {
+		t.Fatalf("apt enable service command mismatch:\nwant %q\n got %q", want, got)
 	}
 }
 
 func TestApkAdapterCommands(t *testing.T) {
 	a := &apkAdapter{}
-	if !strings.Contains(a.EnableService("sshd"), "rc-update add sshd") {
-		t.Error("apk enable service should use rc-update")
+	if got, want := a.EnableService("sshd"), "rc-update add 'sshd'"; got != want {
+		t.Fatalf("apk enable service command mismatch:\nwant %q\n got %q", want, got)
 	}
-	if !strings.Contains(a.StartService("sshd"), "rc-service sshd start") {
-		t.Error("apk start service should use rc-service")
+	if got, want := a.StartService("sshd"), "rc-service 'sshd' start"; got != want {
+		t.Fatalf("apk start service command mismatch:\nwant %q\n got %q", want, got)
 	}
 }
 
@@ -145,5 +156,14 @@ func TestMapPackageNameUnmapped(t *testing.T) {
 	)
 	if result != "nginx" {
 		t.Errorf("unmapped package should return original: got %q", result)
+	}
+}
+
+func TestShellQuote(t *testing.T) {
+	if got, want := shellQuote("simple"), "'simple'"; got != want {
+		t.Fatalf("shellQuote mismatch:\nwant %q\n got %q", want, got)
+	}
+	if got, want := shellQuote("foo'bar"), "'foo'\\''bar'"; got != want {
+		t.Fatalf("shellQuote escaping mismatch:\nwant %q\n got %q", want, got)
 	}
 }

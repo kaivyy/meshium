@@ -10,16 +10,30 @@ import (
 )
 
 type Handler struct {
-	svc *Service
+	svc       *Service
+	keyHandler *KeyHandler
 }
 
 func NewHandler(svc *Service) *Handler {
-	return &Handler{svc: svc}
+	return &Handler{
+		svc:       svc,
+		keyHandler: NewKeyHandler(svc),
+	}
 }
 
 func (h *Handler) RegisterRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("/api/servers", h.handleServers)
 	mux.HandleFunc("/api/servers/", h.handleServerByID)
+	mux.HandleFunc("/api/auth-priority", h.keyHandler.handleAuthPriority)
+	mux.HandleFunc("/api/connection-profiles", h.keyHandler.handleConnectionProfiles)
+	mux.HandleFunc("/api/connection-profiles/", h.keyHandler.handleConnectionProfileByID)
+	mux.HandleFunc("/api/known-hosts", h.keyHandler.handleKnownHosts)
+	mux.HandleFunc("/api/known-hosts/", h.keyHandler.handleKnownHostByID)
+	mux.HandleFunc("/api/host-key-changes", h.keyHandler.handleHostKeyChanges)
+	mux.HandleFunc("/api/dashboard", h.keyHandler.handleDashboard)
+	mux.HandleFunc("/api/ssh-agent/status", h.keyHandler.handleSSHAgentStatus)
+	mux.HandleFunc("/api/export", h.keyHandler.handleExport)
+	mux.HandleFunc("/api/import", h.keyHandler.handleImport)
 }
 
 func (h *Handler) handleServers(w http.ResponseWriter, r *http.Request) {
@@ -74,6 +88,34 @@ func (h *Handler) handleServerByID(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		h.handleGetInfo(w, r, id)
+	case "auth-status":
+		h.keyHandler.handleAuthStatus(w, r, id)
+	case "credential-health":
+		h.keyHandler.handleCredentialHealth(w, r, id)
+	case "connection-history":
+		h.keyHandler.handleConnectionHistory(w, r, id)
+	case "connection-metrics":
+		h.keyHandler.handleConnectionMetrics(w, r, id)
+	case "retry-config":
+		h.keyHandler.handleRetryConfig(w, r, id)
+	case "keys":
+		h.keyHandler.handleServerKeys(w, r, id)
+	case "install-key":
+		h.keyHandler.handleInstallKey(w, r, id)
+	case "verify-key":
+		h.keyHandler.handleVerifyKey(w, r, id)
+	case "rotate-key":
+		h.keyHandler.handleRotateKey(w, r, id)
+	case "fingerprint":
+		h.keyHandler.handleFingerprint(w, r, id)
+	case "test-auth":
+		h.keyHandler.handleTestAuth(w, r, id)
+	case "remove-password":
+		h.keyHandler.handleRemovePassword(w, r, id)
+	case "clear-key":
+		h.keyHandler.handleClearKey(w, r, id)
+	case "agent-config":
+		h.keyHandler.handleAgentConfig(w, r, id)
 	default:
 		shared.WriteError(w, http.StatusNotFound, "not found", "NOT_FOUND")
 	}

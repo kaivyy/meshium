@@ -1,41 +1,16 @@
 import { writable } from 'svelte/store';
-import { api } from '$lib/api/client';
+import {
+  serverApi,
+  type ServerCreateRequest,
+  type ServerListFilters,
+  type ServerResponse,
+  type ServerUpdateRequest,
+  type ServerInfo as ApiServerInfo
+} from '$lib/api/client';
 
-export interface Server {
-  id: number;
-  name: string;
-  description: string;
-  host: string;
-  port: number;
-  username: string;
-  authMethod?: 'password' | 'key';
-  tags: string[];
-  environment: string;
-  region: string;
-  icon: string;
-  color: string;
-  favorite: boolean;
-  createdAt: string;
-  updatedAt: string;
-}
+export interface Server extends ServerResponse {}
 
-export interface ServerInfo {
-  sshStatus: string;
-  latencyMs: number;
-  hostname: string;
-  os: string;
-  kernel: string;
-  architecture: string;
-  cpuModel: string;
-  cpuCores: number;
-  ramTotalMb: number;
-  diskTotalGb: number;
-  virtualization: string;
-  provider: string;
-  publicIp: string;
-  privateIp: string;
-  timezone: string;
-}
+export interface ServerInfo extends ApiServerInfo {}
 
 export interface ServerStoreState {
   servers: Server[];
@@ -67,9 +42,13 @@ function applyFilters(state: ServerStoreState): ServerStoreState {
       server.description,
       server.host,
       server.username,
+      server.authMethod,
+      server.credentialStatus,
+      server.keyType ?? '',
       server.environment,
       server.region,
-      server.tags.join(' ')
+      server.tags.join(' '),
+      server.bastionId ? String(server.bastionId) : ''
     ]
       .join(' ')
       .toLowerCase();
@@ -104,11 +83,11 @@ export function setFilterFavorites(filterFavorites: boolean) {
   updateState((state) => ({ ...state, filterFavorites }));
 }
 
-export async function fetchServers() {
+export async function fetchServers(filters?: ServerListFilters) {
   updateState((state) => ({ ...state, loading: true, error: null }));
 
   try {
-    const servers = await api.get<Server[]>('/servers');
+    const servers = await serverApi.list(filters);
     updateState((state) => ({
       ...state,
       servers,
@@ -124,36 +103,23 @@ export async function fetchServers() {
   }
 }
 
-export async function createServer(
-  data: Partial<Server> & {
-    password?: string;
-    sshKey?: string;
-    passphrase?: string;
-  }
-) {
-  const server = await api.post<Server>('/servers', data);
+export async function createServer(data: ServerCreateRequest | Record<string, unknown>) {
+  const server = await serverApi.create(data as ServerCreateRequest);
   await fetchServers();
   return server;
 }
 
-export async function updateServer(
-  id: number,
-  data: Partial<Server> & {
-    password?: string;
-    sshKey?: string;
-    passphrase?: string;
-  }
-) {
-  await api.put<Server>(`/servers/${id}`, data);
+export async function updateServer(id: number, data: ServerUpdateRequest | Record<string, unknown>) {
+  await serverApi.update(id, data as ServerUpdateRequest);
   await fetchServers();
 }
 
 export async function deleteServer(id: number) {
-  await api.delete(`/servers/${id}`);
+  await serverApi.delete(id);
   await fetchServers();
 }
 
 export async function toggleFavorite(id: number) {
-  await api.patch(`/servers/${id}/favorite`);
+  await serverApi.toggleFavorite(id);
   await fetchServers();
 }

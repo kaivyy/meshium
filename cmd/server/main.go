@@ -1,14 +1,18 @@
 package main
 
 import (
+	"context"
 	"fmt"
 	"net/http"
 	"os"
+	"os/signal"
+	"syscall"
 	"time"
 
 	"meshium/internal/db"
 	"meshium/internal/mod/auth"
 	"meshium/internal/mod/discovery"
+	"meshium/internal/mod/middleware"
 	"meshium/internal/mod/migration"
 	"meshium/internal/mod/server"
 	"meshium/internal/mod/ssh"
@@ -36,7 +40,8 @@ func main() {
 
 	authRepo := auth.NewRepo(database)
 	authSvc := auth.NewService(authRepo)
-	authHandler := auth.NewHandler(authSvc)
+	sessionMgr := auth.NewSessionManager()
+	authHandler := auth.NewHandler(authSvc, sessionMgr)
 
 	serverRepo := server.NewRepo(database)
 	serverSvc := server.NewService(serverRepo, authSvc)
@@ -46,6 +51,7 @@ func main() {
 		MaxIdle:     10 * time.Minute,
 		MaxLifetime: 30 * time.Minute,
 	})
+	defer sshPool.CloseAll()
 	knownHosts := ssh.NewKnownHostsStore(database)
 
 	discoverySvc := discovery.NewService(discovery.NewPoolAdapter(sshPool), serverRepo, authSvc, knownHosts)
@@ -71,10 +77,56 @@ func main() {
 	migrationHandler.RegisterRoutes(mux)
 	mux.Handle("/", staticHandler())
 
-	addr := ":" + cfg.ServerPort
-	fmt.Printf("Meshium server starting on %s\n", addr)
-	if err := http.ListenAndServe(addr, mux); err != nil {
-		fmt.Fprintf(os.Stderr, "Server error: %v\n", err)
-		os.Exit(1)
+	finalHandler := middleware.Chain(
+		mux,
+		middleware.SecurityHeaders(),
+		middleware.RateLimit(),
+		middleware.RequestSizeLimit(),
+		func(next http.Handler) http.Handler {
+			return auth.AuthMiddleware(authSvc, sessionMgr, next)
+		},
+	)
+
+	// Configure HTTP server with timeouts
+	server := &http.Server{
+		Addr:              ":" + cfg.ServerPort,
+		Handler:           finalHandler,
+		ReadHeaderTimeout: 10 * time.Second,
+		ReadTimeout:       30 * time.Second,
+		WriteTimeout:      30 * time.Second,
+		IdleTimeout:       120 * time.Second,
 	}
+
+	// Start server in a goroutine
+	go func() {
+		fmt.Printf("Meshium server starting on %s\n", server.Addr)
+		if cfg.TLSCertFile != "" && cfg.TLSKeyFile != "" {
+			fmt.Printf("TLS enabled (cert: %s)\n", cfg.TLSCertFile)
+			if err := server.ListenAndServeTLS(cfg.TLSCertFile, cfg.TLSKeyFile); err != nil && err != http.ErrServerClosed {
+				fmt.Fprintf(os.Stderr, "Server error: %v\n", err)
+				os.Exit(1)
+			}
+		} else {
+			if err := server.ListenAndServe(); err != nil && err != http.ErrServerClosed {
+				fmt.Fprintf(os.Stderr, "Server error: %v\n", err)
+				os.Exit(1)
+			}
+		}
+	}()
+
+	// Wait for interrupt signal for graceful shutdown
+	quit := make(chan os.Signal, 1)
+	signal.Notify(quit, syscall.SIGINT, syscall.SIGTERM)
+	<-quit
+	fmt.Println("\nShutting down server...")
+
+	// Give outstanding requests 30 seconds to complete
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+
+	if err := server.Shutdown(ctx); err != nil {
+		fmt.Fprintf(os.Stderr, "Server forced to shutdown: %v\n", err)
+	}
+
+	fmt.Println("Server exited")
 }

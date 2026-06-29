@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"strconv"
 	"strings"
+	"time"
 
 	"meshium/internal/shared"
 
@@ -33,9 +34,7 @@ func NewHandler(runner MigrationRunner, repo Repo) *Handler {
 		runner: runner,
 		repo:   repo,
 		upgrader: websocket.Upgrader{
-			CheckOrigin: func(r *http.Request) bool {
-				return true
-			},
+			CheckOrigin: shared.CheckWebSocketOrigin,
 		},
 	}
 }
@@ -138,7 +137,7 @@ func (h *Handler) handleCreate(w http.ResponseWriter, r *http.Request) {
 	// Plan synchronously (for REST, without WebSocket progress)
 	plan, err := h.runner.Plan(r.Context(), req, nil)
 	if err != nil {
-		shared.WriteError(w, http.StatusInternalServerError, "failed to create plan: "+err.Error(), "INTERNAL")
+		shared.WriteErrorSafe(w, http.StatusInternalServerError, "operation failed", "INTERNAL", err)
 		return
 	}
 
@@ -173,7 +172,7 @@ func (h *Handler) handleDelete(w http.ResponseWriter, r *http.Request, id int) {
 func (h *Handler) handleRollback(w http.ResponseWriter, r *http.Request, id int) {
 	err := h.runner.Rollback(r.Context(), id, nil)
 	if err != nil {
-		shared.WriteError(w, http.StatusInternalServerError, "rollback failed: "+err.Error(), "INTERNAL")
+		shared.WriteErrorSafe(w, http.StatusInternalServerError, "operation failed", "INTERNAL", err)
 		return
 	}
 	shared.WriteJSON(w, http.StatusOK, map[string]string{"status": "rolled_back"})
@@ -197,28 +196,7 @@ func (h *Handler) handlePlanWS(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	var req PlanRequest
-	if r.Method == http.MethodPost {
-		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-			http.Error(w, "invalid request body", http.StatusBadRequest)
-			return
-		}
-	} else {
-		sourceID, _ := strconv.Atoi(r.URL.Query().Get("source"))
-		targetID, _ := strconv.Atoi(r.URL.Query().Get("target"))
-		categories := strings.Split(r.URL.Query().Get("categories"), ",")
-		req = PlanRequest{
-			SourceServerID: sourceID,
-			TargetServerID: targetID,
-			Categories:     categories,
-		}
-	}
-
-	if req.SourceServerID == 0 || req.TargetServerID == 0 {
-		http.Error(w, "sourceServerId and targetServerId are required", http.StatusBadRequest)
-		return
-	}
-
+	// Upgrade to WebSocket first
 	conn, err := h.upgrader.Upgrade(w, r, nil)
 	if err != nil {
 		log.Printf("websocket upgrade failed: %v", err)
@@ -226,22 +204,42 @@ func (h *Handler) handlePlanWS(w http.ResponseWriter, r *http.Request) {
 	}
 	defer conn.Close()
 
+	// Read the plan request from the first WebSocket message
+	// (the frontend sends JSON after the connection is established)
+	_, message, err := conn.ReadMessage()
+	if err != nil {
+		log.Printf("websocket read failed: %v", err)
+		return
+	}
+
+	var req PlanRequest
+	if err := json.Unmarshal(message, &req); err != nil {
+		_ = writeJSONWithDeadline(conn, WSMessage{Step: "plan", Status: "error", Error: "invalid request"})
+		return
+	}
+
+	if req.SourceServerID == 0 || req.TargetServerID == 0 {
+		_ = writeJSONWithDeadline(conn, WSMessage{Step: "plan", Status: "error", Error: "sourceServerId and targetServerId are required"})
+		return
+	}
+
 	ctx, cancel := context.WithCancel(r.Context())
 	defer cancel()
 
 	_, err = h.runner.Plan(ctx, req, func(msg WSMessage) {
-		if writeErr := conn.WriteJSON(msg); writeErr != nil {
+		if writeErr := writeJSONWithDeadline(conn, msg); writeErr != nil {
 			log.Printf("websocket write failed: %v", writeErr)
 			cancel()
 		}
 	})
 
 	if err != nil {
-		conn.WriteJSON(WSMessage{Step: "plan", Status: "error", Error: err.Error()})
+		log.Printf("plan failed: %v", err)
+		_ = writeJSONWithDeadline(conn, WSMessage{Step: "plan", Status: "error", Error: "operation failed"})
 		return
 	}
 
-	conn.WriteJSON(WSMessage{Step: "plan", Status: "complete"})
+	_ = writeJSONWithDeadline(conn, WSMessage{Step: "plan", Status: "complete"})
 }
 
 func (h *Handler) handleMigrateWS(w http.ResponseWriter, r *http.Request) {
@@ -282,14 +280,14 @@ func (h *Handler) handleMigrateWS(w http.ResponseWriter, r *http.Request) {
 	var runErr error
 	if action == "rollback" {
 		runErr = h.runner.Rollback(ctx, migrationID, func(msg WSMessage) {
-			if writeErr := conn.WriteJSON(msg); writeErr != nil {
+			if writeErr := writeJSONWithDeadline(conn, msg); writeErr != nil {
 				log.Printf("websocket write failed: %v", writeErr)
 				cancel()
 			}
 		})
 	} else {
 		runErr = h.runner.Execute(ctx, migrationID, func(msg WSMessage) {
-			if writeErr := conn.WriteJSON(msg); writeErr != nil {
+			if writeErr := writeJSONWithDeadline(conn, msg); writeErr != nil {
 				log.Printf("websocket write failed: %v", writeErr)
 				cancel()
 			}
@@ -297,13 +295,21 @@ func (h *Handler) handleMigrateWS(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if runErr != nil {
-		conn.WriteJSON(WSMessage{
+		log.Printf("%s failed for migration %d: %v", action, migrationID, runErr)
+		_ = writeJSONWithDeadline(conn, WSMessage{
 			Step:   action,
 			Status: "error",
-			Error:  runErr.Error(),
+			Error:  "operation failed",
 		})
 		return
 	}
 
-	conn.WriteJSON(WSMessage{Step: action, Status: "complete"})
+	_ = writeJSONWithDeadline(conn, WSMessage{Step: action, Status: "complete"})
+}
+
+func writeJSONWithDeadline(conn *websocket.Conn, msg interface{}) error {
+	if err := conn.SetWriteDeadline(time.Now().Add(10 * time.Second)); err != nil {
+		return err
+	}
+	return conn.WriteJSON(msg)
 }

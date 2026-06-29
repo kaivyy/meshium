@@ -18,6 +18,25 @@ type ConfigsBackup struct {
 	Files map[string][]byte `json:"files"`
 }
 
+// sensitiveFiles are files that should never be collected or backed up
+// because they contain password hashes, private keys, or other secrets.
+var sensitiveFiles = map[string]bool{
+	"/etc/shadow":     true,
+	"/etc/gshadow":    true,
+	"/etc/shadow-":    true,
+	"/etc/gshadow-":   true,
+	"/etc/ssh/ssh_host_rsa_key":     true,
+	"/etc/ssh/ssh_host_dsa_key":     true,
+	"/etc/ssh/ssh_host_ecdsa_key":   true,
+	"/etc/ssh/ssh_host_ed25519_key": true,
+}
+
+// isSensitiveFile returns true if the file path is a sensitive file
+// that should not be collected or backed up.
+func isSensitiveFile(path string) bool {
+	return sensitiveFiles[path]
+}
+
 // ConfigsCollector collects config files from the source server via SFTP.
 type ConfigsCollector struct {
 	Paths []string // paths to collect (default: /etc/)
@@ -35,24 +54,45 @@ func (c *ConfigsCollector) Collect(ssh SSHExecuter) (CategoryData, error) {
 	}
 
 	for _, path := range paths {
-		// List files in the directory
-		stdout, _, _, err := ssh.Exec(fmt.Sprintf("find %s -type f 2>/dev/null", strings.TrimRight(path, "/")))
-		if err != nil {
-			continue // non-fatal
+		cleanPath := strings.TrimRight(path, "/")
+		if cleanPath == "" {
+			cleanPath = "/"
 		}
 
-		for _, file := range strings.Split(strings.TrimSpace(stdout), "\n") {
-			file = strings.TrimSpace(file)
-			if file == "" {
+		candidates := []string{path}
+		if cleanPath != path {
+			candidates = append(candidates, cleanPath)
+		}
+
+		for _, candidate := range candidates {
+			if !validatePath(candidate) {
 				continue
 			}
 
-			// Download the file content
-			buf := new(bytes.Buffer)
-			if err := ssh.Download(file, buf); err != nil {
+			stdout, _, _, err := ssh.Exec(fmt.Sprintf("find %s -type f 2>/dev/null", shellQuote(candidate)))
+			if err != nil {
 				continue // non-fatal
 			}
-			data.Files[file] = buf.Bytes()
+
+			for _, file := range strings.Split(strings.TrimSpace(stdout), "\n") {
+				file = strings.TrimSpace(file)
+				if file == "" {
+					continue
+				}
+				if isSensitiveFile(file) {
+					continue // skip sensitive files
+				}
+
+				buf := new(bytes.Buffer)
+				if err := ssh.Download(file, buf); err != nil {
+					continue // non-fatal
+				}
+				data.Files[file] = buf.Bytes()
+			}
+
+			if len(data.Files) > 0 {
+				break
+			}
 		}
 	}
 
@@ -81,6 +121,9 @@ func (a *ConfigsApplier) Backup(ssh SSHExecuter) (BackupData, error) {
 		file = strings.TrimSpace(file)
 		if file == "" {
 			continue
+		}
+		if isSensitiveFile(file) {
+			continue // skip sensitive files
 		}
 		buf := new(bytes.Buffer)
 		if err := ssh.Download(file, buf); err != nil {

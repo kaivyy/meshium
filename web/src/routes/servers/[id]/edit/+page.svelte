@@ -12,11 +12,12 @@
   let host = '';
   let port = 22;
   let username = 'root';
-  let authMethod: 'password' | 'key' = 'password';
-  let initialAuthMethod: 'password' | 'key' = 'password';
+  let authMethod: 'password' | 'key' | 'agent' | 'keyboard-interactive' = 'password';
+  let initialAuthMethod: 'password' | 'key' | 'agent' | 'keyboard-interactive' = 'password';
   let password = '';
   let sshKey = '';
   let passphrase = '';
+  let keyType = 'rsa';
   let tags = '';
   let environment = '';
   let region = '';
@@ -39,8 +40,9 @@
       environment = server.environment || '';
       region = server.region || '';
       color = server.color || '#3b82f6';
-      authMethod = server.authMethod === 'key' ? 'key' : 'password';
+      authMethod = (server.authMethod as any) || 'password';
       initialAuthMethod = authMethod;
+      keyType = (server as any).keyType || 'rsa';
     } catch {
       error = 'Failed to load server';
     } finally {
@@ -95,6 +97,7 @@
         if (passphrase) {
           data.passphrase = passphrase;
         }
+        data.keyType = keyType;
       }
 
       await updateServer(serverId, data);
@@ -182,8 +185,36 @@
                   <input type="radio" bind:group={authMethod} value="key" />
                   SSH Key
                 </label>
+                <label class="inline-flex items-center gap-2 text-sm text-slate-700">
+                  <input type="radio" bind:group={authMethod} value="agent" />
+                  SSH Agent
+                </label>
+                <label class="inline-flex items-center gap-2 text-sm text-slate-700">
+                  <input type="radio" bind:group={authMethod} value="keyboard-interactive" />
+                  Keyboard-Interactive
+                </label>
               </div>
             </div>
+
+            {#if authMethod === 'key'}
+              <div class="md:col-span-2">
+                <label class="mb-1 block text-sm font-medium text-slate-700">Key Type</label>
+                <div class="flex gap-4">
+                  <label class="inline-flex items-center gap-2 text-sm text-slate-700">
+                    <input type="radio" bind:group={keyType} value="rsa" />
+                    RSA 4096
+                  </label>
+                  <label class="inline-flex items-center gap-2 text-sm text-slate-700">
+                    <input type="radio" bind:group={keyType} value="ed25519" />
+                    ED25519
+                  </label>
+                  <label class="inline-flex items-center gap-2 text-sm text-slate-700">
+                    <input type="radio" bind:group={keyType} value="ecdsa" />
+                    ECDSA P-256
+                  </label>
+                </div>
+              </div>
+            {/if}
 
             {#if authMethod === 'password'}
               <div class="md:col-span-2">

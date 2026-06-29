@@ -73,7 +73,7 @@ func TestPoolGetCreatesConnectionAndReusesIt(t *testing.T) {
 		MaxIdle:     time.Minute,
 		MaxLifetime: 5 * time.Minute,
 	})
-	defer pool.CloseAll()
+	defer pool.Close()
 
 	cfg := ServerConfig{Host: host, Port: port, Username: "test"}
 
@@ -115,7 +115,7 @@ func TestPoolSeparatesConnectionsByServerID(t *testing.T) {
 		MaxIdle:     time.Minute,
 		MaxLifetime: 5 * time.Minute,
 	})
-	defer pool.CloseAll()
+	defer pool.Close()
 
 	cfg := ServerConfig{Host: host, Port: port, Username: "test"}
 
@@ -136,7 +136,7 @@ func TestPoolSeparatesConnectionsByServerID(t *testing.T) {
 	}
 }
 
-func TestPoolCloseAndCloseAll(t *testing.T) {
+func TestPoolReleaseAndClose(t *testing.T) {
 	addr := startPoolTestSSHServer(t)
 	host, portStr, err := net.SplitHostPort(addr)
 	if err != nil {
@@ -160,14 +160,14 @@ func TestPoolCloseAndCloseAll(t *testing.T) {
 		t.Fatalf("Get server 2 failed: %v", err)
 	}
 
-	if err := pool.Close(1); err != nil {
-		t.Fatalf("Close failed: %v", err)
+	if err := pool.Release(1); err != nil {
+		t.Fatalf("Release failed: %v", err)
 	}
 	if got := pool.Count(); got != 1 {
 		t.Fatalf("expected count 1 after Close, got %d", got)
 	}
 
-	pool.CloseAll()
+	pool.Close()
 	if got := pool.Count(); got != 0 {
 		t.Fatalf("expected count 0 after CloseAll, got %d", got)
 	}
@@ -188,7 +188,7 @@ func TestPoolExpiresIdleConnections(t *testing.T) {
 		MaxIdle:     5 * time.Millisecond,
 		MaxLifetime: time.Minute,
 	})
-	defer pool.CloseAll()
+	defer pool.Close()
 
 	cfg := ServerConfig{Host: host, Port: port, Username: "test"}
 
@@ -206,6 +206,39 @@ func TestPoolExpiresIdleConnections(t *testing.T) {
 	if first == second {
 		t.Fatal("expected expired idle connection to be replaced")
 	}
+}
+
+func TestPoolBackgroundSweepRemovesExpiredConnections(t *testing.T) {
+	addr := startPoolTestSSHServer(t)
+	host, portStr, err := net.SplitHostPort(addr)
+	if err != nil {
+		t.Fatalf("SplitHostPort failed: %v", err)
+	}
+	var port int
+	if _, err := fmt.Sscanf(portStr, "%d", &port); err != nil {
+		t.Fatalf("parse port failed: %v", err)
+	}
+
+	pool := NewPool(PoolConfig{
+		MaxIdle:     20 * time.Millisecond,
+		MaxLifetime: time.Minute,
+	})
+	defer pool.Close()
+
+	cfg := ServerConfig{Host: host, Port: port, Username: "test"}
+	if _, err := pool.Get(1, cfg, ssh.InsecureIgnoreHostKey()); err != nil {
+		t.Fatalf("Get failed: %v", err)
+	}
+
+	deadline := time.Now().Add(500 * time.Millisecond)
+	for time.Now().Before(deadline) {
+		if got := pool.Count(); got == 0 {
+			return
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+
+	t.Fatalf("expected background sweep to remove expired connection, got count %d", pool.Count())
 }
 
 func TestNewPoolAppliesDefaultExpiryLimits(t *testing.T) {

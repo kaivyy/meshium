@@ -7,8 +7,8 @@ import (
 
 // DistroInfo holds detected distribution information.
 type DistroInfo struct {
-	Name           string `json:"name"`           // "debian", "ubuntu", "rhel", etc.
-	Family         string `json:"family"`         // "debian", "rhel", "arch", "alpine", "suse"
+	Name           string `json:"name"`   // "debian", "ubuntu", "rhel", etc.
+	Family         string `json:"family"` // "debian", "rhel", "arch", "alpine", "suse"
 	Version        string `json:"version"`
 	PackageManager string `json:"packageManager"` // "apt", "dnf", "yum", "pacman", "apk", "zypper"
 }
@@ -104,6 +104,18 @@ func GetAdapter(info DistroInfo) DistroAdapter {
 	}
 }
 
+func shellQuote(s string) string {
+	return "'" + strings.ReplaceAll(s, "'", "'\\''") + "'"
+}
+
+func shellQuoteList(values []string) string {
+	quoted := make([]string, 0, len(values))
+	for _, value := range values {
+		quoted = append(quoted, shellQuote(value))
+	}
+	return strings.Join(quoted, " ")
+}
+
 // --- apt (Debian/Ubuntu) ---
 
 type aptAdapter struct{}
@@ -116,16 +128,16 @@ func (a *aptAdapter) ListPackages() string {
 	return "dpkg -l | awk 'NR>5 {print $2}'"
 }
 func (a *aptAdapter) InstallPackages(pkgs []string) string {
-	return fmt.Sprintf("apt-get install -y %s", strings.Join(pkgs, " "))
+	return fmt.Sprintf("apt-get install -y %s", shellQuoteList(pkgs))
 }
 func (a *aptAdapter) RemovePackages(pkgs []string) string {
-	return fmt.Sprintf("apt-get remove -y %s", strings.Join(pkgs, " "))
+	return fmt.Sprintf("apt-get remove -y %s", shellQuoteList(pkgs))
 }
 func (a *aptAdapter) EnableService(name string) string {
-	return fmt.Sprintf("systemctl enable %s", name)
+	return fmt.Sprintf("systemctl enable %s", shellQuote(name))
 }
 func (a *aptAdapter) StartService(name string) string {
-	return fmt.Sprintf("systemctl start %s", name)
+	return fmt.Sprintf("systemctl start %s", shellQuote(name))
 }
 
 // --- dnf/yum (RHEL/CentOS) ---
@@ -140,16 +152,16 @@ func (a *dnfAdapter) ListPackages() string {
 	return "rpm -qa --qf '%{NAME}\\n'"
 }
 func (a *dnfAdapter) InstallPackages(pkgs []string) string {
-	return fmt.Sprintf("dnf install -y %s", strings.Join(pkgs, " "))
+	return fmt.Sprintf("dnf install -y %s", shellQuoteList(pkgs))
 }
 func (a *dnfAdapter) RemovePackages(pkgs []string) string {
-	return fmt.Sprintf("dnf remove -y %s", strings.Join(pkgs, " "))
+	return fmt.Sprintf("dnf remove -y %s", shellQuoteList(pkgs))
 }
 func (a *dnfAdapter) EnableService(name string) string {
-	return fmt.Sprintf("systemctl enable %s", name)
+	return fmt.Sprintf("systemctl enable %s", shellQuote(name))
 }
 func (a *dnfAdapter) StartService(name string) string {
-	return fmt.Sprintf("systemctl start %s", name)
+	return fmt.Sprintf("systemctl start %s", shellQuote(name))
 }
 
 // --- pacman (Arch) ---
@@ -164,16 +176,16 @@ func (a *pacmanAdapter) ListPackages() string {
 	return "pacman -Q --qf '%n\\n'"
 }
 func (a *pacmanAdapter) InstallPackages(pkgs []string) string {
-	return fmt.Sprintf("pacman -S --noconfirm %s", strings.Join(pkgs, " "))
+	return fmt.Sprintf("pacman -S --noconfirm %s", shellQuoteList(pkgs))
 }
 func (a *pacmanAdapter) RemovePackages(pkgs []string) string {
-	return fmt.Sprintf("pacman -Rns --noconfirm %s", strings.Join(pkgs, " "))
+	return fmt.Sprintf("pacman -Rns --noconfirm %s", shellQuoteList(pkgs))
 }
 func (a *pacmanAdapter) EnableService(name string) string {
-	return fmt.Sprintf("systemctl enable %s", name)
+	return fmt.Sprintf("systemctl enable %s", shellQuote(name))
 }
 func (a *pacmanAdapter) StartService(name string) string {
-	return fmt.Sprintf("systemctl start %s", name)
+	return fmt.Sprintf("systemctl start %s", shellQuote(name))
 }
 
 // --- apk (Alpine) ---
@@ -188,16 +200,16 @@ func (a *apkAdapter) ListPackages() string {
 	return "apk info -v | awk '{print $1}'"
 }
 func (a *apkAdapter) InstallPackages(pkgs []string) string {
-	return fmt.Sprintf("apk add %s", strings.Join(pkgs, " "))
+	return fmt.Sprintf("apk add %s", shellQuoteList(pkgs))
 }
 func (a *apkAdapter) RemovePackages(pkgs []string) string {
-	return fmt.Sprintf("apk del %s", strings.Join(pkgs, " "))
+	return fmt.Sprintf("apk del %s", shellQuoteList(pkgs))
 }
 func (a *apkAdapter) EnableService(name string) string {
-	return fmt.Sprintf("rc-update add %s", name)
+	return fmt.Sprintf("rc-update add %s", shellQuote(name))
 }
 func (a *apkAdapter) StartService(name string) string {
-	return fmt.Sprintf("rc-service %s start", name)
+	return fmt.Sprintf("rc-service %s start", shellQuote(name))
 }
 
 // --- zypper (SUSE) ---
@@ -212,16 +224,16 @@ func (a *zypperAdapter) ListPackages() string {
 	return "zypper se --installed-only | awk 'NR>2 {print $3}'"
 }
 func (a *zypperAdapter) InstallPackages(pkgs []string) string {
-	return fmt.Sprintf("zypper install -y %s", strings.Join(pkgs, " "))
+	return fmt.Sprintf("zypper install -y %s", shellQuoteList(pkgs))
 }
 func (a *zypperAdapter) RemovePackages(pkgs []string) string {
-	return fmt.Sprintf("zypper remove -y %s", strings.Join(pkgs, " "))
+	return fmt.Sprintf("zypper remove -y %s", shellQuoteList(pkgs))
 }
 func (a *zypperAdapter) EnableService(name string) string {
-	return fmt.Sprintf("systemctl enable %s", name)
+	return fmt.Sprintf("systemctl enable %s", shellQuote(name))
 }
 func (a *zypperAdapter) StartService(name string) string {
-	return fmt.Sprintf("systemctl start %s", name)
+	return fmt.Sprintf("systemctl start %s", shellQuote(name))
 }
 
 // --- Package name mapping ---
@@ -230,25 +242,25 @@ func (a *zypperAdapter) StartService(name string) string {
 // Key format: "sourceFamily->targetFamily" -> map of source package -> target package.
 var packageMap = map[string]map[string]string{
 	"debian->rhel": {
-		"python3-dev":             "python3-devel",
-		"python3-pip":             "python3-pip",
-		"libssl-dev":              "openssl-devel",
-		"libcurl4-openssl-dev":    "libcurl-devel",
-		"build-essential":         "gcc make",
-		"libffi-dev":              "libffi-devel",
-		"libxml2-dev":             "libxml2-devel",
-		"libxslt-dev":             "libxslt-devel",
+		"python3-dev":                "python3-devel",
+		"python3-pip":                "python3-pip",
+		"libssl-dev":                 "openssl-devel",
+		"libcurl4-openssl-dev":       "libcurl-devel",
+		"build-essential":            "gcc make",
+		"libffi-dev":                 "libffi-devel",
+		"libxml2-dev":                "libxml2-devel",
+		"libxslt-dev":                "libxslt-devel",
 		"default-libmysqlclient-dev": "mysql-devel",
-		"libpq-dev":               "postgresql-devel",
+		"libpq-dev":                  "postgresql-devel",
 	},
 	"rhel->debian": {
-		"python3-devel":   "python3-dev",
+		"python3-devel":    "python3-dev",
 		"openssl-devel":    "libssl-dev",
-		"libcurl-devel":   "libcurl4-openssl-dev",
-		"libffi-devel":    "libffi-dev",
-		"libxml2-devel":   "libxml2-dev",
-		"libxslt-devel":   "libxslt-dev",
-		"mysql-devel":     "default-libmysqlclient-dev",
+		"libcurl-devel":    "libcurl4-openssl-dev",
+		"libffi-devel":     "libffi-dev",
+		"libxml2-devel":    "libxml2-dev",
+		"libxslt-devel":    "libxslt-dev",
+		"mysql-devel":      "default-libmysqlclient-dev",
 		"postgresql-devel": "libpq-dev",
 	},
 }

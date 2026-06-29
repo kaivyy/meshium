@@ -7,7 +7,7 @@ import (
 
 func TestConfigsCollector(t *testing.T) {
 	ssh := newMockSSH()
-	ssh.execOutput["find /etc/nginx -type f 2>/dev/null"] = "/etc/nginx/nginx.conf\n/etc/nginx/conf.d/default.conf\n"
+	ssh.execOutput["find '/etc/nginx' -type f 2>/dev/null"] = "/etc/nginx/nginx.conf\n/etc/nginx/conf.d/default.conf\n"
 	ssh.downloadData["/etc/nginx/nginx.conf"] = []byte("worker_processes auto;\n")
 	ssh.downloadData["/etc/nginx/conf.d/default.conf"] = []byte("server { listen 80; }\n")
 
@@ -81,5 +81,22 @@ func TestConfigsApplierRollback(t *testing.T) {
 		}
 	} else {
 		t.Error("expected nginx.conf to be restored via upload")
+	}
+}
+
+func TestConfigsCollectorRejectsInvalidPath(t *testing.T) {
+	ssh := newMockSSH()
+	collector := &ConfigsCollector{Paths: []string{"etc/nginx", "/etc/../shadow"}}
+	data, err := collector.Collect(ssh)
+	if err != nil {
+		t.Fatalf("Collect failed: %v", err)
+	}
+	var cd ConfigsData
+	json.Unmarshal(data.Data, &cd)
+	if cd.Count != 0 {
+		t.Fatalf("expected invalid paths to be skipped, got %d files", cd.Count)
+	}
+	if len(ssh.commands) != 0 {
+		t.Fatalf("expected no shell commands for invalid paths, got %v", ssh.commands)
 	}
 }

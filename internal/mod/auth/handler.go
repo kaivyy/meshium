@@ -9,10 +9,11 @@ import (
 
 type Handler struct {
 	svc *Service
+	sm  *SessionManager
 }
 
-func NewHandler(svc *Service) *Handler {
-	return &Handler{svc: svc}
+func NewHandler(svc *Service, sm *SessionManager) *Handler {
+	return &Handler{svc: svc, sm: sm}
 }
 
 func (h *Handler) RegisterRoutes(mux *http.ServeMux) {
@@ -55,7 +56,8 @@ func (h *Handler) handleSetup(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	shared.WriteJSON(w, http.StatusOK, map[string]string{"status": "ok"})
+	token := h.sm.CreateSession()
+	shared.WriteJSON(w, http.StatusOK, map[string]string{"status": "ok", "sessionToken": token})
 }
 
 func (h *Handler) handleUnlock(w http.ResponseWriter, r *http.Request) {
@@ -75,13 +77,18 @@ func (h *Handler) handleUnlock(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	shared.WriteJSON(w, http.StatusOK, map[string]string{"status": "ok"})
+	token := h.sm.CreateSession()
+	shared.WriteJSON(w, http.StatusOK, map[string]string{"status": "ok", "sessionToken": token})
 }
 
 func (h *Handler) handleLock(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
 		shared.WriteError(w, http.StatusMethodNotAllowed, "method not allowed", "METHOD_NOT_ALLOWED")
 		return
+	}
+
+	if token := r.Header.Get("X-Session-Token"); token != "" {
+		h.sm.RemoveSession(token)
 	}
 
 	h.svc.Lock()

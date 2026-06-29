@@ -162,7 +162,7 @@ func (a *PackagesApplier) Apply(ssh SSHExecuter, data CategoryData, onProgress S
 			DistroInfo{Family: distroFamilyFromPM(targetPM)},
 			pkg,
 		)
-		packagesToInstall = append(packagesToInstall, mapped)
+		packagesToInstall = append(packagesToInstall, strings.Fields(mapped)...)
 	}
 
 	if onProgress != nil {

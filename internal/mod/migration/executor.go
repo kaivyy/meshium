@@ -92,9 +92,11 @@ func (e *Executor) Execute(ctx context.Context, migrationID int, onProgress Step
 		return err
 	}
 
-	// Parse categories from migration
-	var categories []string
-	json.Unmarshal([]byte(migration.Categories), &categories)
+	// Categories are already parsed as []string in the Migration model
+	categories := migration.Categories
+	if categories == nil {
+		categories = []string{}
+	}
 
 	// 5. Backup phase: backup each category on target
 	onProgress(WSMessage{Step: "backup", Status: "progress", Value: "Creating backups on target..."})
@@ -146,9 +148,13 @@ func (e *Executor) Execute(ctx context.Context, migrationID int, onProgress Step
 			return ctx.Err()
 		}
 
-		if step.Action != "collect" || step.Status != StepStatusCompleted {
+		// Only apply collected steps that have data
+		if step.Action != "collect" || step.Data == "" {
 			continue
 		}
+
+		// Mark step as running
+		e.repo.UpdateStepStatus(step.ID, StepStatusRunning, "")
 
 		mod, ok := e.registry.Get(step.Category)
 		if !ok {

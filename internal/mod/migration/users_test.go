@@ -2,6 +2,7 @@ package migration
 
 import (
 	"encoding/json"
+	"strings"
 	"testing"
 )
 
@@ -9,7 +10,7 @@ func TestUsersCollector(t *testing.T) {
 	ssh := newMockSSH()
 	ssh.execOutput["cat /etc/passwd"] = "root:x:0:0:root:/root:/bin/bash\nwww-data:x:33:33:www-data:/var/www:/usr/sbin/nologin\nappuser:x:1000:1000:App User:/home/appuser:/bin/bash\ndeploy:x:1001:1001:Deploy:/home/deploy:/bin/bash\n"
 	ssh.execOutput["cat /etc/group"] = "root:x:0:\nappuser:x:1000:\ndeploy:x:1001:\n"
-	ssh.execOutput["crontab -u appuser -l 2>/dev/null"] = "0 2 * * * /usr/bin/backup.sh\n"
+	ssh.execOutput["crontab -u 'appuser' -l 2>/dev/null"] = "0 2 * * * /usr/bin/backup.sh\n"
 	ssh.execOutput["iptables-save 2>/dev/null || ufw status 2>/dev/null"] = "*filter\n:INPUT ACCEPT [0:0]\nCOMMIT\n"
 
 	collector := &UsersCollector{}
@@ -98,5 +99,26 @@ func TestUsersApplierApply(t *testing.T) {
 	last := progressMsgs[len(progressMsgs)-1]
 	if last.Status != "success" {
 		t.Errorf("expected last status 'success', got '%s'", last.Status)
+	}
+
+	if !containsCommand(ssh.commands, "groupadd -g 1000 'appuser' 2>/dev/null") {
+		t.Error("expected groupadd command to shell-quote the group name")
+	}
+	if !containsCommand(ssh.commands, "useradd -u 1000 -g 1000 -d '/home/appuser' -s '/bin/bash' -m 'appuser' 2>/dev/null") {
+		t.Error("expected useradd command to shell-quote user fields")
+	}
+	if !containsCommandPrefix(ssh.commands, "crontab -u 'appuser' '/tmp/meshium-crontab-") {
+		t.Error("expected crontab install to use a temporary uploaded file")
+	}
+	if len(ssh.uploadData) != 1 {
+		t.Fatalf("expected 1 uploaded temp file, got %d", len(ssh.uploadData))
+	}
+	for path, data := range ssh.uploadData {
+		if !strings.HasPrefix(path, "/tmp/meshium-crontab-") {
+			t.Fatalf("expected crontab temp file path, got %q", path)
+		}
+		if string(data) != ud.CronJobs["appuser"] {
+			t.Fatalf("unexpected crontab temp file content: %q", string(data))
+		}
 	}
 }

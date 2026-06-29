@@ -105,7 +105,7 @@
       <div>
         <h1 class="text-xl font-bold text-slate-900">Migration #{plan.id}</h1>
         <p class="text-sm text-slate-500">
-          Source: Server #{plan.sourceServerId} → Target: Server #{plan.targetServerId}
+          Source: Server #{plan.sourceId} → Target: Server #{plan.targetId}
         </p>
       </div>
       <div class="flex items-center gap-2">

@@ -63,9 +63,9 @@
           <div class="flex items-center justify-between">
             <div class="flex items-center gap-3">
               <div class="flex items-center gap-2">
-                <span class="text-sm font-medium text-slate-900">Server #{m.sourceServerId}</span>
+                <span class="text-sm font-medium text-slate-900">Server #{m.sourceId}</span>
                 <ArrowRight size={14} class="text-slate-400" />
-                <span class="text-sm font-medium text-slate-900">Server #{m.targetServerId}</span>
+                <span class="text-sm font-medium text-slate-900">Server #{m.targetId}</span>
               </div>
             </div>
             <div class="flex items-center gap-3">

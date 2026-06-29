@@ -1,12 +1,27 @@
 <script lang="ts">
   import { page } from '$app/stores';
   import { lock } from '$lib/stores/auth';
-  import { Server, ArrowRightLeft, Settings, LogOut } from 'lucide-svelte';
+  import { Server, ArrowRightLeft, Settings, LogOut, Shield, KeyRound, History, Gauge, SlidersHorizontal } from 'lucide-svelte';
 
   const navItems = [
     { href: '/', label: 'Servers', icon: Server },
     { href: '/migrations', label: 'Migrations', icon: ArrowRightLeft },
   ];
+
+  const sshItems = [
+    { href: '/ssh', label: 'Dashboard', icon: Gauge },
+    { href: '/ssh/known-hosts', label: 'Known Hosts', icon: Shield },
+    { href: '/ssh/profiles', label: 'Profiles', icon: SlidersHorizontal },
+    { href: '/ssh/auth-priority', label: 'Auth Priority', icon: KeyRound },
+    { href: '/ssh/history', label: 'History', icon: History },
+  ];
+
+  function isActive(href: string): boolean {
+    if (href === '/') {
+      return $page.url.pathname === '/';
+    }
+    return $page.url.pathname.startsWith(href);
+  }
 </script>
 
 <aside class="w-60 bg-white border-r border-slate-200 h-screen flex flex-col shrink-0">
@@ -17,12 +32,26 @@
     </a>
   </div>
 
-  <nav class="flex-1 p-2">
+  <nav class="flex-1 p-2 overflow-y-auto">
     {#each navItems as item}
       <a
         href={item.href}
         class="flex items-center gap-3 px-3 py-2 rounded-lg text-sm transition-colors
-          {($page.url.pathname === '/' && item.href === '/') || ($page.url.pathname.startsWith(item.href) && item.href !== '/')
+          {isActive(item.href)
+            ? 'bg-blue-50 text-blue-700 font-medium'
+            : 'text-slate-600 hover:bg-slate-50'}"
+      >
+        <item.icon size={18} />
+        {item.label}
+      </a>
+    {/each}
+
+    <div class="mt-4 mb-1 px-3 text-xs font-semibold text-slate-400 uppercase tracking-wider">SSH</div>
+    {#each sshItems as item}
+      <a
+        href={item.href}
+        class="flex items-center gap-3 px-3 py-2 rounded-lg text-sm transition-colors
+          {isActive(item.href)
             ? 'bg-blue-50 text-blue-700 font-medium'
             : 'text-slate-600 hover:bg-slate-50'}"
       >

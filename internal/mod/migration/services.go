@@ -179,7 +179,7 @@ func (a *ServicesApplier) Rollback(ssh SSHExecuter, backup BackupData) error {
 	// Disable services that are enabled now but weren't in the backup
 	for svc := range currentServices {
 		if !contains(sb.Services, svc) {
-			ssh.Exec(fmt.Sprintf("systemctl disable --now %s 2>/dev/null", svc))
+			ssh.Exec(fmt.Sprintf("systemctl disable --now %s 2>/dev/null", shellQuote(svc)))
 		}
 	}
 

@@ -49,11 +49,11 @@ func (r *sqliteRepo) CreateMigration(sourceID, targetID int, categories []string
 func (r *sqliteRepo) GetMigration(id int) (*Migration, error) {
 	var m Migration
 	var categoriesJSON, planJSON string
-	var completedAt sql.NullString
+	var completedAt, rolledBackAt sql.NullString
 	err := r.db.QueryRow(
-		`SELECT id, source_id, target_id, categories, status, plan, error, created_at, completed_at
+		`SELECT id, source_id, target_id, categories, status, plan, error, created_at, completed_at, rolled_back_at
 		 FROM migrations WHERE id = ?`, id,
-	).Scan(&m.ID, &m.SourceID, &m.TargetID, &categoriesJSON, &m.Status, &planJSON, &m.Error, &m.CreatedAt, &completedAt)
+	).Scan(&m.ID, &m.SourceID, &m.TargetID, &categoriesJSON, &m.Status, &planJSON, &m.Error, &m.CreatedAt, &completedAt, &rolledBackAt)
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, errors.New("migration not found")
 	}
@@ -61,16 +61,21 @@ func (r *sqliteRepo) GetMigration(id int) (*Migration, error) {
 		return nil, err
 	}
 	json.Unmarshal([]byte(categoriesJSON), &m.Categories)
-	_ = planJSON
+	if planJSON != "" {
+		json.Unmarshal([]byte(planJSON), &m.Plan)
+	}
 	if completedAt.Valid {
 		m.CompletedAt = completedAt.String
+	}
+	if rolledBackAt.Valid {
+		m.RolledBackAt = rolledBackAt.String
 	}
 	return &m, nil
 }
 
 func (r *sqliteRepo) ListMigrations() ([]Migration, error) {
 	rows, err := r.db.Query(
-		`SELECT id, source_id, target_id, categories, status, error, created_at, completed_at
+		`SELECT id, source_id, target_id, categories, status, error, created_at, completed_at, rolled_back_at
 		 FROM migrations ORDER BY created_at DESC`,
 	)
 	if err != nil {
@@ -82,13 +87,16 @@ func (r *sqliteRepo) ListMigrations() ([]Migration, error) {
 	for rows.Next() {
 		var m Migration
 		var categoriesJSON string
-		var completedAt sql.NullString
-		if err := rows.Scan(&m.ID, &m.SourceID, &m.TargetID, &categoriesJSON, &m.Status, &m.Error, &m.CreatedAt, &completedAt); err != nil {
+		var completedAt, rolledBackAt sql.NullString
+		if err := rows.Scan(&m.ID, &m.SourceID, &m.TargetID, &categoriesJSON, &m.Status, &m.Error, &m.CreatedAt, &completedAt, &rolledBackAt); err != nil {
 			return nil, err
 		}
 		json.Unmarshal([]byte(categoriesJSON), &m.Categories)
 		if completedAt.Valid {
 			m.CompletedAt = completedAt.String
+		}
+		if rolledBackAt.Valid {
+			m.RolledBackAt = rolledBackAt.String
 		}
 		migrations = append(migrations, m)
 	}
@@ -109,13 +117,15 @@ func (r *sqliteRepo) SetMigrationPlan(id int, plan MigrationPlan) error {
 	return err
 }
 
+
+
 func (r *sqliteRepo) SetMigrationCompletedAt(id int, ts string) error {
 	_, err := r.db.Exec("UPDATE migrations SET completed_at = ? WHERE id = ?", ts, id)
 	return err
 }
 
 func (r *sqliteRepo) SetMigrationRolledBackAt(id int, ts string) error {
-	_, err := r.db.Exec("UPDATE migrations SET completed_at = ? WHERE id = ?", ts, id)
+	_, err := r.db.Exec("UPDATE migrations SET rolled_back_at = ?, status = 'rolled_back' WHERE id = ?", ts, id)
 	return err
 }
 
@@ -134,7 +144,7 @@ func (r *sqliteRepo) DeleteMigration(id int) error {
 func (r *sqliteRepo) CreateStep(migrationID int, category, action, data string) (int, error) {
 	res, err := r.db.Exec(
 		`INSERT INTO migration_steps (migration_id, category, action, status, data, started_at)
-		 VALUES (?, ?, ?, 'completed', ?, CURRENT_TIMESTAMP)`,
+		 VALUES (?, ?, ?, 'pending', ?, CURRENT_TIMESTAMP)`,
 		migrationID, category, action, data,
 	)
 	if err != nil {
