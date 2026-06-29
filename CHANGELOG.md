@@ -9,6 +9,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [1.3.0] — 2026-06-29
 
+The first major update since v1.2.0. Includes Discovery Engine, Migration Planner, Job Engine, security hardening, frontend UX improvements, Docker deployment, and structured logging.
+
 ### Security Hardening
 
 #### Authentication & Authorization
@@ -34,253 +36,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Executor** — Checks step data presence instead of status when selecting steps to apply
 - **Rollback validation** — Only allows rollback from `completed` or `failed` states
 - **Frontend types** — Corrected `sourceId`/`targetId` field names to match backend JSON tags
-
-### Infrastructure
-- **Docker deployment** — Multi-stage Dockerfile (node → go → alpine) with docker-compose.yml, non-root user, health check
-- **Structured logging** — JSON logger with configurable log level (`internal/shared/logger.go`)
-- **Updated dependencies** — postcss 8.5.16, @sveltejs/kit 2.68.0, svelte 5.56.4, cookie override for CVE fixes
-
----
-
-## [1.5.1] — 2026-06-28
-
-### Bug Fixes
-- **Atomic salt storage** — `pbkdf2_salt` is now stored in the same DB transaction as `master_password_hash`, `ssh_key_private_encrypted`, and `ssh_key_public`, preventing inconsistent unlock states.
-- **Fail-fast Unlock()** — `Unlock()` now returns a clear error when `pbkdf2_salt` is missing or empty instead of silently deriving a key from an empty salt.
-- **SSH helper decrypt errors** — `buildSSHConfig()` and `resolveBastion()` now return decrypt errors instead of ignoring them, and empty credential fields are skipped.
-- **Snapshot null checks** — Discovery, monitoring, and dashboard pages now treat both `null` and `undefined` snapshots as missing, preventing crashes on `snap.capturedAt` after 404 fetches.
+- **Atomic salt storage** — `pbkdf2_salt` is now stored in the same DB transaction as `master_password_hash`, `ssh_key_private_encrypted`, and `ssh_key_public`, preventing inconsistent unlock states
+- **Fail-fast Unlock()** — `Unlock()` now returns a clear error when `pbkdf2_salt` is missing or empty
+- **SSH helper decrypt errors** — `buildSSHConfig()` and `resolveBastion()` now return decrypt errors instead of ignoring them
+- **Snapshot null checks** — Discovery, monitoring, and dashboard pages now treat both `null` and `undefined` snapshots as missing
 
 ### Frontend
-- **Shared snapshot cache** — Added `/web/src/lib/stores/snapshots.ts` so discovery, monitoring, docker, files, alerts, dashboard, and server detail pages share snapshot data and avoid redundant 404 retries.
-- **403 LOCKED redirect** — The API client now clears the session token and redirects to `/login` on `403` responses with `code: "LOCKED"`.
-- **Favicon** — Added `favicon.svg` and a `<link rel="icon">` in `app.html`.
-- **Svelte 5 compatibility** — Fixed `{@const}` placement so it is an immediate child of `{#each}` blocks.
-- **Card class handling** — Wrapped `Card` usage in `<div class="...">` instead of passing `class` as a prop.
-
-### Phase 3 Completion
-- **Alerts page** — Aggregates alerts from snapshots, jobs, and migrations.
-- **Terminal page** — SSH connection test UI with WebSocket real-time output.
-- **Files page** — Disk usage explorer with partition aggregation and filtering.
-- **Dashboard page** — Real activity feed showing recent jobs and migrations.
-
----
-
-## [1.5.0] — 2026-06-28
-
-### Job Engine (Phase 6)
-
-#### Added — Domain Types
-- **JobType** enum — Migration, Discovery, CompatCheck
-- **JobStatus** enum — Queued, Running, Paused, Done, Failed, Cancelled
-  - `IsTerminal()` — true for Done, Failed, Cancelled
-  - `IsActive()` — true for Queued, Running, Paused
-- **LogLevel** enum — Info, Warn, Error
-- **Job** struct — ID, Type, Status, CreatedAt, StartedAt, FinishedAt, PlanID, MigrationID, Progress, Logs, Error
-- **JobProgress** — CurrentStep, TotalSteps, CurrentName, Percentage, BytesDone, BytesTotal, SpeedBPS, ETA
-- **JobLog** — Timestamp, Level, Step, Message
-- **JobRequest** — Type, PlanID, SourceID, TargetID, MigrationID
-- **JobFilter** — Type, Status, Limit
-
-#### Added — Job Queue
-- **JobQueue interface** — Enqueue, Dequeue, Peek, Size, Remove
-- **SQLiteJobQueue** — SQLite-backed FIFO queue
-  - `job_queue` table with id, job (JSON), position, enqueued_at
-  - Sequential position column for FIFO ordering
-  - Index on position for efficient dequeue
-  - Transaction support for atomic operations
-- **InMemoryJobQueue** — In-memory implementation for testing
-
-#### Added — Job Store
-- **JobStore interface** — SaveJob, LoadJob, ListJobs, AppendLog, GetLogs, UpdateProgress
-- **SQLiteJobStore** — SQLite-backed job + log persistence
-  - `jobs` table with id, type, status, plan_id, migration_id, error, timestamps
-  - `job_logs` table with FK to jobs, index on job_id + timestamp
-  - Indexes on status, type, created_at
-  - UPSERT support (ON CONFLICT DO UPDATE)
-- **NoopJobStore** — No-op implementation for testing
-
-#### Added — Progress Broadcaster
-- **ProgressBroadcaster interface** — Subscribe, Unsubscribe, Broadcast, Cleanup
-- **DefaultProgressBroadcaster** — Channel-based pub/sub
-  - Per-job subscriber maps with RWMutex
-  - Non-blocking broadcast: `select { case ch <- progress: default: }` — drops if channel full
-  - 16-entry buffer per subscriber
-  - Auto-cleanup: closes all channels and removes subscribers
-
-#### Added — Job Handlers
-- **JobHandler interface** — `Execute(ctx, job, onProgress, onLog)`
-- **MigrationJobHandler** — Loads Phase 5 plan → builds steps via bridge → runs Phase 2 Engine
-  - Reports progress from StepCallback
-  - Reports logs at Info/Warn/Error levels
-- **DiscoveryJobHandler** — SSH to server → runs Phase 4 CollectorRunner → saves snapshot
-- **CompatCheckJobHandler** — Loads two snapshots → runs Phase 4 CheckCompatibility
-  - Reports blockers and warnings as logs
-
-#### Added — Engine
-- **Engine** struct — queue, store, broadcaster, shutdown, handlerFactory, maxWorkers
-- **HandlerFactory interface** — Creates handlers by job type (dependency injection)
-- **EngineConfig** — Queue, Store, Broadcaster, HandlerFactory, MaxWorkers (default 1)
-- **Start(ctx)** — Recovers interrupted jobs → launches worker goroutines
-- **Stop(ctx)** — Closes stop channel → ShutdownManager waits up to 30s → workers exit
-- **Submit(ctx, req)** — Creates Job → SaveJob → Enqueue → returns job
-- **Cancel(ctx, jobID)** — Removes from queue (if queued) or cancels context (if running)
-- **Pause(ctx, jobID)** — Cancels context, sets status to Paused
-- **Resume(ctx, jobID)** — Re-enqueues a paused job
-- **GetJob**, **ListJobs**, **GetLogs**, **SubscribeProgress**, **UnsubscribeProgress**
-- **Worker loop** — Continuously dequeue → executeJob → handler.Execute → update status
-  - 5-second dequeue timeout, 500ms idle sleep when queue empty
-- **recoverJobs()** — Running → Paused (manual resume), Queued → stays queued (auto-processed)
-
-#### Added — Graceful Shutdown
-- **ShutdownManager** — Tracks running jobs with cancel functions
-  - `Register(jobID, cancelFunc)` / `Unregister(jobID)`
-  - `RunningCount()` — number of active jobs
-  - `Shutdown(ctx)` — Polls every 500ms until all jobs finish or 30s timeout → force-cancel remaining
-- Default timeout: 30 seconds
-
-### Testing
-- 31 new tests in `internal/jobengine` — all pass with `-race` detector
-  - Submit job: queued/running, not started, all types (migration, discovery, compat_check)
-  - Job execution: success, failure
-  - Cancel: queued, running
-  - Progress broadcast: receive updates, non-blocking
-  - Graceful shutdown: with running job, empty
-  - Concurrent jobs: sequential execution (maxWorkers=1)
-  - Pause/Resume
-  - Recovery after restart: crashed job → paused
-  - List jobs with filter
-  - Job status: IsTerminal, IsActive
-  - SQLiteJobQueue: enqueue/dequeue, peek, remove
-  - SQLiteJobStore: save/load, append/get logs, update progress
-  - ProgressBroadcaster: non-blocking, multiple subscribers, cleanup
-  - ShutdownManager: register/unregister, empty shutdown
-  - Integration: Planner PlanStore + JobEngine, Discovery SnapshotStore
-  - File-based DB
-
-### Changed
-- Architecture diagram updated to show Job Engine layer above Migration Engine
-- Project structure updated with `internal/jobengine/` directory
-- Test badge updated: "190+ passing" → "220+ passing with -race"
-
----
-
-## [1.4.0] — 2026-06-28
-
-### Migration Planner (Phase 5)
-
-#### Added — Migration Plan Types
-- **MigrationPlan** — Concrete migration plan with ordered steps, estimates, risk assessment, and warnings/blockers
-  - `ID`, `CreatedAt`, `Source`/`Target` (ServerSummary), `Steps` ([]PlannedStep), `TotalEstimate`, `RiskLevel`, `Warnings`, `Blockers`
-  - `HasBlockers()` — quick check for blocking issues
-  - `StepCount()` — number of steps in the plan
-- **PlannedStep** — Single step in a migration plan
-  - `Order`, `Name`, `Type` (StepType), `DependsOn` ([]int), `Estimate` (TransferEstimate), `RiskLevel`, `Reversible`, `Config` (map[string]interface{})
-  - Config holds workload-specific data used by the bridge to create MigrationStep instances
-- **RiskLevel** — Low, Medium, High, Critical
-- **StepType** — DockerVolume, DockerImage, Database, File, Config, Nginx, Service
-- **ServerSummary** — Lightweight server summary (hostname, OS, RAM, disk)
-- **TransferEstimate** — SizeBytes, DurationMin, DurationMax, Confidence (0.0–1.0)
-- **PlanWarning** / **PlanBlocker** — Non-blocking and blocking issues with code + message
-- **MigrationPlanSummary** — Lightweight summary for listing plans
-
-#### Added — Planner
-- **Planner interface** — `CreatePlan(ctx, source, target *discovery.ServerSnapshot) (*MigrationPlan, error)`
-- **DefaultPlanner** — Implements the full planning pipeline:
-  1. Run compatibility check (Phase 4 CompatibilityChecker)
-  2. Build dependency graph from source snapshot (Phase 4 BuildDependencyGraph)
-  3. Topological sort → determine safe migration order
-  4. For each node: generate PlannedStep using workload-specific generators
-  5. Compute DependsOn from graph edges
-  6. Estimate transfer size and duration per step
-  7. Assess risk per step and overall
-  8. Convert compatibility blockers/warnings to PlanBlocker/PlanWarning
-  9. Compute total estimate across all steps
-  10. Assess overall risk level
-- If blockers are present, CreatePlan still returns the plan — the caller decides whether to proceed
-- Dependency cycle detection returns a plan with a Critical blocker
-
-#### Added — Step Generators
-- **StepGenerator interface** — `Generate(node, source, target) (*PlannedStep, error)`
-- **DockerStepGenerator** — Generates DockerVolume + DockerImage steps for containers
-  - Config: containerName, image, volumes, ports, networks, labels, composeProject, composeFile
-- **DatabaseStepGenerator** — Generates Database dump/restore steps
-  - Config: type, version, port, dataDir, sizeMB, dumpCommand, restoreCommand
-- **FileStepGenerator** — Generates File transfer steps for non-Docker directories
-  - Config: sourcePath, targetPath, isDirectory
-- **NginxStepGenerator** — Generates Nginx config migration steps
-  - Config: serverName, configFile, listen, proxyPass
-- **ServiceStepGenerator** — Generates systemd service management steps
-  - Config: name, type, dependsOn
-
-#### Added — Risk Assessor
-- **RiskAssessor interface** — `AssessStep(step, source, target) RiskLevel` and `AssessOverall(plan) RiskLevel`
-- **DefaultRiskAssessor** with configurable thresholds:
-  - Database migration → High (data loss risk)
-  - Running container → High (requires downtime)
-  - Large volume (>10GB) → High
-  - Large database (>5GB) → High
-  - Unknown service dependencies → Medium
-  - Port conflict on target → Critical
-  - Blockers present → Critical overall
-  - 3+ high-risk steps → Critical overall
-  - Highest step risk determines overall risk (with compound elevation)
-
-#### Added — Transfer Estimator
-- **Estimator interface** — `EstimateStep(step, source) TransferEstimate`
-- **DefaultEstimator** with configurable speed assumptions:
-  - Network transfer: 100 MB/s (100 * 1024 * 1024 B/s)
-  - Database dump: 50 MB/s (50 * 1024 * 1024 B/s)
-  - rsync overhead: 1.2x (20% protocol overhead)
-- Size estimation per step type:
-  - Docker volumes: 500MB per volume
-  - Docker images: from snapshot or 500MB default
-  - Database: from SizeMB or 1GB default
-  - Files: 1GB default
-  - Configs: 50MB
-  - Nginx: 5MB
-  - Services: 0 (no data transfer)
-- Confidence scoring (0.0–1.0) based on data availability
-- Duration = size / speed, with rsync overhead and 50% pessimism for max
-
-#### Added — Plan Store
-- **PlanStore interface** — `SavePlan`, `LoadPlan`, `ListPlans`, `DeletePlan`
-- **SQLitePlanStore** — SQLite-backed with WAL mode
-  - `migration_plans` table with id, plan JSON, source/target host, step count, risk level, has_blockers, created_at
-  - Index on created_at for efficient listing
-  - Upsert support (ON CONFLICT DO UPDATE)
-- **NoopPlanStore** — No-op implementation for testing
-- **MigrationPlanSummary** — Lightweight summary for list operations
-
-#### Added — Plan → Engine Bridge
-- **BuildSteps(plan, sourceSSH, targetSSH)** — Converts MigrationPlan to []migration.MigrationStep
-  - All returned steps implement the `migration.MigrationStep` interface (Prepare/Apply/Verify/Rollback)
-  - **DockerVolumeMigrationStep** — Stop container, transfer volumes via io.Pipe streaming, start on target
-  - **DockerImageMigrationStep** — Pull image on target via `docker pull`
-  - **DatabaseMigrationStep** — Dump on source, stream via io.Pipe, restore on target
-  - **NginxMigrationStep** — Copy config file, verify syntax with `nginx -t`, reload with `nginx -s reload`
-  - **ServiceMigrationStep** — Enable and start systemd service via `systemctl enable --now`
-  - File/Config steps use `transfer.FileTransferStep` from Phase 3
-- Compile-time interface compliance verified via `var _ migration.MigrationStep = (*StepType)(nil)`
-
-### Testing
-- 43 new tests in `internal/mod/planner` — all pass with `-race` detector
-  - Plan generation: basic plan, step order, step types, blockers, nil inputs, cancelled context, total estimate, dependency cycle, empty snapshot, no Docker, Docker mismatch
-  - Risk assessment: database, Docker volume, Nginx, service, overall with blockers, multiple high-risk, low risk, port conflict
-  - Estimator: database, Docker image, service, nil source, parseImageSize
-  - PlanStore: save/load, load not found, list, delete, delete non-existent, save nil, save empty ID, concurrent save, concurrent read/write, file-based DB
-  - Bridge: basic plan, empty plan, nil plan, with blockers
-  - Integration: full pipeline (snapshot → plan → store → load → bridge → MigrationStep)
-  - JSON roundtrip serialization
-  - Concurrent plan creation
-
-### Changed
-- Architecture diagram updated to show Migration Planner layer between Discovery Engine and Migration Engine
-- Project structure updated with `internal/mod/planner/` directory
-- Test badge updated: "150+ passing" → "190+ passing with -race"
-
----
-
-## [1.3.0] — 2026-06-28
+- **Shared snapshot cache** — Added `/web/src/lib/stores/snapshots.ts` so discovery, monitoring, docker, files, alerts, dashboard, and server detail pages share snapshot data
+- **403 LOCKED redirect** — The API client now clears the session token and redirects to `/login` on `403` responses with `code: "LOCKED"`
+- **Favicon** — Added `favicon.svg` and a `<link rel="icon">` in `app.html`
+- **Svelte 5 compatibility** — Fixed `{@const}` placement so it is an immediate child of `{#each}` blocks
+- **Card class handling** — Wrapped `Card` usage in `<div class="...">` instead of passing `class` as a prop
+- **Alerts page** — Aggregates alerts from snapshots, jobs, and migrations
+- **Terminal page** — SSH connection test UI with WebSocket real-time output
+- **Files page** — Disk usage explorer with partition aggregation and filtering
+- **Dashboard page** — Real activity feed showing recent jobs and migrations
 
 ### Discovery Engine (Phase 4)
 
@@ -358,7 +128,159 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - Verify: fails if any blockers are found
   - Rollback: no-op
 
-#### Added — Transfer Engine (Phase 3)
+### Migration Planner (Phase 5)
+
+#### Added — Migration Plan Types
+- **MigrationPlan** — Concrete migration plan with ordered steps, estimates, risk assessment, and warnings/blockers
+  - `ID`, `CreatedAt`, `Source`/`Target` (ServerSummary), `Steps` ([]PlannedStep), `TotalEstimate`, `RiskLevel`, `Warnings`, `Blockers`
+  - `HasBlockers()` — quick check for blocking issues
+  - `StepCount()` — number of steps in the plan
+- **PlannedStep** — Single step in a migration plan
+  - `Order`, `Name`, `Type` (StepType), `DependsOn` ([]int), `Estimate` (TransferEstimate), `RiskLevel`, `Reversible`, `Config` (map[string]interface{})
+- **RiskLevel** — Low, Medium, High, Critical
+- **StepType** — DockerVolume, DockerImage, Database, File, Config, Nginx, Service
+- **ServerSummary** — Lightweight server summary (hostname, OS, RAM, disk)
+- **TransferEstimate** — SizeBytes, DurationMin, DurationMax, Confidence (0.0–1.0)
+- **PlanWarning** / **PlanBlocker** — Non-blocking and blocking issues with code + message
+- **MigrationPlanSummary** — Lightweight summary for listing plans
+
+#### Added — Planner
+- **Planner interface** — `CreatePlan(ctx, source, target *discovery.ServerSnapshot) (*MigrationPlan, error)`
+- **DefaultPlanner** — Implements the full planning pipeline:
+  1. Run compatibility check (Phase 4 CompatibilityChecker)
+  2. Build dependency graph from source snapshot (Phase 4 BuildDependencyGraph)
+  3. Topological sort → determine safe migration order
+  4. For each node: generate PlannedStep using workload-specific generators
+  5. Compute DependsOn from graph edges
+  6. Estimate transfer size and duration per step
+  7. Assess risk per step and overall
+  8. Convert compatibility blockers/warnings to PlanBlocker/PlanWarning
+  9. Compute total estimate across all steps
+  10. Assess overall risk level
+- If blockers are present, CreatePlan still returns the plan — the caller decides whether to proceed
+- Dependency cycle detection returns a plan with a Critical blocker
+
+#### Added — Step Generators
+- **StepGenerator interface** — `Generate(node, source, target) (*PlannedStep, error)`
+- **DockerStepGenerator** — Generates DockerVolume + DockerImage steps for containers
+- **DatabaseStepGenerator** — Generates Database dump/restore steps
+- **FileStepGenerator** — Generates File transfer steps for non-Docker directories
+- **NginxStepGenerator** — Generates Nginx config migration steps
+- **ServiceStepGenerator** — Generates systemd service management steps
+
+#### Added — Risk Assessor
+- **RiskAssessor interface** — `AssessStep(step, source, target) RiskLevel` and `AssessOverall(plan) RiskLevel`
+- **DefaultRiskAssessor** with configurable thresholds:
+  - Database migration → High (data loss risk)
+  - Running container → High (requires downtime)
+  - Large volume (>10GB) → High
+  - Large database (>5GB) → High
+  - Unknown service dependencies → Medium
+  - Port conflict on target → Critical
+  - Blockers present → Critical overall
+  - 3+ high-risk steps → Critical overall
+
+#### Added — Transfer Estimator
+- **Estimator interface** — `EstimateStep(step, source) TransferEstimate`
+- **DefaultEstimator** with configurable speed assumptions:
+  - Network transfer: 100 MB/s
+  - Database dump: 50 MB/s
+  - rsync overhead: 1.2x (20% protocol overhead)
+- Confidence scoring (0.0–1.0) based on data availability
+
+#### Added — Plan Store
+- **PlanStore interface** — `SavePlan`, `LoadPlan`, `ListPlans`, `DeletePlan`
+- **SQLitePlanStore** — SQLite-backed with WAL mode
+  - `migration_plans` table with id, plan JSON, source/target host, step count, risk level, has_blockers, created_at
+  - Index on created_at for efficient listing
+  - Upsert support (ON CONFLICT DO UPDATE)
+- **NoopPlanStore** — No-op implementation for testing
+
+#### Added — Plan → Engine Bridge
+- **BuildSteps(plan, sourceSSH, targetSSH)** — Converts MigrationPlan to []migration.MigrationStep
+  - All returned steps implement the `migration.MigrationStep` interface (Prepare/Apply/Verify/Rollback)
+  - **DockerVolumeMigrationStep** — Stop container, transfer volumes via io.Pipe streaming, start on target
+  - **DockerImageMigrationStep** — Pull image on target via `docker pull`
+  - **DatabaseMigrationStep** — Dump on source, stream via io.Pipe, restore on target
+  - **NginxMigrationStep** — Copy config file, verify syntax with `nginx -t`, reload with `nginx -s reload`
+  - **ServiceMigrationStep** — Enable and start systemd service via `systemctl enable --now`
+  - File/Config steps use `transfer.FileTransferStep` from Phase 3
+- Compile-time interface compliance verified via `var _ migration.MigrationStep = (*StepType)(nil)`
+
+### Job Engine (Phase 6)
+
+#### Added — Domain Types
+- **JobType** enum — Migration, Discovery, CompatCheck
+- **JobStatus** enum — Queued, Running, Paused, Done, Failed, Cancelled
+  - `IsTerminal()` — true for Done, Failed, Cancelled
+  - `IsActive()` — true for Queued, Running, Paused
+- **LogLevel** enum — Info, Warn, Error
+- **Job** struct — ID, Type, Status, CreatedAt, StartedAt, FinishedAt, PlanID, MigrationID, Progress, Logs, Error
+- **JobProgress** — CurrentStep, TotalSteps, CurrentName, Percentage, BytesDone, BytesTotal, SpeedBPS, ETA
+- **JobLog** — Timestamp, Level, Step, Message
+- **JobRequest** — Type, PlanID, SourceID, TargetID, MigrationID
+- **JobFilter** — Type, Status, Limit
+
+#### Added — Job Queue
+- **JobQueue interface** — Enqueue, Dequeue, Peek, Size, Remove
+- **SQLiteJobQueue** — SQLite-backed FIFO queue
+  - `job_queue` table with id, job (JSON), position, enqueued_at
+  - Sequential position column for FIFO ordering
+  - Index on position for efficient dequeue
+  - Transaction support for atomic operations
+- **InMemoryJobQueue** — In-memory implementation for testing
+
+#### Added — Job Store
+- **JobStore interface** — SaveJob, LoadJob, ListJobs, AppendLog, GetLogs, UpdateProgress
+- **SQLiteJobStore** — SQLite-backed job + log persistence
+  - `jobs` table with id, type, status, plan_id, migration_id, error, timestamps
+  - `job_logs` table with FK to jobs, index on job_id + timestamp
+  - Indexes on status, type, created_at
+  - UPSERT support (ON CONFLICT DO UPDATE)
+- **NoopJobStore** — No-op implementation for testing
+
+#### Added — Progress Broadcaster
+- **ProgressBroadcaster interface** — Subscribe, Unsubscribe, Broadcast, Cleanup
+- **DefaultProgressBroadcaster** — Channel-based pub/sub
+  - Per-job subscriber maps with RWMutex
+  - Non-blocking broadcast: `select { case ch <- progress: default: }` — drops if channel full
+  - 16-entry buffer per subscriber
+  - Auto-cleanup: closes all channels and removes subscribers
+
+#### Added — Job Handlers
+- **JobHandler interface** — `Execute(ctx, job, onProgress, onLog)`
+- **MigrationJobHandler** — Loads Phase 5 plan → builds steps via bridge → runs Phase 2 Engine
+  - Reports progress from StepCallback
+  - Reports logs at Info/Warn/Error levels
+- **DiscoveryJobHandler** — SSH to server → runs Phase 4 CollectorRunner → saves snapshot
+- **CompatCheckJobHandler** — Loads two snapshots → runs Phase 4 CheckCompatibility
+  - Reports blockers and warnings as logs
+
+#### Added — Engine
+- **Engine** struct — queue, store, broadcaster, shutdown, handlerFactory, maxWorkers
+- **HandlerFactory interface** — Creates handlers by job type (dependency injection)
+- **EngineConfig** — Queue, Store, Broadcaster, HandlerFactory, MaxWorkers (default 1)
+- **Start(ctx)** — Recovers interrupted jobs → launches worker goroutines
+- **Stop(ctx)** — Closes stop channel → ShutdownManager waits up to 30s → workers exit
+- **Submit(ctx, req)** — Creates Job → SaveJob → Enqueue → returns job
+- **Cancel(ctx, jobID)** — Removes from queue (if queued) or cancels context (if running)
+- **Pause(ctx, jobID)** — Cancels context, sets status to Paused
+- **Resume(ctx, jobID)** — Re-enqueues a paused job
+- **GetJob**, **ListJobs**, **GetLogs**, **SubscribeProgress**, **UnsubscribeProgress**
+- **Worker loop** — Continuously dequeue → executeJob → handler.Execute → update status
+  - 5-second dequeue timeout, 500ms idle sleep when queue empty
+- **recoverJobs()** — Running → Paused (manual resume), Queued → stays queued (auto-processed)
+
+#### Added — Graceful Shutdown
+- **ShutdownManager** — Tracks running jobs with cancel functions
+  - `Register(jobID, cancelFunc)` / `Unregister(jobID)`
+  - `RunningCount()` — number of active jobs
+  - `Shutdown(ctx)` — Polls every 500ms until all jobs finish or 30s timeout → force-cancel remaining
+- Default timeout: 30 seconds
+
+### Transfer Engine (Phase 3)
+
+#### Added — File Transfer
 - **TransferStrategy interface** — Pluggable file transfer strategies
   - **SCPStrategy** — SFTP via SSHExecuter.Upload/Download, suitable for <1GB files
   - **RsyncStrategy** — rsync over SSH, suitable for large files or when resume is required
@@ -376,7 +298,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - Verifies all files with checksums
   - Rollback removes all transferred files
 
-#### Added — State Machine Engine (Phase 2)
+### State Machine Engine (Phase 2)
+
+#### Added — Migration Lifecycle
 - **13-State Migration Lifecycle** — Typed state machine with validated transitions
   - States: Created, Planning, Backup, Snapshot, Transferring, Applying, Verifying, Committed, Failed, Rollback, Restored, Interrupted, Resuming
   - `transitionTable` defines valid from→to transitions
@@ -400,24 +324,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - Context-aware variants for all state mutations
   - `GetInterruptedMigrations()` for recovery discovery
 
-### Testing
-- 35 new tests in `internal/mod/discovery` — all pass with `-race` detector
-  - 8 collector tests (OS, hardware, Docker, services, databases, Nginx, disk, ports)
-  - Collector runner tests (parallel execution, partial failure, timeout)
-  - Dependency graph tests (node creation, edge building, topological sort)
-  - Compatibility checker tests (RAM, disk, Docker, port conflicts, OS)
-  - Snapshot store tests (SQLite save/load, noop store)
-- All existing tests continue to pass with `-race` across all packages:
-  - `internal/mod/ssh` — all pass
-  - `internal/mod/migration` — all pass
-  - `internal/mod/transfer` — all pass
-  - `internal/mod/discovery` — 35 tests pass
+### Infrastructure
+- **Docker deployment** — Multi-stage Dockerfile (node → go → alpine) with docker-compose.yml, non-root user, health check
+- **Structured logging** — JSON logger with configurable log level (`internal/shared/logger.go`)
+- **Updated dependencies** — postcss 8.5.16, @sveltejs/kit 2.68.0, svelte 5.56.4, cookie override for CVE fixes
 
-### Changed
-- `discovery/service.go` — Mock SSH uses longest-prefix-first matching algorithm for command responses
-- `discovery/collectors_service.go` — Nginx version parsing uses `strings.LastIndex` to extract version after final slash
-- Architecture diagram updated to show discovery engine, transfer engine, and recovery manager
-- Project structure updated with all new files
+### Testing
+- 220+ tests pass across 11 packages with `-race` detector
+  - 35 tests in `internal/mod/discovery` — 8 collectors, collector runner, dependency graph, compatibility checker, snapshot store
+  - 43 tests in `internal/mod/planner` — plan generation, risk assessment, estimator, plan store, bridge
+  - 31 tests in `internal/jobengine` — job queue, store, progress broadcaster, shutdown manager, engine submit/cancel/pause/resume, concurrent jobs, recovery
+  - All existing tests in ssh, migration, transfer, auth, server, shared, db continue to pass
 
 ---
 
@@ -609,8 +526,7 @@ The first complete release of Meshium — a self-hosted server migration engine 
 
 | Version | Date | Highlights |
 |---------|------|------------|
-| 1.4.0 | 2026-06-28 | Migration planner (step generators, risk assessor, transfer estimator, plan store, plan→engine bridge), 43 new tests |
-| 1.3.0 | 2026-06-28 | Discovery engine (8 collectors, dependency graph, compatibility checker), transfer engine (SCP/rsync), state machine engine, crash recovery, 35 new tests |
+| 1.3.0 | 2026-06-29 | Security hardening, discovery engine, migration planner, job engine, transfer engine, state machine, crash recovery, Docker deployment, structured logging, frontend UX fixes |
 | 1.2.0 | 2026-06-28 | Mobile bottom navbar, SSH host key auto-accept, API null→[] fix |
 | 1.1.0 | 2026-06-28 | Docker migration, dry run, diff view, bastion/jump host, pre-flight validation, config exclusion, CI/CD, SSH pool concurrency |
 | 1.0.0 | 2026-06-27 | Initial release — full migration engine, web UI, 85 tests |
