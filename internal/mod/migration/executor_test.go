@@ -90,7 +90,7 @@ func TestRecoverInterruptedEmptyList(t *testing.T) {
 // categories that have been applied (StepStatusApplied).
 func TestGetAppliedCategories(t *testing.T) {
 	repo := &mockRepo{
-		steps: []MigrationStep{
+		steps: []MigrationStepRecord{
 			{ID: 1, MigrationID: 1, Category: "docker", Action: "collect", Status: StepStatusApplied},
 			{ID: 2, MigrationID: 1, Category: "packages", Action: "collect", Status: StepStatusCompleted},
 			{ID: 3, MigrationID: 1, Category: "configs", Action: "collect", Status: StepStatusApplied},
@@ -127,7 +127,7 @@ func TestGetAppliedCategories(t *testing.T) {
 // returns empty when no categories have been applied yet.
 func TestGetAppliedCategoriesNoApplied(t *testing.T) {
 	repo := &mockRepo{
-		steps: []MigrationStep{
+		steps: []MigrationStepRecord{
 			{ID: 1, MigrationID: 1, Category: "docker", Action: "collect", Status: StepStatusCompleted},
 		},
 	}
@@ -201,7 +201,7 @@ func TestStatusResumingConstant(t *testing.T) {
 // that GetAppliedCategories correctly filters by migration ID.
 func TestMockRepoGetAppliedCategoriesWithMultipleMigrations(t *testing.T) {
 	repo := &mockRepo{
-		steps: []MigrationStep{
+		steps: []MigrationStepRecord{
 			{ID: 1, MigrationID: 1, Category: "docker", Action: "collect", Status: StepStatusApplied},
 			{ID: 2, MigrationID: 1, Category: "packages", Action: "collect", Status: StepStatusApplied},
 			{ID: 3, MigrationID: 2, Category: "docker", Action: "collect", Status: StepStatusApplied},

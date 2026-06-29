@@ -10,6 +10,7 @@ Migrate packages, configurations, services, and users across Linux servers — s
 [![SvelteKit](https://img.shields.io/badge/SvelteKit-2.x-FF3E00?style=flat-square&logo=svelte)](https://svelte.dev)
 [![CI](https://img.shields.io/badge/CI-GitHub%20Actions-2088FF?style=flat-square&logo=githubactions)](https://github.com/kaivyy/meshium/actions)
 [![License](https://img.shields.io/badge/License-MIT-22c55e?style=flat-square)](LICENSE)
+[![Release](https://img.shields.io/badge/Release-v1.3.0-22c55e?style=flat-square)](https://github.com/kaivyy/meshium/releases)
 [![Tests](https://img.shields.io/badge/Tests-220%2B%20passing%20with%20%2Drace-22c55e?style=flat-square)](#testing)
 
 </div>
@@ -619,18 +620,24 @@ Tests run automatically on every push and pull request via GitHub Actions.
 
 ## Security
 
-- **Credentials at rest** — Server passwords and SSH keys are encrypted with AES-256-GCM using a key derived from your master password via PBKDF2-HMAC-SHA256 (600,000 iterations). The PBKDF2 salt is stored atomically with the encrypted credential bundle to prevent inconsistent unlock states.
-- **SSH key management** — Meshium auto-generates an Ed25519 keypair for connecting to servers. You can also use password auth.
-- **SSH bastion** — Connections can be tunneled through a bastion/jump host for firewalled targets.
+- **Credentials at rest** — Server passwords and SSH keys are encrypted with AES-256-GCM using a key derived from your master password via Argon2id (64MB memory, 3 iterations, 2 parallelism). Legacy PBKDF2 hashes are still verified for backward compatibility. The salt is stored atomically with the encrypted credential bundle to prevent inconsistent unlock states.
+- **Session-based auth** — Bearer token authentication for all API routes. WebSocket endpoints validate tokens via query parameter. Tokens are generated using cryptographically secure random bytes.
+- **CSRF protection** — Content-Type validation middleware blocks state-changing requests (POST/PUT/DELETE/PATCH) that don't have `application/json` Content-Type, preventing cross-origin form submissions.
+- **Security headers** — X-Content-Type-Options, X-Frame-Options, X-XSS-Protection, Referrer-Policy, and Content-Security-Policy headers on all responses.
+- **SSH key management** — Meshium auto-generates an Ed25519 keypair for connecting to servers. Per-server key management with AddServerKey/GetServerKey/RemoveServerKey.
+- **SSH bastion** — Connections can be tunneled through a bastion/jump host for firewalled targets. Bastion host keys are verified independently.
 - **Known hosts** — SSH host keys are auto-accepted on first connection (like `ssh -o StrictHostKeyChecking=accept-new`) and verified on subsequent connections to prevent MITM attacks.
-- **Config exclusion** — 20 OS-critical file paths are automatically excluded from migration to prevent breaking the target server.
-- **SSH pool limits** — Maximum 10 concurrent SSH connections (configurable) to prevent resource exhaustion.
-- **Session management** — The web UI locks after inactivity, requiring password re-entry.
+- **Config exclusion** — 20 OS-critical file paths (`/etc/shadow`, `/etc/passwd`, SSH host keys, etc.) are automatically excluded from migration to prevent breaking the target server.
+- **SSH pool limits** — Maximum 10 concurrent SSH connections (configurable) to prevent resource exhaustion. Stale connections are swept by a background goroutine.
+- **Session management** — The web UI locks after inactivity, requiring password re-entry. Invalid session tokens are rejected; missing tokens are allowed when the app is unlocked to prevent reload loops.
+- **Error handling** — Internal errors are logged with structured JSON logging; 5xx responses return generic messages to avoid leaking internal details.
 
 ## Troubleshooting
 
 - **`cipher: message authentication failed` during unlock** — This usually means the `pbkdf2_salt` is missing or empty, or the credential bundle was written inconsistently. Re-run setup so the salt and encrypted values are written together.
 - **Snapshot 404 errors** — Discovery data is only available after a server has been discovered. Run discovery first so the shared snapshot cache has data to serve.
+- **Web page keeps reloading** — If the app is unlocked but the browser has no session token (e.g., after server restart), the frontend should not enter a redirect loop. This was fixed in v1.3.0 — the middleware now allows API access when unlocked without requiring a token.
+- **Migration not found vs API error** — The migration detail page now distinguishes 404 ("not found") from other API errors, showing the actual error message instead of always saying "not found".
 
 ---
 

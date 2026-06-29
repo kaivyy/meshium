@@ -5,6 +5,8 @@
   import { onMount } from 'svelte';
   import { authStore, checkStatus } from '$lib/stores/auth';
   import Sidebar from '$lib/components/Sidebar.svelte';
+  import TopBar from '$lib/components/TopBar.svelte';
+  import Toast from '$lib/components/ui/Toast.svelte';
 
   onMount(() => {
     checkStatus();
@@ -35,9 +37,12 @@
   <div class="flex h-screen overflow-hidden">
     <Sidebar />
     <div class="flex-1 flex flex-col overflow-hidden">
+      <TopBar />
       <main class="flex-1 overflow-auto bg-slate-50 pb-16 md:pb-0">
         <slot />
       </main>
     </div>
   </div>
 {/if}
+
+<Toast />

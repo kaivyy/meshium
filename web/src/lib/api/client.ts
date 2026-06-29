@@ -41,12 +41,11 @@ async function request<T>(method: string, path: string, body?: unknown): Promise
 
   if (!res.ok) {
     const err = await res.json().catch(() => ({ error: 'Unknown error', code: 'UNKNOWN' }));
-    // On 401 or 403 (locked), clear the stale session token and redirect to login
-    if (res.status === 401 || (res.status === 403 && err.code === 'LOCKED')) {
+    // On 403 (locked), clear the stale session token — the layout's reactive
+    // block will handle the redirect to /login. We don't hard-redirect here
+    // to avoid reload loops.
+    if (res.status === 403 && err.code === 'LOCKED') {
       clearSessionToken();
-      if (typeof window !== 'undefined' && !window.location.pathname.startsWith('/login') && !window.location.pathname.startsWith('/setup')) {
-        window.location.href = '/login';
-      }
     }
     throw new APIError(err.error, err.code);
   }

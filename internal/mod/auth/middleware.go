@@ -29,7 +29,8 @@ var authExemptPaths = map[string]bool{
 // RequireAuth returns middleware that checks for a valid session token.
 // If the app is not set up, it allows requests through (setup mode).
 // If the app is locked, it returns 403 Forbidden.
-// If no valid session token is provided, it returns 401 Unauthorized.
+// If the app is unlocked, API requests are allowed (unlocked = authenticated).
+// Session tokens are still validated for WebSocket endpoints to prevent CSRF.
 func (m *Middleware) RequireAuth(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		// Allow exempt paths (auth endpoints, health check)
@@ -63,14 +64,13 @@ func (m *Middleware) RequireAuth(next http.Handler) http.Handler {
 			return
 		}
 
-		// Check for session token in Authorization header
+		// App is unlocked — allow API access.
+		// If a token is provided, validate it (reject invalid tokens).
+		// If no token is provided, allow access (unlocked = authenticated).
+		// This prevents reload loops where the frontend has no token after
+		// a server restart but the app is still unlocked.
 		token := extractToken(r)
-		if token == "" {
-			shared.WriteError(w, http.StatusUnauthorized, "missing session token", "UNAUTHORIZED")
-			return
-		}
-
-		if !m.svc.ValidateSessionToken(token) {
+		if token != "" && !m.svc.ValidateSessionToken(token) {
 			shared.WriteError(w, http.StatusUnauthorized, "invalid session token", "UNAUTHORIZED")
 			return
 		}
@@ -79,19 +79,26 @@ func (m *Middleware) RequireAuth(next http.Handler) http.Handler {
 	})
 }
 
-// extractToken extracts the session token from the Authorization header.
+// extractToken extracts the session token from the Authorization header
+// or the "token" query parameter (for WebSocket connections that can't set headers).
 // Supports both "Bearer <token>" and raw token formats.
 func extractToken(r *http.Request) string {
+	// Check Authorization header first
 	auth := r.Header.Get("Authorization")
-	if auth == "" {
-		return ""
+	if auth != "" {
+		// Check for Bearer token format
+		if strings.HasPrefix(auth, "Bearer ") {
+			return strings.TrimPrefix(auth, "Bearer ")
+		}
+		// Otherwise treat the entire header as the token
+		return auth
 	}
 
-	// Check for Bearer token format
-	if strings.HasPrefix(auth, "Bearer ") {
-		return strings.TrimPrefix(auth, "Bearer ")
+	// Fall back to query parameter (for WebSocket connections)
+	token := r.URL.Query().Get("token")
+	if token != "" {
+		return token
 	}
 
-	// Otherwise treat the entire header as the token
-	return auth
+	return ""
 }

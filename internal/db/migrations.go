@@ -91,6 +91,39 @@ func Migrate(db *sql.DB) error {
 			backup_type  TEXT NOT NULL,
 			created_at   DATETIME DEFAULT CURRENT_TIMESTAMP
 		);`,
+		// migration_checkpoints stores per-step checkpoint state for resume.
+		// Each row records that a specific step has been verified and can be
+		// skipped on resume. The checkpoint is written AFTER Verify succeeds
+		// and cleared if Rollback reverts the step.
+		`CREATE TABLE IF NOT EXISTS migration_checkpoints (
+			id           INTEGER PRIMARY KEY AUTOINCREMENT,
+			migration_id INTEGER NOT NULL REFERENCES migrations(id) ON DELETE CASCADE,
+			step_name    TEXT NOT NULL,
+			step_index   INTEGER NOT NULL,
+			state        TEXT NOT NULL DEFAULT 'verified',
+			checkpoint_data TEXT,
+			created_at   DATETIME DEFAULT CURRENT_TIMESTAMP,
+			updated_at   DATETIME DEFAULT CURRENT_TIMESTAMP,
+			UNIQUE(migration_id, step_name)
+		);`,
+		// migration_job_steps stores the ordered list of steps for a migration
+		// job, with per-step state tracking (pending, preparing, prepared,
+		// applying, applied, verifying, verified, rolling_back, rolled_back, failed).
+		`CREATE TABLE IF NOT EXISTS migration_job_steps (
+			id           INTEGER PRIMARY KEY AUTOINCREMENT,
+			migration_id INTEGER NOT NULL REFERENCES migrations(id) ON DELETE CASCADE,
+			step_name    TEXT NOT NULL,
+			step_index   INTEGER NOT NULL,
+			step_type    TEXT NOT NULL DEFAULT 'category',
+			state        TEXT NOT NULL DEFAULT 'pending',
+			prepare_data TEXT,
+			apply_data   TEXT,
+			verify_data  TEXT,
+			error        TEXT,
+			started_at   DATETIME,
+			completed_at DATETIME,
+			UNIQUE(migration_id, step_name)
+		);`,
 	}
 
 	tx, err := db.Begin()
@@ -108,6 +141,10 @@ func Migrate(db *sql.DB) error {
 	// Add bastion_id column if it doesn't exist (for existing databases)
 	alterStatements := []string{
 		`ALTER TABLE servers ADD COLUMN bastion_id INTEGER DEFAULT 0`,
+		// Add state column to migrations for typed state machine (Phase 2).
+		// Stores the MigrationState string representation alongside the existing
+		// status column for backward compatibility.
+		`ALTER TABLE migrations ADD COLUMN state TEXT DEFAULT ''`,
 	}
 
 	for _, stmt := range alterStatements {

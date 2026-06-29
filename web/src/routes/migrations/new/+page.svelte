@@ -1,7 +1,9 @@
 <script lang="ts">
   import { onMount, onDestroy } from 'svelte';
   import { goto } from '$app/navigation';
+  import { page } from '$app/stores';
   import { api } from '$lib/api/client';
+  import { toast } from '$lib/stores/toast';
   import { wsPlan, type WSMessage, type PlanRequest } from '$lib/api/migrations';
   import type { Server } from '$lib/stores/servers';
   import { ArrowLeft, ArrowRight, Check, Package, FileCode, Settings, Users, Loader, Container } from 'lucide-svelte';
@@ -27,6 +29,22 @@
   onMount(async () => {
     try {
       servers = await api.get('/servers') as Server[];
+
+      const sourceParam = $page.url.searchParams.get('source');
+      const targetParam = $page.url.searchParams.get('target');
+
+      if (sourceParam) {
+        sourceServerId = Number(sourceParam);
+        step = 2;
+      }
+
+      if (targetParam) {
+        targetServerId = Number(targetParam);
+      }
+
+      if (sourceParam && targetParam) {
+        step = 3;
+      }
     } catch {
       // handle error
     }
@@ -64,6 +82,7 @@
   function startPlanning() {
     planning = true;
     planMessages = [];
+    toast.info('Planning migration...');
 
     const req: PlanRequest = {
       sourceServerId,
@@ -78,11 +97,15 @@
         planMessages = [...planMessages, msg];
         if (msg.step === 'plan' && msg.status === 'complete') {
           planning = false;
+          toast.success('Migration plan created');
           setTimeout(() => goto('/migrations'), 1000);
         }
       },
       () => { planning = false; },
-      () => { planning = false; }
+      () => {
+        planning = false;
+        toast.error('Migration planning failed');
+      }
     );
   }
 

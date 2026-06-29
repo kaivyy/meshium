@@ -1,7 +1,9 @@
 <script lang="ts">
   import { onMount } from 'svelte';
   import { migrationApi, type MigrationPlan } from '$lib/api/migrations';
-  import { Plus, ArrowRight, Trash2, CheckCircle, XCircle, Clock, Loader } from 'lucide-svelte';
+  import { Plus, ArrowRight, ArrowRightLeft, Trash2 } from 'lucide-svelte';
+  import { PageHeader, Skeleton } from '$lib/components/ui';
+  import { toast } from '$lib/stores/toast';
 
   let migrations: MigrationPlan[] = [];
   let loading = true;
@@ -19,8 +21,14 @@
   async function deleteMigration(id: number, event: MouseEvent) {
     event.stopPropagation();
     if (!confirm('Delete this migration?')) return;
-    await migrationApi.delete(id);
-    migrations = migrations.filter(m => m.id !== id);
+
+    try {
+      await migrationApi.delete(id);
+      migrations = migrations.filter((m) => m.id !== id);
+      toast.success('Migration deleted');
+    } catch {
+      toast.error('Failed to delete migration');
+    }
   }
 
   function statusBadge(status: string): string {
@@ -36,22 +44,38 @@
 </script>
 
 <div class="p-4 sm:p-6 max-w-4xl mx-auto">
-  <div class="flex items-center justify-between mb-6">
-    <h1 class="text-xl font-bold text-slate-900">Migrations</h1>
-    <a
-      href="/migrations/new"
-      class="flex items-center gap-1 px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 text-sm font-medium"
-    >
-      <Plus size={16} /> New Migration
-    </a>
-  </div>
+  <PageHeader title="Migrations" subtitle="Manage and monitor your server migrations.">
+    {#snippet actions()}
+      <a href="/migrations/new" class="flex items-center gap-1 px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 text-sm font-medium">
+        <Plus size={16} /> New Migration
+      </a>
+    {/snippet}
+  </PageHeader>
 
   {#if loading}
-    <p class="text-slate-500">Loading...</p>
+    <div class="space-y-3">
+      {#each Array(3) as _, index}
+        <div class="flex items-center justify-between gap-4 rounded-lg border border-slate-200 bg-white p-4">
+          <div class="flex items-center gap-3">
+            <Skeleton width="200px" />
+          </div>
+          <div class="flex items-center gap-3">
+            <Skeleton width="80px" height="20px" rounded />
+            <Skeleton width="100px" />
+          </div>
+        </div>
+      {/each}
+    </div>
   {:else if migrations.length === 0}
-    <div class="text-center py-12">
-      <p class="text-slate-500 mb-4">No migrations yet</p>
-      <a href="/migrations/new" class="text-blue-600 hover:underline">Create your first migration</a>
+    <div class="flex flex-col items-center text-center rounded-2xl border border-dashed border-slate-300 bg-white px-6 py-12">
+      <div class="inline-flex items-center justify-center rounded-full bg-slate-100 p-3 text-slate-400">
+        <ArrowRightLeft size={24} />
+      </div>
+      <h3 class="mt-4 text-sm font-medium text-slate-900">No migrations yet</h3>
+      <p class="mt-1 text-sm text-slate-500">Create your first migration to move services between servers.</p>
+      <a href="/migrations/new" class="mt-4 inline-flex items-center justify-center gap-2 rounded-lg bg-blue-600 px-4 py-2 text-sm font-medium text-white transition hover:bg-blue-700">
+        <Plus size={18} /> New Migration
+      </a>
     </div>
   {:else}
     <div class="space-y-2">

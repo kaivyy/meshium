@@ -171,7 +171,7 @@ func TestMiddlewareBlocksAPIWhenLocked(t *testing.T) {
 	}
 }
 
-func TestMiddlewareBlocksAPIWithoutToken(t *testing.T) {
+func TestMiddlewareAllowsAPIWithoutTokenWhenUnlocked(t *testing.T) {
 	d := setupTestDB(t)
 	defer d.Close()
 
@@ -190,11 +190,11 @@ func TestMiddlewareBlocksAPIWithoutToken(t *testing.T) {
 	w := httptest.NewRecorder()
 	handler.ServeHTTP(w, req)
 
-	if handlerCalled {
-		t.Error("handler should NOT be called without session token")
+	if !handlerCalled {
+		t.Error("handler should be called without token when unlocked")
 	}
-	if w.Code != http.StatusUnauthorized {
-		t.Errorf("expected 401 Unauthorized without token, got %d", w.Code)
+	if w.Code != http.StatusOK {
+		t.Errorf("expected 200 OK without token when unlocked, got %d", w.Code)
 	}
 }
 

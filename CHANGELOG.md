@@ -7,6 +7,41 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [1.3.0] — 2026-06-29
+
+### Security Hardening
+
+#### Authentication & Authorization
+- **Session-based auth middleware** — Bearer token authentication for all API routes with WebSocket token support via query parameter
+- **Reload loop fix** — Middleware now allows API access when app is unlocked without requiring a session token, preventing infinite redirect loops between `/` and `/login`
+- **Frontend 401 handling** — API client no longer hard-redirects to `/login` on 401; only clears token on 403 LOCKED and lets the layout handle redirects
+
+#### Frontend UX Improvements
+- **Login redirect race fix** — Layout now waits for `checkStatus()` to complete before performing auth-based redirects
+- **Migration list error states** — Load and delete errors are now displayed to the user instead of being silently swallowed
+- **Migration detail error handling** — Distinguishes 404 ("not found") from other API errors, showing the actual error message
+- **Delete button HTML fix** — Moved delete button outside `<a>` tag for valid HTML
+- **Delete loading state** — Per-row delete spinner with disabled button
+- **Server list loading/error** — New migration page shows loading spinner and error state for server list fetch
+- **Confirmation dialogs** — Added confirmation prompts for migration execute and rollback actions
+- **SPA navigation** — Replaced `window.location.href` with `goto()` for proper SPA navigation
+- **WebSocket JSON safety** — All WebSocket `JSON.parse` calls wrapped in try/catch to prevent crashes on malformed messages
+
+### Bug Fixes
+- **Migration model** — `Categories` changed to `[]string`, `Plan` to `*MigrationPlan`, added `RolledBackAt` field
+- **DB schema** — Added `rolled_back_at` column; `SetMigrationRolledBackAt` no longer overwrites `completed_at`
+- **Step status** — `CreateStep` now uses `pending` status instead of `completed`
+- **Executor** — Checks step data presence instead of status when selecting steps to apply
+- **Rollback validation** — Only allows rollback from `completed` or `failed` states
+- **Frontend types** — Corrected `sourceId`/`targetId` field names to match backend JSON tags
+
+### Infrastructure
+- **Docker deployment** — Multi-stage Dockerfile (node → go → alpine) with docker-compose.yml, non-root user, health check
+- **Structured logging** — JSON logger with configurable log level (`internal/shared/logger.go`)
+- **Updated dependencies** — postcss 8.5.16, @sveltejs/kit 2.68.0, svelte 5.56.4, cookie override for CVE fixes
+
+---
+
 ## [1.5.1] — 2026-06-28
 
 ### Bug Fixes

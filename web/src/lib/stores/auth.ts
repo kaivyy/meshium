@@ -1,5 +1,5 @@
 import { writable } from 'svelte/store';
-import { api } from '$lib/api/client';
+import { api, setSessionToken, clearSessionToken } from '$lib/api/client';
 
 export interface AuthState {
   setup: boolean;
@@ -24,16 +24,23 @@ export async function checkStatus() {
 }
 
 export async function setup(password: string) {
-  await api.post('/auth/setup', { password });
+  const res = await api.post<{ status: string; sessionToken: string }>('/auth/setup', { password });
+  if (res?.sessionToken) {
+    setSessionToken(res.sessionToken);
+  }
   await checkStatus();
 }
 
 export async function unlock(password: string) {
-  await api.post('/auth/unlock', { password });
+  const res = await api.post<{ status: string; sessionToken: string }>('/auth/unlock', { password });
+  if (res?.sessionToken) {
+    setSessionToken(res.sessionToken);
+  }
   await checkStatus();
 }
 
 export async function lock() {
   await api.post('/auth/lock');
+  clearSessionToken();
   await checkStatus();
 }
