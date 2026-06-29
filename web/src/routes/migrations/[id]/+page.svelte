@@ -1,8 +1,10 @@
 <script lang="ts">
   import { onMount, onDestroy } from 'svelte';
   import { page } from '$app/stores';
+  import { api } from '$lib/api/client';
   import { migrationApi, wsExecute, wsRollback, wsDryRun, type WSMessage, type MigrationPlan, type MigrationStep, type DryRunResult } from '$lib/api/migrations';
-  import { ArrowLeft, Play, Undo2, Trash2, Eye, Download } from 'lucide-svelte';
+  import { ArrowLeft, AlertTriangle, Ban, CheckCircle2, Download, Eye, GitCompare, Play, Trash2, Undo2 } from 'lucide-svelte';
+  import { toast } from '$lib/stores/toast';
 
   const migrationId = parseInt($page.params.id);
   let plan: MigrationPlan | null = null;
@@ -12,6 +14,10 @@
   let rollingBack = false;
   let dryRunning = false;
   let dryRunResult: DryRunResult | null = null;
+  let preflightLoading = false;
+  let preflightErrors: string[] = [];
+  let preflightWarnings: string[] = [];
+  let preflightError = '';
   let progressMessages: WSMessage[] = [];
   let ws: WebSocket | null = null;
 
@@ -19,6 +25,7 @@
     try {
       plan = await migrationApi.get(migrationId);
       steps = await migrationApi.getSteps(migrationId);
+      void runPreflight();
     } catch {
       // handle error
     } finally {
@@ -33,6 +40,7 @@
   function startExecution() {
     executing = true;
     progressMessages = [];
+    toast.success('Migration started');
 
     ws = wsExecute(
       migrationId,
@@ -51,6 +59,7 @@
   function startRollback() {
     rollingBack = true;
     progressMessages = [];
+    toast.success('Rollback started');
 
     ws = wsRollback(
       migrationId,
@@ -70,6 +79,7 @@
     dryRunning = true;
     dryRunResult = null;
     progressMessages = [];
+    toast.info('Running dry run...');
 
     ws = wsDryRun(
       migrationId,
@@ -95,6 +105,27 @@
     }
   }
 
+  async function runPreflight() {
+    preflightLoading = true;
+    preflightError = '';
+    preflightErrors = [];
+    preflightWarnings = [];
+
+    try {
+      const result = (await api.get(`/migrations/${migrationId}/preflight`)) as { errors?: string[]; warnings?: string[] };
+      preflightErrors = result.errors ?? [];
+      preflightWarnings = result.warnings ?? [];
+
+      if (preflightErrors.length > 0) {
+        toast.error('Pre-flight check failed: ' + preflightErrors[0]);
+      }
+    } catch (err) {
+      preflightError = err instanceof Error ? err.message : 'Failed to run pre-flight check';
+    } finally {
+      preflightLoading = false;
+    }
+  }
+
   async function refreshPlan() {
     try {
       plan = await migrationApi.get(migrationId);
@@ -106,8 +137,14 @@
 
   async function deleteMigration() {
     if (!confirm('Delete this migration? This cannot be undone.')) return;
-    await migrationApi.delete(migrationId);
-    window.location.href = '/migrations';
+
+    try {
+      await migrationApi.delete(migrationId);
+      toast.success('Migration deleted');
+      window.location.href = '/migrations';
+    } catch {
+      toast.error('Failed to delete migration');
+    }
   }
 
   function exportMigration() {
@@ -136,6 +173,70 @@
   {:else if !plan}
     <p class="text-red-500">Migration not found</p>
   {:else}
+    <div class="mb-6 rounded-lg border border-slate-200 bg-white p-4">
+      <div class="mb-3 flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between">
+        <div>
+          <h2 class="text-sm font-semibold text-slate-900">Pre-flight Check</h2>
+          <p class="mt-1 text-sm text-slate-500">Auto-runs on page load. Re-run anytime before executing the migration.</p>
+        </div>
+        <button
+          type="button"
+          on:click={runPreflight}
+          disabled={preflightLoading}
+          class="inline-flex items-center gap-2 rounded-lg border border-slate-300 px-4 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50 disabled:opacity-50"
+        >
+          {#if preflightLoading}
+            <span class="inline-flex items-center gap-2"><span class="h-4 w-4 animate-spin rounded-full border-2 border-slate-400 border-t-transparent"></span>Checking...</span>
+          {:else}
+            Run Pre-flight Check
+          {/if}
+        </button>
+      </div>
+
+      {#if preflightLoading}
+        <div class="rounded-lg border border-slate-200 bg-slate-50 px-4 py-3 text-sm text-slate-500">
+          Checking migration prerequisites...
+        </div>
+      {:else if preflightError}
+        <div class="rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
+          {preflightError}
+        </div>
+      {:else if preflightErrors.length > 0}
+        <div class="space-y-3">
+          <div class="rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm font-medium text-red-800">
+            Cannot execute migration until these blocking issues are resolved.
+          </div>
+          <div class="space-y-2">
+            {#each preflightErrors as item}
+              <div class="flex items-start gap-2 rounded-lg border border-red-200 bg-white px-3 py-2 text-sm text-red-700">
+                <Ban size={16} class="mt-0.5 shrink-0" />
+                <span>{item}</span>
+              </div>
+            {/each}
+          </div>
+        </div>
+      {:else if preflightWarnings.length > 0}
+        <div class="space-y-3">
+          <div class="rounded-lg border border-yellow-200 bg-yellow-50 px-4 py-3 text-sm font-medium text-yellow-800">
+            Warnings found. You can still execute the migration.
+          </div>
+          <div class="space-y-2">
+            {#each preflightWarnings as item}
+              <div class="flex items-start gap-2 rounded-lg border border-yellow-200 bg-white px-3 py-2 text-sm text-yellow-700">
+                <AlertTriangle size={16} class="mt-0.5 shrink-0" />
+                <span>{item}</span>
+              </div>
+            {/each}
+          </div>
+        </div>
+      {:else}
+        <div class="flex items-center gap-2 rounded-lg border border-green-200 bg-green-50 px-4 py-3 text-sm text-green-800">
+          <CheckCircle2 size={16} />
+          Ready to migrate.
+        </div>
+      {/if}
+    </div>
+
     <div class="flex flex-col gap-4 mb-6 lg:flex-row lg:items-center lg:justify-between">
       <div>
         <h1 class="text-xl font-bold text-slate-900">Migration #{plan.id}</h1>
@@ -154,7 +255,7 @@
           </button>
           <button
             on:click={startExecution}
-            disabled={executing}
+            disabled={executing || preflightLoading || preflightErrors.length > 0}
             class="flex items-center gap-1 px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-50 text-sm font-medium"
           >
             <Play size={16} /> {executing ? 'Executing...' : 'Execute'}
@@ -169,6 +270,9 @@
             <Undo2 size={16} /> {rollingBack ? 'Rolling back...' : 'Rollback'}
           </button>
         {/if}
+        <a href={`/migrations/${migrationId}/diff`} class="inline-flex items-center gap-1.5 text-sm text-blue-600 hover:text-blue-700">
+          <GitCompare size={16} /> View Diff
+        </a>
         <button
           on:click={exportMigration}
           class="flex items-center gap-1 px-4 py-2 text-slate-600 border border-slate-200 rounded-lg hover:bg-slate-50 text-sm font-medium"

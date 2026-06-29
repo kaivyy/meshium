@@ -81,21 +81,26 @@ func (s *Service) Create(req CreateRequest) (*Server, error) {
 		port = 22
 	}
 
+	credentialStatus := "unknown"
+
 	id, err := s.repo.Create(Server{
-		Name:        req.Name,
-		Description: req.Description,
-		Host:        req.Host,
-		Port:        port,
-		Username:    req.Username,
-		Password:    password,
-		SSHKey:      sshKey,
-		Passphrase:  passphrase,
-		Tags:        req.Tags,
-		Environment: req.Environment,
-		Region:      req.Region,
-		Icon:        req.Icon,
-		Color:       req.Color,
-		BastionID:   req.BastionID,
+		Name:             req.Name,
+		Description:      req.Description,
+		Host:             req.Host,
+		Port:             port,
+		Username:         req.Username,
+		AuthMethod:       req.AuthMethod,
+		CredentialStatus: credentialStatus,
+		KeyType:          req.KeyType,
+		Password:         password,
+		SSHKey:           sshKey,
+		Passphrase:       passphrase,
+		BastionID:        req.BastionID,
+		Tags:             req.Tags,
+		Environment:      req.Environment,
+		Region:           req.Region,
+		Icon:             req.Icon,
+		Color:            req.Color,
 	})
 	if err != nil {
 		return nil, err
@@ -146,6 +151,21 @@ func (s *Service) Update(id int, req UpdateRequest) error {
 	if req.Username != nil {
 		srv.Username = *req.Username
 	}
+	if req.AuthMethod != nil {
+		srv.AuthMethod = *req.AuthMethod
+	}
+	if req.KeyType != nil {
+		srv.KeyType = *req.KeyType
+	}
+	if req.CredentialStatus != nil {
+		srv.CredentialStatus = *req.CredentialStatus
+	}
+	if req.Fingerprint != nil {
+		srv.Fingerprint = *req.Fingerprint
+	}
+	if req.BastionID != nil {
+		srv.BastionID = *req.BastionID
+	}
 	if req.Tags != nil {
 		srv.Tags = *req.Tags
 	}
@@ -160,9 +180,6 @@ func (s *Service) Update(id int, req UpdateRequest) error {
 	}
 	if req.Color != nil {
 		srv.Color = *req.Color
-	}
-	if req.BastionID != nil {
-		srv.BastionID = *req.BastionID
 	}
 
 	if req.Password != nil {
@@ -200,6 +217,34 @@ func (s *Service) ToggleFavorite(id int) error {
 
 func (s *Service) GetServerInfo(serverID int) (*ServerInfo, error) {
 	return s.repo.GetServerInfo(serverID)
+}
+
+func (s *Service) UpdateAuthStatus(serverID int, authMethod string, credentialStatus string, fingerprint string) error {
+	return s.repo.UpdateAuthStatus(serverID, authMethod, credentialStatus, fingerprint)
+}
+
+func (s *Service) RecordConnection(serverID int, success bool, durationMs int, reason string, remoteIP string, fingerprint string, authMethod string) error {
+	return s.repo.RecordConnection(serverID, success, durationMs, reason, remoteIP, fingerprint, authMethod)
+}
+
+func (s *Service) GetConnectionHistory(serverID int, limit int) ([]ConnectionHistoryEntry, error) {
+	return s.repo.GetConnectionHistory(serverID, limit)
+}
+
+func (s *Service) GetConnectionMetrics(serverID int) (*ConnectionMetrics, error) {
+	return s.repo.GetConnectionMetrics(serverID)
+}
+
+func (s *Service) RemovePassword(serverID int) error {
+	return s.repo.RemovePassword(serverID)
+}
+
+func (s *Service) ClearSSHKey(serverID int) error {
+	return s.repo.ClearSSHKey(serverID)
+}
+
+func (s *Service) UpdateFingerprint(serverID int, fingerprint string) error {
+	return s.repo.UpdateFingerprint(serverID, fingerprint)
 }
 
 // GetDecryptedCredentials returns decrypted credentials for SSH connection consumers.

@@ -54,6 +54,7 @@ func main() {
 		MaxLifetime: 30 * time.Minute,
 	})
 	knownHosts := ssh.NewKnownHostsStore(database)
+	keyHandler := server.NewKeyHandler(serverSvc, sshPool, knownHosts, authSvc)
 
 	discoverySvc := discovery.NewService(discovery.NewPoolAdapter(sshPool), serverRepo, authSvc, knownHosts)
 	discoveryHandler := discovery.NewHandler(discoverySvc)
@@ -151,6 +152,7 @@ func main() {
 	})
 	authHandler.RegisterRoutes(mux)
 	serverHandler.RegisterRoutes(mux)
+	keyHandler.RegisterRoutes(mux)
 	discoveryHandler.RegisterRoutes(mux)
 	migrationHandler.RegisterRoutes(mux)
 

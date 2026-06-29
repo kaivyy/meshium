@@ -106,8 +106,10 @@ type Migration struct {
 	CompletedAt string `json:"completedAt,omitempty"`
 }
 
-// MigrationStep is the DB model for a migration step.
-type MigrationStep struct {
+// MigrationStepRecord is the DB model for a migration step.
+// (Renamed from MigrationStep to avoid collision with the MigrationStep
+// interface used by the Phase 2 engine.)
+type MigrationStepRecord struct {
 	ID          int    `json:"id"`
 	MigrationID int    `json:"migrationId"`
 	Category    string `json:"category"`
@@ -149,7 +151,7 @@ type MigrationResponse struct {
 	Error       string          `json:"error,omitempty"`
 	CreatedAt   string          `json:"createdAt"`
 	CompletedAt string          `json:"completedAt,omitempty"`
-	Steps       []MigrationStep `json:"steps,omitempty"`
+	Steps       []MigrationStepRecord `json:"steps,omitempty"`
 }
 
 // --- Interfaces (reused from transport) ---

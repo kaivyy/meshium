@@ -10,7 +10,7 @@ import (
 // mockRepo implements Repo for testing.
 type mockRepo struct {
 	migrations []Migration
-	steps       []MigrationStep
+	steps       []MigrationStepRecord
 	backups     []MigrationBackup
 }
 
@@ -66,7 +66,7 @@ func (m *mockRepo) DeleteMigration(id int) error {
 
 func (m *mockRepo) CreateStep(migrationID int, category, action, data string) (int, error) {
 	id := len(m.steps) + 1
-	m.steps = append(m.steps, MigrationStep{
+	m.steps = append(m.steps, MigrationStepRecord{
 		ID:          id,
 		MigrationID: migrationID,
 		Category:    category,
@@ -79,8 +79,8 @@ func (m *mockRepo) CreateStep(migrationID int, category, action, data string) (i
 
 func (m *mockRepo) UpdateStepStatus(stepID int, status, errMsg string) error { return nil }
 
-func (m *mockRepo) GetSteps(migrationID int) ([]MigrationStep, error) {
-	var result []MigrationStep
+func (m *mockRepo) GetSteps(migrationID int) ([]MigrationStepRecord, error) {
+	var result []MigrationStepRecord
 	for _, s := range m.steps {
 		if s.MigrationID == migrationID {
 			result = append(result, s)
@@ -185,7 +185,7 @@ func TestHandleCreateValidation(t *testing.T) {
 
 func TestHandleGetSteps(t *testing.T) {
 	repo := &mockRepo{
-		steps: []MigrationStep{
+		steps: []MigrationStepRecord{
 			{ID: 1, MigrationID: 1, Category: "packages", Action: "collect", Status: StepStatusCompleted},
 		},
 	}

@@ -1,6 +1,6 @@
 # Binaries
 bin/
-server
+/server
 
 # Database
 *.db
@@ -20,4 +20,4 @@ Thumbs.db
 
 # SvelteKit build artifacts (embedded via cmd/server/web/build)
 web/.svelte-kit/
-web/build/
+#web/build/

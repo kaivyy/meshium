@@ -153,7 +153,7 @@ func (e *Executor) PreFlight(ctx context.Context, migrationID int, onProgress St
 	return result, nil
 }
 
-func (e *Executor) loadStoredDistroInfo(serverID int, migration *Migration, steps []MigrationStep, side string) (DistroInfo, bool) {
+func (e *Executor) loadStoredDistroInfo(serverID int, migration *Migration, steps []MigrationStepRecord, side string) (DistroInfo, bool) {
 	if migration != nil && migration.Plan != "" {
 		if info, ok := distroInfoFromPlanJSON(migration.Plan, side); ok {
 			return info, true
@@ -201,7 +201,7 @@ func distroInfoFromPlanJSON(planJSON, side string) (DistroInfo, bool) {
 	return DistroInfo{}, false
 }
 
-func distroInfoFromStepData(steps []MigrationStep, side string) (DistroInfo, bool) {
+func distroInfoFromStepData(steps []MigrationStepRecord, side string) (DistroInfo, bool) {
 	for _, step := range steps {
 		if step.Data == "" {
 			continue

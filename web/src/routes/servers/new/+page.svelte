@@ -1,7 +1,9 @@
 <script lang="ts">
+  import { onMount } from 'svelte';
   import { goto } from '$app/navigation';
   import { ArrowLeft } from 'lucide-svelte';
-  import { createServer } from '$lib/stores/servers';
+  import { createServer, type Server } from '$lib/stores/servers';
+  import { api } from '$lib/api/client';
 
   let name = '';
   let description = '';
@@ -12,12 +14,23 @@
   let password = '';
   let sshKey = '';
   let passphrase = '';
+  let keyType: 'rsa' | 'ed25519' | 'ecdsa' = 'ed25519';
   let tags = '';
   let environment = '';
   let region = '';
   let color = '#3b82f6';
+  let bastionId = 0;
+  let availableServers: Server[] = [];
   let error = '';
   let loading = false;
+
+  onMount(async () => {
+    try {
+      availableServers = await api.get('/servers') as Server[];
+    } catch {
+      // ignore
+    }
+  });
 
   async function handleSubmit() {
     error = '';
@@ -54,7 +67,9 @@
           : [],
         environment,
         region,
-        color
+        color,
+        bastionId: bastionId,
+        keyType: keyType
       };
 
       if (authMethod === 'password') {
@@ -166,6 +181,20 @@
           </div>
         {:else}
           <div class="md:col-span-2">
+            <label for="keyType" class="mb-1 block text-sm font-medium text-slate-700">Key Type</label>
+            <select
+              id="keyType"
+              bind:value={keyType}
+              class="w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-slate-900 shadow-sm outline-none transition focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20"
+            >
+              <option value="ed25519">ED25519 (Recommended)</option>
+              <option value="rsa">RSA 4096-bit</option>
+              <option value="ecdsa">ECDSA 521-bit</option>
+            </select>
+            <p class="mt-1 text-xs text-slate-500">ED25519 is recommended for new keys — faster and more secure than RSA</p>
+          </div>
+
+          <div class="md:col-span-2">
             <label for="sshKey" class="mb-1 block text-sm font-medium text-slate-700">SSH Key</label>
             <textarea
               id="sshKey"
@@ -187,6 +216,21 @@
             />
           </div>
         {/if}
+
+        <div class="md:col-span-2">
+          <label for="bastion" class="mb-1 block text-sm font-medium text-slate-700">Bastion / Jump Host</label>
+          <select
+            id="bastion"
+            bind:value={bastionId}
+            class="w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-slate-900 shadow-sm outline-none transition focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20"
+          >
+            <option value={0}>None (Direct Connection)</option>
+            {#each availableServers as srv}
+              <option value={srv.id}>{srv.name} ({srv.host}:{srv.port})</option>
+            {/each}
+          </select>
+          <p class="mt-1 text-xs text-slate-500">Route SSH connections through this server as a jump host</p>
+        </div>
 
         <div class="md:col-span-2">
           <label for="tags" class="mb-1 block text-sm font-medium text-slate-700">Tags</label>

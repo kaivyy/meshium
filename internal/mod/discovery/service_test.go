@@ -92,6 +92,34 @@ func (f *fakeServerRepo) GetServerInfo(serverID int) (*server.ServerInfo, error)
 	return nil, errors.New("not implemented")
 }
 
+func (f *fakeServerRepo) UpdateAuthStatus(serverID int, authMethod string, credentialStatus string, fingerprint string) error {
+	return errors.New("not implemented")
+}
+
+func (f *fakeServerRepo) RecordConnection(serverID int, success bool, durationMs int, reason string, remoteIP string, fingerprint string, authMethod string) error {
+	return errors.New("not implemented")
+}
+
+func (f *fakeServerRepo) GetConnectionHistory(serverID int, limit int) ([]server.ConnectionHistoryEntry, error) {
+	return nil, errors.New("not implemented")
+}
+
+func (f *fakeServerRepo) GetConnectionMetrics(serverID int) (*server.ConnectionMetrics, error) {
+	return nil, errors.New("not implemented")
+}
+
+func (f *fakeServerRepo) RemovePassword(serverID int) error {
+	return errors.New("not implemented")
+}
+
+func (f *fakeServerRepo) ClearSSHKey(serverID int) error {
+	return errors.New("not implemented")
+}
+
+func (f *fakeServerRepo) UpdateFingerprint(serverID int, fingerprint string) error {
+	return errors.New("not implemented")
+}
+
 func TestRunConnectionTestWithMock(t *testing.T) {
 	key := make([]byte, 32)
 	for i := range key {

@@ -28,7 +28,7 @@ type Repo interface {
 
 	CreateStep(migrationID int, category, action, data string) (int, error)
 	UpdateStepStatus(id int, status, errMsg string) error
-	GetSteps(migrationID int) ([]MigrationStep, error)
+	GetSteps(migrationID int) ([]MigrationStepRecord, error)
 	GetAppliedCategories(migrationID int) ([]string, error) // categories with StepStatusApplied
 
 	CreateBackup(migrationID, serverID int, category, data string) (int, error)
@@ -61,22 +61,26 @@ func (r *sqliteRepo) CreateMigration(sourceID, targetID int, categories []string
 
 func (r *sqliteRepo) GetMigration(id int) (*Migration, error) {
 	var m Migration
-	var categoriesJSON, planJSON string
+	var categoriesJSON string
+	var planJSON, errStr sql.NullString
 	var completedAt sql.NullString
 	err := r.db.QueryRow(
 		`SELECT id, source_id, target_id, categories, status, plan, error, created_at, completed_at
 		 FROM migrations WHERE id = ?`, id,
-	).Scan(&m.ID, &m.SourceID, &m.TargetID, &categoriesJSON, &m.Status, &planJSON, &m.Error, &m.CreatedAt, &completedAt)
+	).Scan(&m.ID, &m.SourceID, &m.TargetID, &categoriesJSON, &m.Status, &planJSON, &errStr, &m.CreatedAt, &completedAt)
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, ErrMigrationNotFound
 	}
 	if err != nil {
 		return nil, err
 	}
-	if err := json.Unmarshal([]byte(categoriesJSON), &m.Categories); err != nil {
-		return nil, fmt.Errorf("unmarshal migration categories: %w", err)
+	m.Categories = categoriesJSON
+	if planJSON.Valid {
+		m.Plan = planJSON.String
 	}
-	m.Plan = planJSON
+	if errStr.Valid {
+		m.Error = errStr.String
+	}
 	if completedAt.Valid {
 		m.CompletedAt = completedAt.String
 	}
@@ -175,7 +179,7 @@ func (r *sqliteRepo) UpdateStepStatus(id int, status, errMsg string) error {
 	return err
 }
 
-func (r *sqliteRepo) GetSteps(migrationID int) ([]MigrationStep, error) {
+func (r *sqliteRepo) GetSteps(migrationID int) ([]MigrationStepRecord, error) {
 	rows, err := r.db.Query(
 		`SELECT id, migration_id, category, action, status, data, error, started_at, completed_at
 		 FROM migration_steps WHERE migration_id = ? ORDER BY id ASC`,
@@ -186,9 +190,9 @@ func (r *sqliteRepo) GetSteps(migrationID int) ([]MigrationStep, error) {
 	}
 	defer rows.Close()
 
-	steps := make([]MigrationStep, 0)
+	steps := make([]MigrationStepRecord, 0)
 	for rows.Next() {
-		var s MigrationStep
+		var s MigrationStepRecord
 		var data, errMsg, startedAt, completedAt sql.NullString
 		if err := rows.Scan(&s.ID, &s.MigrationID, &s.Category, &s.Action, &s.Status, &data, &errMsg, &startedAt, &completedAt); err != nil {
 			return nil, err

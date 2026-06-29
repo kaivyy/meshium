@@ -2,18 +2,18 @@
   import { goto } from '$app/navigation';
   import { page } from '$app/state';
   import { onDestroy } from 'svelte';
-  import { ArrowLeft, ArrowRightLeft, Clock, Cpu, HardDrive, MemoryStick, MoreVertical, Network, Play, RefreshCw } from 'lucide-svelte';
+  import { ArrowLeft, ArrowRightLeft, Clock, Cpu, HardDrive, Key, MemoryStick, MoreVertical, Network, Play, RefreshCw, Shield, ShieldCheck, ShieldAlert, Trash2 } from 'lucide-svelte';
   import { api } from '$lib/api/client';
   import { discoveryApi, type ServerSnapshot, type ServerConnectionInfo } from '$lib/api/discovery';
   import { wsConnect, type WSMessage } from '$lib/api/websocket';
   import { Badge, Card, DropdownMenu, EmptyState, Spinner } from '$lib/components/ui';
   import { formatBytes, formatDateTime, formatDuration, formatRelativeTime } from '$lib/utils/format';
   import { toast } from '$lib/stores/toast';
-  import { deleteServer, type Server } from '$lib/stores/servers';
+  import { deleteServer, type Server, installKey, verifyKey, rotateKey, getFingerprint, testAuth, getConnectionHistory, getConnectionMetrics, removePassword, clearSSHKey, type KeyInstallResult, type KeyVerifyResult, type KeyRotationResult, type FingerprintResult, type AuthTestResult, type ConnectionHistoryEntry, type ConnectionMetrics } from '$lib/stores/servers';
   import { loadSnapshot as loadSnapshotFromStore, invalidateSnapshot } from '$lib/stores/snapshots';
   import { getSnapshot as getCachedSnapshot } from '$lib/stores/snapshots';
 
-  type TabKey = 'overview' | 'docker' | 'services' | 'databases' | 'network' | 'nginx';
+  type TabKey = 'overview' | 'ssh' | 'docker' | 'services' | 'databases' | 'network' | 'nginx';
 
   let serverId = $derived(Number(page.params.id));
   let server = $state<Server | null>(null);
@@ -35,8 +35,23 @@
   let snapshotRequestId = 0;
   let refreshTimer: ReturnType<typeof setInterval> | null = null;
 
+  // SSH key management state
+  let sshActionLoading = $state(false);
+  let sshActionMessage = $state('');
+  let sshActionError = $state('');
+  let fingerprintData = $state<FingerprintResult | null>(null);
+  let authTestResult = $state<AuthTestResult | null>(null);
+  let connectionHistory = $state<ConnectionHistoryEntry[]>([]);
+  let connectionMetrics = $state<ConnectionMetrics | null>(null);
+  let installKeyResult = $state<KeyInstallResult | null>(null);
+  let verifyKeyResult = $state<KeyVerifyResult | null>(null);
+  let rotateKeyResult = $state<KeyRotationResult | null>(null);
+  let installKeyType = $state<'rsa' | 'ed25519' | 'ecdsa'>('ed25519');
+  let rotateKeyType = $state<'rsa' | 'ed25519' | 'ecdsa'>('ed25519');
+
   const tabs: { id: TabKey; label: string }[] = [
     { id: 'overview', label: 'Overview' },
+    { id: 'ssh', label: 'SSH' },
     { id: 'docker', label: 'Docker' },
     { id: 'services', label: 'Services' },
     { id: 'databases', label: 'Databases' },
@@ -232,6 +247,155 @@
     }
   }
 
+  // --- SSH Key Management Actions ---
+
+  async function handleInstallKey() {
+    const id = serverId;
+    if (!Number.isFinite(id)) return;
+    sshActionLoading = true;
+    sshActionMessage = '';
+    sshActionError = '';
+    installKeyResult = null;
+    try {
+      const result = await installKey(id, installKeyType);
+      installKeyResult = result;
+      if (result.success) {
+        sshActionMessage = result.alreadyInstalled
+          ? `Key already installed. Fingerprint: ${result.fingerprint}`
+          : `Key installed successfully. Fingerprint: ${result.fingerprint}`;
+        toast.success('SSH key installed');
+        await loadServer(id);
+      } else {
+        sshActionError = result.message || 'Failed to install key';
+      }
+    } catch (e) {
+      sshActionError = e instanceof Error ? e.message : 'Failed to install key';
+    } finally {
+      sshActionLoading = false;
+    }
+  }
+
+  async function handleVerifyKey() {
+    const id = serverId;
+    if (!Number.isFinite(id)) return;
+    sshActionLoading = true;
+    sshActionMessage = '';
+    sshActionError = '';
+    verifyKeyResult = null;
+    try {
+      const result = await verifyKey(id);
+      verifyKeyResult = result;
+      if (result.success) {
+        sshActionMessage = `Key verified. Installed: ${result.installed ? 'Yes' : 'No'}. Fingerprint: ${result.fingerprint}`;
+        toast.success('Key verified');
+      } else {
+        sshActionError = result.message || 'Key verification failed';
+      }
+    } catch (e) {
+      sshActionError = e instanceof Error ? e.message : 'Failed to verify key';
+    } finally {
+      sshActionLoading = false;
+    }
+  }
+
+  async function handleRotateKey() {
+    const id = serverId;
+    if (!Number.isFinite(id)) return;
+    if (!confirm('Rotate the SSH key? The old key will be removed from the server.')) return;
+    sshActionLoading = true;
+    sshActionMessage = '';
+    sshActionError = '';
+    rotateKeyResult = null;
+    try {
+      const result = await rotateKey(id, rotateKeyType);
+      rotateKeyResult = result;
+      if (result.success) {
+        sshActionMessage = `Key rotated. New fingerprint: ${result.newFingerprint}`;
+        toast.success('SSH key rotated');
+        await loadServer(id);
+      } else {
+        sshActionError = result.message || 'Failed to rotate key';
+      }
+    } catch (e) {
+      sshActionError = e instanceof Error ? e.message : 'Failed to rotate key';
+    } finally {
+      sshActionLoading = false;
+    }
+  }
+
+  async function handleTestAuth() {
+    const id = serverId;
+    if (!Number.isFinite(id)) return;
+    sshActionLoading = true;
+    sshActionMessage = '';
+    sshActionError = '';
+    authTestResult = null;
+    try {
+      const result = await testAuth(id);
+      authTestResult = result;
+      if (result.success) {
+        sshActionMessage = `Authentication successful via ${result.authMethod} in ${result.latencyMs}ms`;
+        toast.success('Authentication test passed');
+      } else {
+        sshActionError = result.message || 'Authentication test failed';
+      }
+    } catch (e) {
+      sshActionError = e instanceof Error ? e.message : 'Failed to test authentication';
+    } finally {
+      sshActionLoading = false;
+    }
+  }
+
+  async function handleLoadFingerprint() {
+    const id = serverId;
+    if (!Number.isFinite(id)) return;
+    sshActionLoading = true;
+    try {
+      fingerprintData = await getFingerprint(id);
+    } catch (e) {
+      sshActionError = e instanceof Error ? e.message : 'Failed to get fingerprint';
+    } finally {
+      sshActionLoading = false;
+    }
+  }
+
+  async function handleLoadHistory() {
+    const id = serverId;
+    if (!Number.isFinite(id)) return;
+    try {
+      connectionHistory = await getConnectionHistory(id, 50);
+      connectionMetrics = await getConnectionMetrics(id);
+    } catch {
+      // ignore
+    }
+  }
+
+  async function handleRemovePassword() {
+    const id = serverId;
+    if (!Number.isFinite(id)) return;
+    if (!confirm('Remove the stored password? Key-based authentication will be required.')) return;
+    try {
+      await removePassword(id);
+      toast.success('Password removed');
+      await loadServer(id);
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : 'Failed to remove password');
+    }
+  }
+
+  async function handleClearKey() {
+    const id = serverId;
+    if (!Number.isFinite(id)) return;
+    if (!confirm('Clear the stored SSH key? You will need password authentication to reconnect.')) return;
+    try {
+      await clearSSHKey(id);
+      toast.success('SSH key cleared');
+      await loadServer(id);
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : 'Failed to clear key');
+    }
+  }
+
   function buildMigrateMenuItems(id: number) {
     return [
       { label: 'Migrate FROM this server', href: `/migrations/new?source=${id}` },
@@ -357,6 +521,15 @@
           <span class="rounded-full bg-slate-100 px-2.5 py-1 text-xs font-medium text-slate-600">
             {server.environment || 'no environment'}
           </span>
+          {#if server.credentialStatus === 'valid'}
+            <span class="inline-flex items-center gap-1 rounded-full bg-emerald-100 px-2.5 py-1 text-xs font-medium text-emerald-700">
+              <ShieldCheck size={12} /> Valid
+            </span>
+          {:else if server.credentialStatus === 'invalid' || server.credentialStatus === 'expired' || server.credentialStatus === 'locked'}
+            <span class="inline-flex items-center gap-1 rounded-full bg-rose-100 px-2.5 py-1 text-xs font-medium text-rose-700">
+              <ShieldAlert size={12} /> {server.credentialStatus}
+            </span>
+          {/if}
         </div>
         <p class="mt-1 text-sm text-slate-500">
           {server.host}:{server.port} · {server.username}
@@ -542,6 +715,333 @@
             />
           {/if}
         </Card>
+      {/if}
+
+      {#if activeTab === 'ssh'}
+        <div class="space-y-6">
+          {#if sshActionMessage}
+            <div class="rounded-lg border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm text-emerald-700">
+              {sshActionMessage}
+            </div>
+          {/if}
+          {#if sshActionError}
+            <div class="rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
+              {sshActionError}
+            </div>
+          {/if}
+
+          <!-- Credential Status -->
+          <Card padding="lg">
+            <div class="mb-4 flex items-center gap-2">
+              <Shield size={20} class="text-slate-500" />
+              <h2 class="text-sm font-semibold uppercase tracking-wide text-slate-500">Credential Status</h2>
+            </div>
+            <div class="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4">
+              <div class="rounded-xl border border-slate-200 bg-slate-50 p-4">
+                <p class="text-xs font-semibold uppercase tracking-wide text-slate-500">Auth Method</p>
+                <p class="mt-1 text-sm font-medium text-slate-900">{server.authMethod || 'password'}</p>
+              </div>
+              <div class="rounded-xl border border-slate-200 bg-slate-50 p-4">
+                <p class="text-xs font-semibold uppercase tracking-wide text-slate-500">Status</p>
+                <div class="mt-1 flex items-center gap-2">
+                  {#if server.credentialStatus === 'valid'}
+                    <ShieldCheck size={16} class="text-emerald-500" />
+                    <span class="text-sm font-medium text-emerald-700">Valid</span>
+                  {:else if server.credentialStatus === 'invalid' || server.credentialStatus === 'expired' || server.credentialStatus === 'locked'}
+                    <ShieldAlert size={16} class="text-rose-500" />
+                    <span class="text-sm font-medium text-rose-700">{server.credentialStatus}</span>
+                  {:else}
+                    <Shield size={16} class="text-slate-400" />
+                    <span class="text-sm font-medium text-slate-500">Unknown</span>
+                  {/if}
+                </div>
+              </div>
+              <div class="rounded-xl border border-slate-200 bg-slate-50 p-4">
+                <p class="text-xs font-semibold uppercase tracking-wide text-slate-500">Key Type</p>
+                <p class="mt-1 text-sm font-medium text-slate-900">{server.keyType || '—'}</p>
+              </div>
+              <div class="rounded-xl border border-slate-200 bg-slate-50 p-4">
+                <p class="text-xs font-semibold uppercase tracking-wide text-slate-500">Fingerprint</p>
+                <p class="mt-1 break-all text-xs font-mono text-slate-600">{server.fingerprint || '—'}</p>
+              </div>
+            </div>
+            {#if server.lastSuccess || server.lastFailure}
+              <div class="mt-4 grid grid-cols-1 gap-4 sm:grid-cols-2">
+                <div class="text-sm text-slate-600">
+                  <span class="font-medium">Last success:</span> {server.lastSuccess ? formatRelativeTime(server.lastSuccess) : 'Never'}
+                </div>
+                <div class="text-sm text-slate-600">
+                  <span class="font-medium">Last failure:</span> {server.lastFailure ? formatRelativeTime(server.lastFailure) : 'Never'}
+                </div>
+              </div>
+            {/if}
+          </Card>
+
+          <!-- Key Management Actions -->
+          <Card padding="lg">
+            <div class="mb-4 flex items-center gap-2">
+              <Key size={20} class="text-slate-500" />
+              <h2 class="text-sm font-semibold uppercase tracking-wide text-slate-500">Key Management</h2>
+            </div>
+            <div class="space-y-4">
+              <!-- Install Key -->
+              <div class="rounded-xl border border-slate-200 bg-slate-50 p-4">
+                <div class="flex flex-wrap items-center justify-between gap-3">
+                  <div>
+                    <p class="text-sm font-medium text-slate-900">Install SSH Key</p>
+                    <p class="mt-1 text-xs text-slate-500">Generate a new key pair and install the public key on the server using password auth</p>
+                  </div>
+                  <div class="flex items-center gap-2">
+                    <select
+                      bind:value={installKeyType}
+                      class="rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm text-slate-900 outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20"
+                    >
+                      <option value="ed25519">ED25519</option>
+                      <option value="rsa">RSA</option>
+                      <option value="ecdsa">ECDSA</option>
+                    </select>
+                    <button
+                      type="button"
+                      onclick={handleInstallKey}
+                      disabled={sshActionLoading}
+                      class="inline-flex items-center justify-center gap-2 rounded-lg bg-blue-600 px-4 py-2 text-sm font-medium text-white transition hover:bg-blue-700 disabled:cursor-not-allowed disabled:opacity-50"
+                    >
+                      {sshActionLoading ? 'Working...' : 'Install Key'}
+                    </button>
+                  </div>
+                </div>
+                {#if installKeyResult}
+                  <div class="mt-3 rounded-lg bg-white px-3 py-2 text-sm">
+                    <p class="text-slate-600">Fingerprint: <code class="font-mono text-xs">{installKeyResult.fingerprint}</code></p>
+                    <p class="text-slate-600">Key type: {installKeyResult.keyType}</p>
+                    {#if installKeyResult.alreadyInstalled}
+                      <p class="text-amber-600">Key was already installed</p>
+                    {/if}
+                  </div>
+                {/if}
+              </div>
+
+              <!-- Verify Key -->
+              <div class="rounded-xl border border-slate-200 bg-slate-50 p-4">
+                <div class="flex flex-wrap items-center justify-between gap-3">
+                  <div>
+                    <p class="text-sm font-medium text-slate-900">Verify SSH Key</p>
+                    <p class="mt-1 text-xs text-slate-500">Test that the stored key can authenticate and is installed on the server</p>
+                  </div>
+                  <button
+                    type="button"
+                    onclick={handleVerifyKey}
+                    disabled={sshActionLoading}
+                    class="inline-flex items-center justify-center gap-2 rounded-lg border border-slate-300 bg-white px-4 py-2 text-sm font-medium text-slate-700 transition hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-50"
+                  >
+                    Verify Key
+                  </button>
+                </div>
+                {#if verifyKeyResult}
+                  <div class="mt-3 rounded-lg bg-white px-3 py-2 text-sm">
+                    <p class="text-slate-600">Installed: <span class="font-medium">{verifyKeyResult.installed ? 'Yes' : 'No'}</span></p>
+                    <p class="text-slate-600">Fingerprint: <code class="font-mono text-xs">{verifyKeyResult.fingerprint}</code></p>
+                  </div>
+                {/if}
+              </div>
+
+              <!-- Rotate Key -->
+              <div class="rounded-xl border border-slate-200 bg-slate-50 p-4">
+                <div class="flex flex-wrap items-center justify-between gap-3">
+                  <div>
+                    <p class="text-sm font-medium text-slate-900">Rotate SSH Key</p>
+                    <p class="mt-1 text-xs text-slate-500">Generate a new key, install it, and remove the old key from the server</p>
+                  </div>
+                  <div class="flex items-center gap-2">
+                    <select
+                      bind:value={rotateKeyType}
+                      class="rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm text-slate-900 outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20"
+                    >
+                      <option value="ed25519">ED25519</option>
+                      <option value="rsa">RSA</option>
+                      <option value="ecdsa">ECDSA</option>
+                    </select>
+                    <button
+                      type="button"
+                      onclick={handleRotateKey}
+                      disabled={sshActionLoading}
+                      class="inline-flex items-center justify-center gap-2 rounded-lg border border-amber-300 bg-amber-50 px-4 py-2 text-sm font-medium text-amber-700 transition hover:bg-amber-100 disabled:cursor-not-allowed disabled:opacity-50"
+                    >
+                      Rotate Key
+                    </button>
+                  </div>
+                </div>
+                {#if rotateKeyResult}
+                  <div class="mt-3 rounded-lg bg-white px-3 py-2 text-sm">
+                    <p class="text-slate-600">Old fingerprint: <code class="font-mono text-xs">{rotateKeyResult.oldFingerprint}</code></p>
+                    <p class="text-slate-600">New fingerprint: <code class="font-mono text-xs">{rotateKeyResult.newFingerprint}</code></p>
+                  </div>
+                {/if}
+              </div>
+
+              <!-- Test Auth -->
+              <div class="rounded-xl border border-slate-200 bg-slate-50 p-4">
+                <div class="flex flex-wrap items-center justify-between gap-3">
+                  <div>
+                    <p class="text-sm font-medium text-slate-900">Test Authentication</p>
+                    <p class="mt-1 text-xs text-slate-500">Attempt to connect using the configured credentials and record the result</p>
+                  </div>
+                  <button
+                    type="button"
+                    onclick={handleTestAuth}
+                    disabled={sshActionLoading}
+                    class="inline-flex items-center justify-center gap-2 rounded-lg border border-slate-300 bg-white px-4 py-2 text-sm font-medium text-slate-700 transition hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-50"
+                  >
+                    <Play size={16} />
+                    Test Auth
+                  </button>
+                </div>
+                {#if authTestResult}
+                  <div class="mt-3 rounded-lg bg-white px-3 py-2 text-sm">
+                    <p class={authTestResult.success ? 'text-emerald-600' : 'text-rose-600'}>
+                      {authTestResult.success ? 'Success' : 'Failed'} via {authTestResult.authMethod} in {authTestResult.latencyMs}ms
+                    </p>
+                    {#if authTestResult.message}
+                      <p class="text-slate-500">{authTestResult.message}</p>
+                    {/if}
+                  </div>
+                {/if}
+              </div>
+
+              <!-- Fingerprint -->
+              <div class="rounded-xl border border-slate-200 bg-slate-50 p-4">
+                <div class="flex flex-wrap items-center justify-between gap-3">
+                  <div>
+                    <p class="text-sm font-medium text-slate-900">View Fingerprint</p>
+                    <p class="mt-1 text-xs text-slate-500">Display the SHA256 and MD5 fingerprints of the stored key</p>
+                  </div>
+                  <button
+                    type="button"
+                    onclick={handleLoadFingerprint}
+                    disabled={sshActionLoading}
+                    class="inline-flex items-center justify-center gap-2 rounded-lg border border-slate-300 bg-white px-4 py-2 text-sm font-medium text-slate-700 transition hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-50"
+                  >
+                    Get Fingerprint
+                  </button>
+                </div>
+                {#if fingerprintData}
+                  <div class="mt-3 space-y-1 rounded-lg bg-white px-3 py-2 text-sm">
+                    <p class="text-slate-600">SHA256: <code class="font-mono text-xs break-all">{fingerprintData.sha256}</code></p>
+                    <p class="text-slate-600">MD5: <code class="font-mono text-xs break-all">{fingerprintData.md5}</code></p>
+                    <p class="text-slate-600">Type: {fingerprintData.keyType}</p>
+                  </div>
+                {/if}
+              </div>
+            </div>
+          </Card>
+
+          <!-- Danger Zone -->
+          <Card padding="lg">
+            <div class="mb-4 flex items-center gap-2">
+              <Trash2 size={20} class="text-rose-500" />
+              <h2 class="text-sm font-semibold uppercase tracking-wide text-rose-500">Danger Zone</h2>
+            </div>
+            <div class="space-y-3">
+              <div class="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-slate-200 bg-slate-50 p-4">
+                <div>
+                  <p class="text-sm font-medium text-slate-900">Remove Password</p>
+                  <p class="mt-1 text-xs text-slate-500">Delete the stored password — key auth will be required</p>
+                </div>
+                <button
+                  type="button"
+                  onclick={handleRemovePassword}
+                  class="inline-flex items-center justify-center gap-2 rounded-lg border border-rose-300 bg-white px-4 py-2 text-sm font-medium text-rose-700 transition hover:bg-rose-50"
+                >
+                  Remove
+                </button>
+              </div>
+              <div class="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-slate-200 bg-slate-50 p-4">
+                <div>
+                  <p class="text-sm font-medium text-slate-900">Clear SSH Key</p>
+                  <p class="mt-1 text-xs text-slate-500">Delete the stored SSH key — password auth will be required</p>
+                </div>
+                <button
+                  type="button"
+                  onclick={handleClearKey}
+                  class="inline-flex items-center justify-center gap-2 rounded-lg border border-rose-300 bg-white px-4 py-2 text-sm font-medium text-rose-700 transition hover:bg-rose-50"
+                >
+                  Clear
+                </button>
+              </div>
+            </div>
+          </Card>
+
+          <!-- Connection History -->
+          <Card padding="lg">
+            <div class="mb-4 flex items-center justify-between gap-3">
+              <div class="flex items-center gap-2">
+                <Clock size={20} class="text-slate-500" />
+                <h2 class="text-sm font-semibold uppercase tracking-wide text-slate-500">Connection History</h2>
+              </div>
+              <button
+                type="button"
+                onclick={handleLoadHistory}
+                class="inline-flex items-center justify-center gap-2 rounded-lg border border-slate-300 bg-white px-4 py-2 text-sm font-medium text-slate-700 transition hover:bg-slate-50"
+              >
+                Load History
+              </button>
+            </div>
+            {#if connectionMetrics}
+              <div class="mb-4 grid grid-cols-2 gap-4 sm:grid-cols-4">
+                <div class="rounded-xl border border-slate-200 bg-slate-50 p-3">
+                  <p class="text-xs font-semibold uppercase tracking-wide text-slate-500">Total</p>
+                  <p class="mt-1 text-lg font-bold text-slate-900">{connectionMetrics.totalAttempts}</p>
+                </div>
+                <div class="rounded-xl border border-slate-200 bg-slate-50 p-3">
+                  <p class="text-xs font-semibold uppercase tracking-wide text-slate-500">Success</p>
+                  <p class="mt-1 text-lg font-bold text-emerald-600">{connectionMetrics.successCount}</p>
+                </div>
+                <div class="rounded-xl border border-slate-200 bg-slate-50 p-3">
+                  <p class="text-xs font-semibold uppercase tracking-wide text-slate-500">Failed</p>
+                  <p class="mt-1 text-lg font-bold text-rose-600">{connectionMetrics.failureCount}</p>
+                </div>
+                <div class="rounded-xl border border-slate-200 bg-slate-50 p-3">
+                  <p class="text-xs font-semibold uppercase tracking-wide text-slate-500">Success Rate</p>
+                  <p class="mt-1 text-lg font-bold text-slate-900">{(connectionMetrics.successRate * 100).toFixed(1)}%</p>
+                </div>
+              </div>
+            {/if}
+            {#if connectionHistory.length > 0}
+              <div class="overflow-hidden rounded-xl border border-slate-200 bg-white shadow-sm">
+                <table class="min-w-full divide-y divide-slate-200 text-left text-sm">
+                  <thead class="bg-slate-50 text-slate-500">
+                    <tr>
+                      <th class="px-4 py-3 font-medium">Time</th>
+                      <th class="px-4 py-3 font-medium">Result</th>
+                      <th class="px-4 py-3 font-medium">Method</th>
+                      <th class="px-4 py-3 font-medium">Duration</th>
+                      <th class="px-4 py-3 font-medium">Reason</th>
+                    </tr>
+                  </thead>
+                  <tbody class="divide-y divide-slate-200 bg-white">
+                    {#each connectionHistory as entry}
+                      <tr>
+                        <td class="px-4 py-3 text-slate-600">{formatRelativeTime(entry.createdAt)}</td>
+                        <td class="px-4 py-3">
+                          {#if entry.success}
+                            <Badge variant="success">Success</Badge>
+                          {:else}
+                            <Badge variant="error">Failed</Badge>
+                          {/if}
+                        </td>
+                        <td class="px-4 py-3 text-slate-600">{entry.authMethod || '—'}</td>
+                        <td class="px-4 py-3 text-slate-600">{entry.durationMs ? `${entry.durationMs}ms` : '—'}</td>
+                        <td class="px-4 py-3 text-slate-600">{entry.reason || '—'}</td>
+                      </tr>
+                    {/each}
+                  </tbody>
+                </table>
+              </div>
+            {:else if connectionMetrics}
+              <EmptyState title="No connection history" description="No connection attempts have been recorded yet." />
+            {/if}
+          </Card>
+        </div>
       {/if}
 
       {#if activeTab === 'docker'}

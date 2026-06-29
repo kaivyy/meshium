@@ -79,19 +79,26 @@ func (m *Middleware) RequireAuth(next http.Handler) http.Handler {
 	})
 }
 
-// extractToken extracts the session token from the Authorization header.
+// extractToken extracts the session token from the Authorization header
+// or the "token" query parameter (for WebSocket connections that can't set headers).
 // Supports both "Bearer <token>" and raw token formats.
 func extractToken(r *http.Request) string {
+	// Check Authorization header first
 	auth := r.Header.Get("Authorization")
-	if auth == "" {
-		return ""
+	if auth != "" {
+		// Check for Bearer token format
+		if strings.HasPrefix(auth, "Bearer ") {
+			return strings.TrimPrefix(auth, "Bearer ")
+		}
+		// Otherwise treat the entire header as the token
+		return auth
 	}
 
-	// Check for Bearer token format
-	if strings.HasPrefix(auth, "Bearer ") {
-		return strings.TrimPrefix(auth, "Bearer ")
+	// Fall back to query parameter (for WebSocket connections)
+	token := r.URL.Query().Get("token")
+	if token != "" {
+		return token
 	}
 
-	// Otherwise treat the entire header as the token
-	return auth
+	return ""
 }
