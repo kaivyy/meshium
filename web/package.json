@@ -11,12 +11,12 @@
   },
   "devDependencies": {
     "@sveltejs/adapter-static": "3.0.8",
-    "@sveltejs/kit": "2.16.0",
+    "@sveltejs/kit": "2.68.0",
     "@types/node": "22.13.9",
     "@sveltejs/vite-plugin-svelte": "5.1.1",
     "autoprefixer": "10.4.21",
-    "postcss": "8.5.3",
-    "svelte": "5.23.1",
+    "postcss": "8.5.16",
+    "svelte": "5.56.4",
     "svelte-check": "4.1.4",
     "tailwindcss": "3.4.17",
     "typescript": "5.7.3",
@@ -27,5 +27,8 @@
     "lucide-svelte": "^0.468.0",
     "tailwind-merge": "^3.0.2",
     "tailwind-variants": "^3.0.0"
+  },
+  "overrides": {
+    "cookie": "0.7.2"
   }
 }

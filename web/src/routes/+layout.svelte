@@ -3,25 +3,26 @@
   import { goto } from '$app/navigation';
   import { page } from '$app/stores';
   import { onMount } from 'svelte';
-  import { authStore, checkStatus, lock } from '$lib/stores/auth';
+  import { authStore, checkStatus } from '$lib/stores/auth';
   import Sidebar from '$lib/components/Sidebar.svelte';
 
-  onMount(() => {
-    checkStatus();
+  let statusChecked = false;
+
+  onMount(async () => {
+    await checkStatus();
+    statusChecked = true;
   });
 
-  $: {
-    const state = $authStore;
+  // Only redirect after the auth status check has completed
+  $: if (statusChecked && !$authStore.loading) {
     const path = $page.url.pathname;
 
-    if (!state.loading) {
-      if (!state.setup && path !== '/setup') {
-        goto('/setup');
-      } else if (state.setup && path === '/setup') {
-        goto(state.locked ? '/login' : '/');
-      } else if (state.setup && state.locked && path !== '/login' && path !== '/setup') {
-        goto('/login');
-      }
+    if (!$authStore.setup && path !== '/setup') {
+      goto('/setup');
+    } else if ($authStore.setup && path === '/setup') {
+      goto($authStore.locked ? '/login' : '/');
+    } else if ($authStore.setup && $authStore.locked && path !== '/login' && path !== '/setup') {
+      goto('/login');
     }
   }
 

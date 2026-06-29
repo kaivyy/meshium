@@ -2,7 +2,6 @@ package shared
 
 import (
 	"encoding/json"
-	"log"
 	"net/http"
 	"net/url"
 )
@@ -29,7 +28,7 @@ func WriteError(w http.ResponseWriter, status int, message, code string) {
 // message or the underlying client-facing message, depending on status.
 func WriteErrorSafe(w http.ResponseWriter, status int, safeMessage, code string, internalErr error) {
 	if internalErr != nil {
-		log.Printf("internal error: %v", internalErr)
+		Log.Error("internal error", "error", internalErr, "status", status, "code", code)
 	}
 
 	message := safeMessage

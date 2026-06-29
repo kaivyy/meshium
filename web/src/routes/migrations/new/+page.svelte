@@ -8,6 +8,8 @@
 
   let step = 1;
   let servers: Server[] = [];
+  let loadingServers = true;
+  let serversError = '';
   let sourceServerId = 0;
   let targetServerId = 0;
   let selectedCategories: string[] = [];
@@ -26,8 +28,10 @@
   onMount(async () => {
     try {
       servers = await api.get('/servers') as Server[];
-    } catch {
-      // handle error
+    } catch (e) {
+      serversError = e instanceof Error ? e.message : 'Failed to load servers';
+    } finally {
+      loadingServers = false;
     }
   });
 
@@ -125,25 +129,33 @@
     <div class="space-y-4">
       <h2 class="text-lg font-semibold text-slate-900">Select Source Server</h2>
       <p class="text-sm text-slate-500">Choose the server to migrate FROM.</p>
-      <div class="space-y-2">
-        {#each servers as s}
-          <button
-            on:click={() => sourceServerId = s.id}
-            class="w-full text-left p-4 rounded-lg border transition-colors
-              {sourceServerId === s.id ? 'border-blue-500 bg-blue-50' : 'border-slate-200 hover:border-slate-300'}"
-          >
-            <div class="flex items-center justify-between">
-              <div>
-                <p class="font-medium text-slate-900">{s.name}</p>
-                <p class="text-sm text-slate-500">{s.host}:{s.port} · {s.username}</p>
+      {#if loadingServers}
+        <div class="flex items-center gap-2 text-sm text-slate-500">
+          <Loader size={16} class="animate-spin" /> Loading servers...
+        </div>
+      {:else if serversError}
+        <div class="rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">{serversError}</div>
+      {:else}
+        <div class="space-y-2">
+          {#each servers as s}
+            <button
+              on:click={() => sourceServerId = s.id}
+              class="w-full text-left p-4 rounded-lg border transition-colors
+                {sourceServerId === s.id ? 'border-blue-500 bg-blue-50' : 'border-slate-200 hover:border-slate-300'}"
+            >
+              <div class="flex items-center justify-between">
+                <div>
+                  <p class="font-medium text-slate-900">{s.name}</p>
+                  <p class="text-sm text-slate-500">{s.host}:{s.port} · {s.username}</p>
+                </div>
+                {#if sourceServerId === s.id}
+                  <Check class="text-blue-600" size={20} />
+                {/if}
               </div>
-              {#if sourceServerId === s.id}
-                <Check class="text-blue-600" size={20} />
-              {/if}
-            </div>
-          </button>
-        {/each}
-      </div>
+            </button>
+          {/each}
+        </div>
+      {/if}
     </div>
 
   <!-- Step 2: Select Target -->
@@ -151,25 +163,33 @@
     <div class="space-y-4">
       <h2 class="text-lg font-semibold text-slate-900">Select Target Server</h2>
       <p class="text-sm text-slate-500">Choose the server to migrate TO. Must be different from source.</p>
-      <div class="space-y-2">
-        {#each servers.filter(s => s.id !== sourceServerId) as s}
-          <button
-            on:click={() => targetServerId = s.id}
-            class="w-full text-left p-4 rounded-lg border transition-colors
-              {targetServerId === s.id ? 'border-blue-500 bg-blue-50' : 'border-slate-200 hover:border-slate-300'}"
-          >
-            <div class="flex items-center justify-between">
-              <div>
-                <p class="font-medium text-slate-900">{s.name}</p>
-                <p class="text-sm text-slate-500">{s.host}:{s.port} · {s.username}</p>
+      {#if loadingServers}
+        <div class="flex items-center gap-2 text-sm text-slate-500">
+          <Loader size={16} class="animate-spin" /> Loading servers...
+        </div>
+      {:else if serversError}
+        <div class="rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">{serversError}</div>
+      {:else}
+        <div class="space-y-2">
+          {#each servers.filter(s => s.id !== sourceServerId) as s}
+            <button
+              on:click={() => targetServerId = s.id}
+              class="w-full text-left p-4 rounded-lg border transition-colors
+                {targetServerId === s.id ? 'border-blue-500 bg-blue-50' : 'border-slate-200 hover:border-slate-300'}"
+            >
+              <div class="flex items-center justify-between">
+                <div>
+                  <p class="font-medium text-slate-900">{s.name}</p>
+                  <p class="text-sm text-slate-500">{s.host}:{s.port} · {s.username}</p>
+                </div>
+                {#if targetServerId === s.id}
+                  <Check class="text-blue-600" size={20} />
+                {/if}
               </div>
-              {#if targetServerId === s.id}
-                <Check class="text-blue-600" size={20} />
-              {/if}
-            </div>
-          </button>
-        {/each}
-      </div>
+            </button>
+          {/each}
+        </div>
+      {/if}
     </div>
 
   <!-- Step 3: Choose Categories -->

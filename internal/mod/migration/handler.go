@@ -3,7 +3,6 @@ package migration
 import (
 	"context"
 	"encoding/json"
-	"log"
 	"net/http"
 	"strconv"
 	"strings"
@@ -191,7 +190,7 @@ func (h *Handler) handleGetSteps(w http.ResponseWriter, r *http.Request, id int)
 
 func (h *Handler) handlePlanWS(w http.ResponseWriter, r *http.Request) {
 	if h == nil || h.runner == nil {
-		log.Printf("migration runner not configured")
+		shared.Log.Error("migration runner not configured")
 		http.Error(w, "service unavailable", http.StatusServiceUnavailable)
 		return
 	}
@@ -199,7 +198,7 @@ func (h *Handler) handlePlanWS(w http.ResponseWriter, r *http.Request) {
 	// Upgrade to WebSocket first
 	conn, err := h.upgrader.Upgrade(w, r, nil)
 	if err != nil {
-		log.Printf("websocket upgrade failed: %v", err)
+		shared.Log.Error("websocket upgrade failed", "error", err, "path", r.URL.Path)
 		return
 	}
 	defer conn.Close()
@@ -208,7 +207,7 @@ func (h *Handler) handlePlanWS(w http.ResponseWriter, r *http.Request) {
 	// (the frontend sends JSON after the connection is established)
 	_, message, err := conn.ReadMessage()
 	if err != nil {
-		log.Printf("websocket read failed: %v", err)
+		shared.Log.Error("websocket read failed", "error", err, "path", r.URL.Path)
 		return
 	}
 
@@ -228,13 +227,13 @@ func (h *Handler) handlePlanWS(w http.ResponseWriter, r *http.Request) {
 
 	_, err = h.runner.Plan(ctx, req, func(msg WSMessage) {
 		if writeErr := writeJSONWithDeadline(conn, msg); writeErr != nil {
-			log.Printf("websocket write failed: %v", writeErr)
+			shared.Log.Error("websocket write failed", "error", writeErr, "step", msg.Step)
 			cancel()
 		}
 	})
 
 	if err != nil {
-		log.Printf("plan failed: %v", err)
+		shared.Log.Error("plan failed", "error", err)
 		_ = writeJSONWithDeadline(conn, WSMessage{Step: "plan", Status: "error", Error: "operation failed"})
 		return
 	}
@@ -244,7 +243,7 @@ func (h *Handler) handlePlanWS(w http.ResponseWriter, r *http.Request) {
 
 func (h *Handler) handleMigrateWS(w http.ResponseWriter, r *http.Request) {
 	if h == nil || h.runner == nil {
-		log.Printf("migration runner not configured")
+		shared.Log.Error("migration runner not configured")
 		http.Error(w, "service unavailable", http.StatusServiceUnavailable)
 		return
 	}
@@ -269,7 +268,7 @@ func (h *Handler) handleMigrateWS(w http.ResponseWriter, r *http.Request) {
 
 	conn, err := h.upgrader.Upgrade(w, r, nil)
 	if err != nil {
-		log.Printf("websocket upgrade failed: %v", err)
+		shared.Log.Error("websocket upgrade failed", "error", err, "path", r.URL.Path)
 		return
 	}
 	defer conn.Close()
@@ -281,21 +280,21 @@ func (h *Handler) handleMigrateWS(w http.ResponseWriter, r *http.Request) {
 	if action == "rollback" {
 		runErr = h.runner.Rollback(ctx, migrationID, func(msg WSMessage) {
 			if writeErr := writeJSONWithDeadline(conn, msg); writeErr != nil {
-				log.Printf("websocket write failed: %v", writeErr)
+				shared.Log.Error("websocket write failed", "error", writeErr, "step", msg.Step)
 				cancel()
 			}
 		})
 	} else {
 		runErr = h.runner.Execute(ctx, migrationID, func(msg WSMessage) {
 			if writeErr := writeJSONWithDeadline(conn, msg); writeErr != nil {
-				log.Printf("websocket write failed: %v", writeErr)
+				shared.Log.Error("websocket write failed", "error", writeErr, "step", msg.Step)
 				cancel()
 			}
 		})
 	}
 
 	if runErr != nil {
-		log.Printf("%s failed for migration %d: %v", action, migrationID, runErr)
+		shared.Log.Error("migration action failed", "action", action, "migrationID", migrationID, "error", runErr)
 		_ = writeJSONWithDeadline(conn, WSMessage{
 			Step:   action,
 			Status: "error",

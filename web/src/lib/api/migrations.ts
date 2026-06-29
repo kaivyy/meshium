@@ -53,14 +53,25 @@ function wsUrl(path: string): string {
   return `${proto}//${window.location.host}${path}${tokenParam}`;
 }
 
+function parseWsMessage(data: string): WSMessage | null {
+  try {
+    return JSON.parse(data) as WSMessage;
+  } catch (error) {
+    console.error('Failed to parse migration WebSocket message', error);
+    return null;
+  }
+}
+
 export function wsPlan(req: PlanRequest, onMessage: (msg: WSMessage) => void, onClose?: () => void, onError?: () => void): WebSocket {
   const ws = new WebSocket(wsUrl('/ws/plan'));
   ws.onopen = () => {
     ws.send(JSON.stringify(req));
   };
   ws.onmessage = (event) => {
-    const msg = JSON.parse(event.data) as WSMessage;
-    onMessage(msg);
+    const msg = parseWsMessage(event.data);
+    if (msg) {
+      onMessage(msg);
+    }
   };
   ws.onclose = () => onClose?.();
   ws.onerror = () => onError?.();
@@ -70,8 +81,10 @@ export function wsPlan(req: PlanRequest, onMessage: (msg: WSMessage) => void, on
 export function wsExecute(migrationId: number, onMessage: (msg: WSMessage) => void, onClose?: () => void, onError?: () => void): WebSocket {
   const ws = new WebSocket(wsUrl(`/ws/migrate/${migrationId}`));
   ws.onmessage = (event) => {
-    const msg = JSON.parse(event.data) as WSMessage;
-    onMessage(msg);
+    const msg = parseWsMessage(event.data);
+    if (msg) {
+      onMessage(msg);
+    }
   };
   ws.onclose = () => onClose?.();
   ws.onerror = () => onError?.();
@@ -81,8 +94,10 @@ export function wsExecute(migrationId: number, onMessage: (msg: WSMessage) => vo
 export function wsRollback(migrationId: number, onMessage: (msg: WSMessage) => void, onClose?: () => void, onError?: () => void): WebSocket {
   const ws = new WebSocket(wsUrl(`/ws/migrate/${migrationId}/rollback`));
   ws.onmessage = (event) => {
-    const msg = JSON.parse(event.data) as WSMessage;
-    onMessage(msg);
+    const msg = parseWsMessage(event.data);
+    if (msg) {
+      onMessage(msg);
+    }
   };
   ws.onclose = () => onClose?.();
   ws.onerror = () => onError?.();

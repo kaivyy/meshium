@@ -33,6 +33,7 @@ func (h *Handler) handleSetup(w http.ResponseWriter, r *http.Request) {
 
 	setup, err := h.svc.IsSetup()
 	if err != nil {
+		shared.Log.Error("failed to check setup status", "error", err)
 		shared.WriteError(w, http.StatusInternalServerError, "internal error", "INTERNAL")
 		return
 	}
@@ -52,6 +53,7 @@ func (h *Handler) handleSetup(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if err := h.svc.Setup(req.Password); err != nil {
+		shared.Log.Error("setup failed", "error", err)
 		shared.WriteError(w, http.StatusInternalServerError, "setup failed", "INTERNAL")
 		return
 	}
@@ -73,6 +75,7 @@ func (h *Handler) handleUnlock(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if err := h.svc.Unlock(req.Password); err != nil {
+		shared.Log.Warn("unlock failed", "error", err)
 		shared.WriteError(w, http.StatusUnauthorized, "invalid password", "AUTH_FAILED")
 		return
 	}
@@ -103,6 +106,7 @@ func (h *Handler) handleStatus(w http.ResponseWriter, r *http.Request) {
 
 	setup, err := h.svc.IsSetup()
 	if err != nil {
+		shared.Log.Error("failed to read auth status", "error", err)
 		shared.WriteError(w, http.StatusInternalServerError, "internal error", "INTERNAL")
 		return
 	}
@@ -121,6 +125,7 @@ func (h *Handler) handleSSHKeyPublic(w http.ResponseWriter, r *http.Request) {
 
 	key, err := h.svc.GetSSHPublicKey()
 	if err != nil {
+		shared.Log.Error("failed to get SSH public key", "error", err)
 		shared.WriteError(w, http.StatusInternalServerError, "internal error", "INTERNAL")
 		return
 	}
@@ -136,6 +141,7 @@ func (h *Handler) handleSSHKeyRegenerate(w http.ResponseWriter, r *http.Request)
 
 	key, err := h.svc.RegenerateSSHKey()
 	if err != nil {
+		shared.Log.Error("failed to regenerate SSH key", "error", err)
 		shared.WriteError(w, http.StatusInternalServerError, "failed to regenerate key", "INTERNAL")
 		return
 	}

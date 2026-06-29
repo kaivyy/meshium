@@ -2,7 +2,6 @@ package main
 
 import (
 	"context"
-	"fmt"
 	"net/http"
 	"os"
 	"os/signal"
@@ -20,21 +19,24 @@ import (
 )
 
 func main() {
+	logger := shared.NewLogger(os.Stdout, shared.ParseLogLevel(os.Getenv("MESHium_LOG_LEVEL")))
+	shared.SetLogger(logger)
+
 	cfg, err := shared.LoadConfig()
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "Failed to load config: %v\n", err)
+		logger.Error("failed to load config", "error", err)
 		os.Exit(1)
 	}
 
 	database, err := db.Open(cfg.DBPath)
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "Failed to open database: %v\n", err)
+		logger.Error("failed to open database", "error", err, "path", cfg.DBPath)
 		os.Exit(1)
 	}
 	defer database.Close()
 
 	if err := db.Migrate(database); err != nil {
-		fmt.Fprintf(os.Stderr, "Failed to run migrations: %v\n", err)
+		logger.Error("failed to run migrations", "error", err)
 		os.Exit(1)
 	}
 
@@ -87,8 +89,7 @@ func main() {
 		},
 	)
 
-	// Configure HTTP server with timeouts
-	server := &http.Server{
+	httpServer := &http.Server{
 		Addr:              ":" + cfg.ServerPort,
 		Handler:           finalHandler,
 		ReadHeaderTimeout: 10 * time.Second,
@@ -97,36 +98,34 @@ func main() {
 		IdleTimeout:       120 * time.Second,
 	}
 
-	// Start server in a goroutine
 	go func() {
-		fmt.Printf("Meshium server starting on %s\n", server.Addr)
+		logger.Info("meshium server starting", "addr", httpServer.Addr, "tlsEnabled", cfg.TLSCertFile != "" && cfg.TLSKeyFile != "")
+		var serveErr error
 		if cfg.TLSCertFile != "" && cfg.TLSKeyFile != "" {
-			fmt.Printf("TLS enabled (cert: %s)\n", cfg.TLSCertFile)
-			if err := server.ListenAndServeTLS(cfg.TLSCertFile, cfg.TLSKeyFile); err != nil && err != http.ErrServerClosed {
-				fmt.Fprintf(os.Stderr, "Server error: %v\n", err)
-				os.Exit(1)
-			}
+			logger.Info("tls enabled", "certFile", cfg.TLSCertFile)
+			serveErr = httpServer.ListenAndServeTLS(cfg.TLSCertFile, cfg.TLSKeyFile)
 		} else {
-			if err := server.ListenAndServe(); err != nil && err != http.ErrServerClosed {
-				fmt.Fprintf(os.Stderr, "Server error: %v\n", err)
-				os.Exit(1)
-			}
+			serveErr = httpServer.ListenAndServe()
+		}
+		if serveErr != nil && serveErr != http.ErrServerClosed {
+			logger.Error("server error", "error", serveErr)
+			os.Exit(1)
 		}
 	}()
 
-	// Wait for interrupt signal for graceful shutdown
 	quit := make(chan os.Signal, 1)
 	signal.Notify(quit, syscall.SIGINT, syscall.SIGTERM)
+	defer signal.Stop(quit)
 	<-quit
-	fmt.Println("\nShutting down server...")
 
-	// Give outstanding requests 30 seconds to complete
+	logger.Info("shutting down server")
+
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
 
-	if err := server.Shutdown(ctx); err != nil {
-		fmt.Fprintf(os.Stderr, "Server forced to shutdown: %v\n", err)
+	if err := httpServer.Shutdown(ctx); err != nil {
+		logger.Error("server forced to shutdown", "error", err)
 	}
 
-	fmt.Println("Server exited")
+	logger.Info("server exited")
 }

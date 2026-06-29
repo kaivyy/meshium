@@ -10,13 +10,13 @@ import (
 )
 
 type Handler struct {
-	svc       *Service
+	svc        *Service
 	keyHandler *KeyHandler
 }
 
 func NewHandler(svc *Service) *Handler {
 	return &Handler{
-		svc:       svc,
+		svc:        svc,
 		keyHandler: NewKeyHandler(svc),
 	}
 }
@@ -131,6 +131,7 @@ func (h *Handler) handleList(w http.ResponseWriter, r *http.Request) {
 
 	servers, err := h.svc.List(filter)
 	if err != nil {
+		shared.Log.Error("failed to list servers", "error", err)
 		shared.WriteError(w, http.StatusInternalServerError, "failed to list servers", "INTERNAL")
 		return
 	}
@@ -152,6 +153,7 @@ func (h *Handler) handleCreate(w http.ResponseWriter, r *http.Request) {
 
 	server, err := h.svc.Create(req)
 	if err != nil {
+		shared.Log.Error("failed to create server", "error", err)
 		shared.WriteError(w, http.StatusInternalServerError, "failed to create server", "INTERNAL")
 		return
 	}
@@ -166,6 +168,7 @@ func (h *Handler) handleGet(w http.ResponseWriter, r *http.Request, id int) {
 			shared.WriteError(w, http.StatusNotFound, "server not found", "SERVER_NOT_FOUND")
 			return
 		}
+		shared.Log.Error("failed to get server", "error", err, "serverID", id)
 		shared.WriteError(w, http.StatusInternalServerError, "failed to get server", "INTERNAL")
 		return
 	}
@@ -185,6 +188,7 @@ func (h *Handler) handleUpdate(w http.ResponseWriter, r *http.Request, id int) {
 			shared.WriteError(w, http.StatusNotFound, "server not found", "SERVER_NOT_FOUND")
 			return
 		}
+		shared.Log.Error("failed to update server", "error", err, "serverID", id)
 		shared.WriteError(w, http.StatusInternalServerError, "failed to update server", "INTERNAL")
 		return
 	}
@@ -195,6 +199,7 @@ func (h *Handler) handleUpdate(w http.ResponseWriter, r *http.Request, id int) {
 			shared.WriteError(w, http.StatusNotFound, "server not found", "SERVER_NOT_FOUND")
 			return
 		}
+		shared.Log.Error("failed to get server", "error", err, "serverID", id)
 		shared.WriteError(w, http.StatusInternalServerError, "failed to get server", "INTERNAL")
 		return
 	}
@@ -208,6 +213,7 @@ func (h *Handler) handleDelete(w http.ResponseWriter, r *http.Request, id int) {
 			shared.WriteError(w, http.StatusNotFound, "server not found", "NOT_FOUND")
 			return
 		}
+		shared.Log.Error("failed to delete server", "error", err, "serverID", id)
 		shared.WriteError(w, http.StatusInternalServerError, "failed to delete server", "INTERNAL")
 		return
 	}
@@ -221,6 +227,7 @@ func (h *Handler) handleToggleFavorite(w http.ResponseWriter, r *http.Request, i
 			shared.WriteError(w, http.StatusNotFound, "server not found", "NOT_FOUND")
 			return
 		}
+		shared.Log.Error("failed to toggle favorite", "error", err, "serverID", id)
 		shared.WriteError(w, http.StatusInternalServerError, "failed to toggle favorite", "INTERNAL")
 		return
 	}
@@ -235,6 +242,7 @@ func (h *Handler) handleGetInfo(w http.ResponseWriter, r *http.Request, id int) 
 			shared.WriteError(w, http.StatusNotFound, "server info not found", "SERVER_NOT_FOUND")
 			return
 		}
+		shared.Log.Error("failed to get server info", "error", err, "serverID", id)
 		shared.WriteError(w, http.StatusInternalServerError, "failed to get server info", "INTERNAL")
 		return
 	}

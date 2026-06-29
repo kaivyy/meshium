@@ -2,7 +2,6 @@ package discovery
 
 import (
 	"context"
-	"log"
 	"net/http"
 	"strconv"
 	"strings"
@@ -52,13 +51,13 @@ func (h *Handler) handleConnect(w http.ResponseWriter, r *http.Request) {
 
 	conn, err := upgrader.Upgrade(w, r, nil)
 	if err != nil {
-		log.Printf("websocket upgrade failed: %v", err)
+		shared.Log.Error("websocket upgrade failed", "error", err, "path", r.URL.Path)
 		return
 	}
 	defer conn.Close()
 
 	if h == nil || h.svc == nil {
-		log.Printf("discovery service not configured")
+		shared.Log.Error("discovery service not configured")
 		return
 	}
 
@@ -67,12 +66,12 @@ func (h *Handler) handleConnect(w http.ResponseWriter, r *http.Request) {
 
 	if err := h.svc.RunConnectionTest(ctx, serverID, func(msg WSMessage) {
 		if err := writeJSONWithDeadline(conn, msg); err != nil {
-			log.Printf("websocket write failed: %v", err)
+			shared.Log.Error("websocket write failed", "error", err, "serverID", serverID)
 			_ = conn.Close()
 			cancel()
 		}
 	}); err != nil {
-		log.Printf("connection test failed for server %d: %v", serverID, err)
+		shared.Log.Error("connection test failed", "error", err, "serverID", serverID)
 	}
 }
 

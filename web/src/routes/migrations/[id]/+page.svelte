@@ -1,7 +1,9 @@
 <script lang="ts">
   import { onMount, onDestroy } from 'svelte';
   import { page } from '$app/stores';
+  import { goto } from '$app/navigation';
   import { migrationApi, wsExecute, wsRollback, type WSMessage, type MigrationPlan, type MigrationStep } from '$lib/api/migrations';
+  import { APIError } from '$lib/api/client';
   import { ArrowLeft, Play, Undo2, Trash2 } from 'lucide-svelte';
 
   const migrationId = parseInt($page.params.id);
@@ -12,16 +14,59 @@
   let rollingBack = false;
   let progressMessages: WSMessage[] = [];
   let ws: WebSocket | null = null;
+  let loadError = '';
+  let notFound = false;
 
-  onMount(async () => {
+  function isNotFoundError(error: unknown): boolean {
+    return error instanceof APIError && (error.code === 'MIGRATION_NOT_FOUND' || error.code === 'NOT_FOUND');
+  }
+
+  function getErrorMessage(error: unknown, fallback: string): string {
+    return error instanceof Error ? error.message : fallback;
+  }
+
+  async function loadMigration(setLoading = true) {
+    if (setLoading) {
+      loading = true;
+      loadError = '';
+      notFound = false;
+      plan = null;
+      steps = [];
+    }
+
     try {
       plan = await migrationApi.get(migrationId);
-      steps = await migrationApi.getSteps(migrationId);
-    } catch {
-      // handle error
-    } finally {
-      loading = false;
+      loadError = '';
+      notFound = false;
+    } catch (error) {
+      if (isNotFoundError(error)) {
+        notFound = true;
+        plan = null;
+        steps = [];
+        loadError = '';
+      } else {
+        loadError = getErrorMessage(error, 'Failed to load migration');
+      }
+      if (setLoading) {
+        loading = false;
+      }
+      return;
     }
+
+    try {
+      steps = await migrationApi.getSteps(migrationId);
+    } catch (error) {
+      loadError = getErrorMessage(error, 'Failed to load migration steps');
+      steps = [];
+    } finally {
+      if (setLoading) {
+        loading = false;
+      }
+    }
+  }
+
+  onMount(() => {
+    void loadMigration();
   });
 
   onDestroy(() => {
@@ -29,6 +74,8 @@
   });
 
   function startExecution() {
+    if (!confirm('Execute this migration now? This will apply the planned changes to the target server.')) return;
+
     executing = true;
     progressMessages = [];
 
@@ -47,6 +94,8 @@
   }
 
   function startRollback() {
+    if (!confirm('Rollback this migration now? This will undo the applied changes.')) return;
+
     rollingBack = true;
     progressMessages = [];
 
@@ -65,18 +114,13 @@
   }
 
   async function refreshPlan() {
-    try {
-      plan = await migrationApi.get(migrationId);
-      steps = await migrationApi.getSteps(migrationId);
-    } catch {
-      // ignore
-    }
+    await loadMigration(false);
   }
 
   async function deleteMigration() {
     if (!confirm('Delete this migration? This cannot be undone.')) return;
     await migrationApi.delete(migrationId);
-    window.location.href = '/migrations';
+    goto('/migrations');
   }
 
   function statusColor(status: string): string {
@@ -98,9 +142,14 @@
 
   {#if loading}
     <p class="text-slate-500">Loading...</p>
-  {:else if !plan}
+  {:else if notFound}
     <p class="text-red-500">Migration not found</p>
+  {:else if !plan}
+    <div class="rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">{loadError || 'Failed to load migration'}</div>
   {:else}
+    {#if loadError}
+      <div class="mb-4 rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">{loadError}</div>
+    {/if}
     <div class="flex items-center justify-between mb-6">
       <div>
         <h1 class="text-xl font-bold text-slate-900">Migration #{plan.id}</h1>

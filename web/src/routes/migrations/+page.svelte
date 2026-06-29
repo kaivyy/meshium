@@ -5,22 +5,32 @@
 
   let migrations: MigrationPlan[] = [];
   let loading = true;
+  let error = '';
+  let deletingId: number | null = null;
 
   onMount(async () => {
     try {
       migrations = await migrationApi.list();
-    } catch {
-      // handle error
+    } catch (e) {
+      error = e instanceof Error ? e.message : 'Failed to load migrations';
     } finally {
       loading = false;
     }
   });
 
-  async function deleteMigration(id: number, event: MouseEvent) {
-    event.stopPropagation();
+  async function deleteMigration(id: number) {
+    if (deletingId !== null) return;
     if (!confirm('Delete this migration?')) return;
-    await migrationApi.delete(id);
-    migrations = migrations.filter(m => m.id !== id);
+
+    deletingId = id;
+    try {
+      await migrationApi.delete(id);
+      migrations = migrations.filter(m => m.id !== id);
+    } catch (e) {
+      error = e instanceof Error ? e.message : 'Failed to delete migration';
+    } finally {
+      deletingId = null;
+    }
   }
 
   function statusBadge(status: string): string {
@@ -46,47 +56,60 @@
     </a>
   </div>
 
+  {#if error}
+    <div class="mb-4 rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">{error}</div>
+  {/if}
+
   {#if loading}
-    <p class="text-slate-500">Loading...</p>
-  {:else if migrations.length === 0}
+    <div class="rounded-lg border border-slate-200 bg-white px-4 py-3 text-slate-500">Loading...</div>
+  {:else if migrations.length === 0 && !error}
     <div class="text-center py-12">
       <p class="text-slate-500 mb-4">No migrations yet</p>
       <a href="/migrations/new" class="text-blue-600 hover:underline">Create your first migration</a>
     </div>
-  {:else}
+  {:else if migrations.length > 0}
     <div class="space-y-2">
       {#each migrations as m}
-        <a
-          href="/migrations/{m.id}"
-          class="block p-4 bg-white rounded-lg border border-slate-200 hover:border-slate-300 transition-colors"
-        >
-          <div class="flex items-center justify-between">
-            <div class="flex items-center gap-3">
-              <div class="flex items-center gap-2">
-                <span class="text-sm font-medium text-slate-900">Server #{m.sourceId}</span>
-                <ArrowRight size={14} class="text-slate-400" />
-                <span class="text-sm font-medium text-slate-900">Server #{m.targetId}</span>
+        <div class="flex items-start justify-between gap-4 p-4 bg-white rounded-lg border border-slate-200 hover:border-slate-300 transition-colors">
+          <a
+            href="/migrations/{m.id}"
+            class="min-w-0 flex-1"
+          >
+            <div class="flex items-center justify-between gap-3">
+              <div class="flex items-center gap-3 min-w-0">
+                <div class="flex items-center gap-2 min-w-0">
+                  <span class="text-sm font-medium text-slate-900">Server #{m.sourceId}</span>
+                  <ArrowRight size={14} class="text-slate-400" />
+                  <span class="text-sm font-medium text-slate-900">Server #{m.targetId}</span>
+                </div>
+              </div>
+              <div class="flex items-center gap-3 shrink-0">
+                <span class="px-2 py-1 rounded-full text-xs font-medium {statusBadge(m.status)}">
+                  {m.status}
+                </span>
+                <span class="text-xs text-slate-500">{m.createdAt}</span>
               </div>
             </div>
-            <div class="flex items-center gap-3">
-              <span class="px-2 py-1 rounded-full text-xs font-medium {statusBadge(m.status)}">
-                {m.status}
-              </span>
-              <span class="text-xs text-slate-500">{m.createdAt}</span>
-              <button
-                on:click={(e) => deleteMigration(m.id, e)}
-                class="text-slate-400 hover:text-red-500"
-              >
-                <Trash2 size={16} />
-              </button>
+            <div class="flex flex-wrap gap-1 mt-2">
+              {#each m.categories as cat}
+                <span class="px-2 py-0.5 bg-slate-50 text-slate-600 text-xs rounded">{cat}</span>
+              {/each}
             </div>
-          </div>
-          <div class="flex flex-wrap gap-1 mt-2">
-            {#each m.categories as cat}
-              <span class="px-2 py-0.5 bg-slate-50 text-slate-600 text-xs rounded">{cat}</span>
-            {/each}
-          </div>
-        </a>
+          </a>
+          <button
+            type="button"
+            on:click={() => deleteMigration(m.id)}
+            disabled={deletingId === m.id}
+            class="mt-0.5 flex items-center justify-center text-slate-400 hover:text-red-500 disabled:cursor-not-allowed disabled:opacity-50"
+            aria-label={`Delete migration ${m.id}`}
+          >
+            {#if deletingId === m.id}
+              <Loader size={16} class="animate-spin" />
+            {:else}
+              <Trash2 size={16} />
+            {/if}
+          </button>
+        </div>
       {/each}
     </div>
   {/if}
