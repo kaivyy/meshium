@@ -32,8 +32,8 @@
   let commandHistory = $state<string[]>([]);
   let historyIndex = $state(-1);
   let lineIdCounter = 0;
-  let terminalContainer: HTMLElement | null = null;
-  let inputElement: HTMLInputElement | null = null;
+  let terminalContainer = $state<HTMLElement | null>(null);
+  let inputElement = $state<HTMLInputElement | null>(null);
 
   // Quick commands
   const quickCommands = [

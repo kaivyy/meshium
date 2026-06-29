@@ -6,14 +6,24 @@
   import {
     LayoutDashboard, Server, Search, ArrowRightLeft, Briefcase,
     Container, FolderTree, Terminal, Activity, Bell, Settings, LogOut,
-    ChevronLeft, ChevronRight, ClipboardList, GitCompare
+    ChevronLeft, ChevronRight, ClipboardList, GitCompare,
+    Grid, X
   } from 'lucide-svelte';
 
   let collapsed = $state(false);
+  let drawerOpen = $state(false);
 
   function toggleSidebar() {
     collapsed = !collapsed;
     try { localStorage.setItem('meshium-sidebar', collapsed ? '1' : '0'); } catch { /* ignore */ }
+  }
+
+  function toggleDrawer() {
+    drawerOpen = !drawerOpen;
+  }
+
+  function closeDrawer() {
+    drawerOpen = false;
   }
 
   onMount(() => {
@@ -62,8 +72,8 @@
     },
   ];
 
-  // Flat list for mobile nav (max 5 items)
-  const mobileNavItems = [
+  // Quick-access items shown directly on the bottom bar (left + right of center button)
+  const quickItems = [
     { href: '/', label: 'Home', icon: LayoutDashboard },
     { href: '/servers', label: 'Servers', icon: Server },
     { href: '/migrations', label: 'Migrate', icon: ArrowRightLeft },
@@ -95,6 +105,14 @@
     if (href === '/') return $page.url.pathname === '/';
     return $page.url.pathname.startsWith(href);
   }
+
+  // Close drawer on route change
+  $effect(() => {
+    if (drawerOpen) {
+      // Track page changes to auto-close drawer
+      $page.url.pathname;
+    }
+  });
 </script>
 
 <!-- Desktop sidebar -->
@@ -184,12 +202,15 @@
   </div>
 </aside>
 
-<!-- Mobile bottom navbar -->
-<nav class="md:hidden fixed bottom-0 inset-x-0 z-40 bg-white border-t border-slate-200 flex items-center justify-around px-2 py-1.5 pb-[max(0.375rem,env(safe-area-inset-bottom))]">
-  {#each mobileNavItems as item}
+<!-- Mobile bottom navbar with center drawer button -->
+<nav
+  class="md:hidden fixed bottom-0 inset-x-0 z-40 bg-white border-t border-slate-200 flex items-center justify-around px-1 py-1 pb-[max(0.375rem,env(safe-area-inset-bottom))]"
+>
+  <!-- Left: 2 quick items -->
+  {#each quickItems.slice(0, 2) as item}
     <a
       href={item.href}
-      class="flex flex-col items-center gap-0.5 px-3 py-1 rounded-lg text-xs transition-colors
+      class="flex flex-col items-center gap-0.5 px-2 py-1 rounded-lg text-[10px] transition-colors
         {isActive(item.href) ? 'text-blue-600 font-medium' : 'text-slate-500'}"
     >
       <div class="relative">
@@ -203,12 +224,130 @@
       <span>{item.label}</span>
     </a>
   {/each}
-  <a
-    href="/settings"
-    class="flex flex-col items-center gap-0.5 px-3 py-1 rounded-lg text-xs transition-colors
-      {isActive('/settings') ? 'text-blue-600 font-medium' : 'text-slate-500'}"
+
+  <!-- Center: Drawer toggle button -->
+  <button
+    type="button"
+    onclick={toggleDrawer}
+    class="flex flex-col items-center justify-center gap-0.5 -mt-4 rounded-full bg-blue-600 px-4 py-2.5 text-white shadow-lg shadow-blue-600/30 transition-transform active:scale-95"
+    aria-label="Open menu"
   >
-    <Settings size={20} />
-    Settings
-  </a>
+    {#if drawerOpen}
+      <X size={22} />
+    {:else}
+      <Grid size={22} />
+    {/if}
+  </button>
+
+  <!-- Right: 2 quick items -->
+  {#each quickItems.slice(2) as item}
+    <a
+      href={item.href}
+      class="flex flex-col items-center gap-0.5 px-2 py-1 rounded-lg text-[10px] transition-colors
+        {isActive(item.href) ? 'text-blue-600 font-medium' : 'text-slate-500'}"
+    >
+      <div class="relative">
+        <item.icon size={20} />
+        {#if item.href === '/jobs' && activeJobs > 0}
+          <span class="absolute -right-2 -top-2 inline-flex h-4 min-w-4 items-center justify-center rounded-full bg-blue-600 px-1 text-[9px] font-semibold leading-none text-white">
+            {activeJobs}
+          </span>
+        {/if}
+      </div>
+      <span>{item.label}</span>
+    </a>
+  {/each}
 </nav>
+
+<!-- Mobile drawer overlay -->
+{#if drawerOpen}
+  <div
+    class="md:hidden fixed inset-0 z-30 bg-black/30 backdrop-blur-sm transition-opacity"
+    onclick={closeDrawer}
+    role="button"
+    tabindex="0"
+    aria-label="Close menu"
+  ></div>
+{/if}
+
+<!-- Mobile drawer panel (slides up from bottom) -->
+<div
+  class="md:hidden fixed bottom-0 inset-x-0 z-50 transition-transform duration-300 ease-out
+    {drawerOpen ? 'translate-y-0' : 'translate-y-full'}"
+>
+  <div class="bg-white rounded-t-2xl shadow-2xl border-t border-slate-200 pb-[max(1rem,env(safe-area-inset-bottom))]">
+    <!-- Handle bar -->
+    <div class="flex justify-center pt-2 pb-1">
+      <div class="h-1 w-10 rounded-full bg-slate-300"></div>
+    </div>
+
+    <!-- Header -->
+    <div class="flex items-center justify-between px-5 py-3 border-b border-slate-100">
+      <div class="flex items-center gap-2">
+        <span class="w-7 h-7 bg-blue-600 rounded-lg flex items-center justify-center text-white text-xs font-bold">M</span>
+        <span class="text-sm font-semibold text-slate-900">Menu</span>
+      </div>
+      <button
+        onclick={closeDrawer}
+        class="p-1.5 rounded-lg text-slate-400 hover:text-slate-700 hover:bg-slate-100 transition"
+        aria-label="Close menu"
+      >
+        <X size={18} />
+      </button>
+    </div>
+
+    <!-- Navigation grid -->
+    <div class="px-4 py-3 max-h-[60vh] overflow-y-auto">
+      {#each navGroups as group}
+        <div class="px-1 pt-3 pb-1 text-[11px] font-semibold uppercase tracking-wider text-slate-400">
+          {group.label}
+        </div>
+        <div class="grid grid-cols-4 gap-2">
+          {#each group.items as item}
+            <a
+              href={item.href}
+              onclick={closeDrawer}
+              class="flex flex-col items-center gap-1.5 rounded-xl p-3 transition-colors
+                {isActive(item.href)
+                  ? 'bg-blue-50 text-blue-600'
+                  : 'text-slate-600 hover:bg-slate-50'}"
+            >
+              <div class="relative">
+                <item.icon size={22} />
+                {#if item.href === '/jobs' && activeJobs > 0}
+                  <span class="absolute -right-2 -top-2 inline-flex h-4 min-w-4 items-center justify-center rounded-full bg-blue-600 px-1 text-[9px] font-semibold leading-none text-white">
+                    {activeJobs}
+                  </span>
+                {/if}
+              </div>
+              <span class="text-[10px] font-medium text-center leading-tight">{item.label}</span>
+            </a>
+          {/each}
+        </div>
+      {/each}
+
+      <!-- Settings & Lock -->
+      <div class="px-1 pt-3 pb-1 text-[11px] font-semibold uppercase tracking-wider text-slate-400">
+        System
+      </div>
+      <div class="grid grid-cols-4 gap-2">
+        <a
+          href="/settings"
+          onclick={closeDrawer}
+          class="flex flex-col items-center gap-1.5 rounded-xl p-3 transition-colors
+            {isActive('/settings') ? 'bg-blue-50 text-blue-600' : 'text-slate-600 hover:bg-slate-50'}"
+        >
+          <Settings size={22} />
+          <span class="text-[10px] font-medium">Settings</span>
+        </a>
+        <button
+          onclick={() => { closeDrawer(); lock(); }}
+          class="flex flex-col items-center gap-1.5 rounded-xl p-3 transition-colors text-slate-600 hover:bg-slate-50"
+        >
+          <LogOut size={22} />
+          <span class="text-[10px] font-medium">Lock</span>
+        </button>
+      </div>
+    </div>
+  </div>
+</div>
