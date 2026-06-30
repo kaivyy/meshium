@@ -5,14 +5,14 @@
     Folder, FolderOpen, FileText, File, FileCode, FileImage, FileArchive,
     FileTerminal, Link, ChevronRight, Home, RefreshCw, Upload, Download,
     Trash2, Edit3, FolderPlus, Search, ArrowLeft, Eye, X, Check, AlertCircle,
-    ChevronUp, ChevronDown, MoreVertical, Copy, Move
+    ChevronUp, ChevronDown, MoreVertical, Copy, Move, Save
   } from 'lucide-svelte';
   import { Badge, Card, EmptyState, PageHeader, Skeleton, Spinner, Modal } from '$lib/components/ui';
   import { toast } from '$lib/stores/toast';
   import { type Server } from '$lib/stores/servers';
   import { api } from '$lib/api/client';
   import {
-    listFiles, getFileContent, downloadFile, uploadFile, deleteFile, renameFile, mkdir,
+    listFiles, getFileContent, downloadFile, uploadFile, deleteFile, renameFile, mkdir, writeFile,
     type FileInfo, type ReadFileResponse, formatFileSize, isPreviewable
   } from '$lib/api/files';
 
@@ -43,6 +43,19 @@
   let uploadOverwrite = $state(false);
   let uploading = $state(false);
   let actionTarget = $state<FileInfo | null>(null);
+
+  // Editor state
+  let showEditModal = $state(false);
+  let editFile = $state<FileInfo | null>(null);
+  let editContent = $state('');
+  let editOriginalContent = $state('');
+  let editIsBinary = $state(false);
+  let editMimeType = $state('');
+  let editLoading = $state(false);
+  let editSaving = $state(false);
+
+  // Derived: dirty flag
+  let editDirty = $derived(editContent !== editOriginalContent);
 
   // Derived: breadcrumbs
   let breadcrumbs = $derived.by(() => {
@@ -243,6 +256,63 @@
     showDeleteModal = true;
   }
 
+  async function openEditor(file: FileInfo) {
+    editFile = file;
+    editLoading = true;
+    editContent = '';
+    editOriginalContent = '';
+    editIsBinary = false;
+    editMimeType = '';
+    showEditModal = true;
+
+    try {
+      const resp = await getFileContent(serverId, file.path);
+      if (resp.isBinary) {
+        editIsBinary = true;
+        editMimeType = resp.mimeType;
+      } else {
+        editContent = resp.content;
+        editOriginalContent = resp.content;
+        editMimeType = resp.mimeType;
+      }
+    } catch (err: any) {
+      toast.error('Failed to load file: ' + (err?.message || 'unknown error'));
+      showEditModal = false;
+    } finally {
+      editLoading = false;
+    }
+  }
+
+  async function handleSaveEdit() {
+    if (!editFile || !editDirty) return;
+    editSaving = true;
+    try {
+      await writeFile(serverId, {
+        path: editFile.path,
+        content: editContent,
+        overwrite: true
+      });
+      toast.success(`Saved ${editFile.name}`);
+      editOriginalContent = editContent;
+      showEditModal = false;
+      editFile = null;
+      await loadFiles();
+    } catch (err: any) {
+      toast.error('Save failed: ' + (err?.message || 'unknown error'));
+    } finally {
+      editSaving = false;
+    }
+  }
+
+  function handleEditKeydown(e: KeyboardEvent) {
+    if ((e.ctrlKey || e.metaKey) && e.key === 's') {
+      e.preventDefault();
+      if (editDirty && !editSaving) {
+        handleSaveEdit();
+      }
+    }
+  }
+
   function toggleSort(field: 'name' | 'size' | 'modTime') {
     if (sortBy === field) {
       sortDir = sortDir === 'asc' ? 'desc' : 'asc';
@@ -374,14 +444,17 @@
           <div class="hidden w-32 text-xs text-slate-400 sm:block">{formatDate(file.modTime)}</div>
           
           <!-- Actions -->
-          <div class="flex w-24 items-center justify-end gap-1">
+          <div class="flex w-28 items-center justify-end gap-1">
             {#if !file.isDir}
+              <button type="button" onclick={() => openEditor(file)} title="Edit" class="rounded p-1.5 text-slate-400 hover:bg-slate-100 hover:text-green-600">
+                <Edit3 size={14} />
+              </button>
               <button type="button" onclick={() => handleDownload(file)} title="Download" class="rounded p-1.5 text-slate-400 hover:bg-slate-100 hover:text-blue-600">
                 <Download size={14} />
               </button>
             {/if}
             <button type="button" onclick={() => openRenameModal(file)} title="Rename" class="rounded p-1.5 text-slate-400 hover:bg-slate-100 hover:text-blue-600">
-              <Edit3 size={14} />
+              <Move size={14} />
             </button>
             <button type="button" onclick={() => openDeleteModal(file)} title="Delete" class="rounded p-1.5 text-slate-400 hover:bg-slate-100 hover:text-red-600">
               <Trash2 size={14} />
@@ -421,6 +494,11 @@
         {formatFileSize(fileContent?.size || selectedFile.size)} · {fileContent?.mimeType || 'unknown'}
       </div>
       <div class="flex items-center gap-2">
+        {#if fileContent && !fileContent.isBinary}
+          <button type="button" onclick={() => { const f = selectedFile; showPreview = false; selectedFile = null; fileContent = null; openEditor(f); }} class="inline-flex items-center gap-2 rounded-lg bg-green-600 px-3 py-1.5 text-sm font-medium text-white hover:bg-green-700">
+            <Edit3 size={14} /> Edit
+          </button>
+        {/if}
         <button type="button" onclick={() => handleDownload(selectedFile)} class="inline-flex items-center gap-2 rounded-lg border border-slate-300 bg-white px-3 py-1.5 text-sm font-medium text-slate-700 hover:bg-slate-50">
           <Download size={14} /> Download
         </button>
@@ -526,6 +604,106 @@
         <Trash2 size={14} /> Delete
       </button>
     </div>
+  </Modal>
+{/if}
+
+<!-- Edit File Modal -->
+{#if showEditModal && editFile}
+  <Modal title="Edit File" onClose={() => {
+    if (editDirty && !confirm('Discard unsaved changes?')) return;
+    showEditModal = false; editFile = null; editContent = ''; editOriginalContent = '';
+  }}>
+    <div class="space-y-3">
+      <!-- File info bar -->
+      <div class="flex items-center justify-between rounded-lg bg-slate-50 px-3 py-2">
+        <div class="flex items-center gap-2">
+          <FileText size={16} class="text-slate-400" />
+          <span class="font-mono text-sm text-slate-700">{editFile.path}</span>
+        </div>
+        <div class="flex items-center gap-3 text-xs text-slate-500">
+          <span>{editMimeType}</span>
+          <span>·</span>
+          <span>{formatFileSize(editFile.size)}</span>
+          {#if editDirty}
+            <span class="inline-flex items-center gap-1 text-amber-600">
+              <span class="h-2 w-2 rounded-full bg-amber-500"></span>
+              Unsaved
+            </span>
+          {:else}
+            <span class="inline-flex items-center gap-1 text-green-600">
+              <span class="h-2 w-2 rounded-full bg-green-500"></span>
+              Saved
+            </span>
+          {/if}
+        </div>
+      </div>
+
+      {#if editLoading}
+        <div class="flex items-center justify-center py-12"><Spinner label="Loading file..." /></div>
+      {:else if editIsBinary}
+        <div class="py-12 text-center">
+          <AlertCircle size={32} class="mx-auto text-slate-400" />
+          <p class="mt-2 text-sm text-slate-500">Binary file cannot be edited</p>
+          <p class="text-xs text-slate-400">{editMimeType}</p>
+        </div>
+      {:else}
+        <!-- Editor textarea with line numbers -->
+        <div class="relative overflow-hidden rounded-lg border border-slate-300">
+          <div class="flex" style="max-height: 60vh;">
+            <!-- Line numbers gutter -->
+            <div id="line-numbers" class="select-none overflow-hidden bg-slate-50 py-3 text-right font-mono text-xs text-slate-400" style="min-width: 3rem; max-height: 60vh;">
+              {#each editContent.split('\n') as _, i}
+                <div class="px-2 leading-6">{i + 1}</div>
+              {/each}
+            </div>
+            <!-- Textarea -->
+            <textarea
+              bind:value={editContent}
+              onkeydown={handleEditKeydown}
+              onscroll={(e) => {
+                const ln = document.getElementById('line-numbers');
+                if (ln) { ln.scrollTop = (e.target as HTMLTextAreaElement).scrollTop; }
+              }}
+              id="edit-textarea"
+              class="flex-1 resize-none overflow-auto bg-white p-3 font-mono text-sm leading-6 text-slate-800 outline-none"
+              style="max-height: 60vh; min-height: 300px;"
+              spellcheck="false"
+              autocomplete="off"
+              autocorrect="off"
+              autocapitalize="off"
+              placeholder="File content..."
+            ></textarea>
+          </div>
+        </div>
+        <p class="text-xs text-slate-400">
+          Press <kbd class="rounded border border-slate-300 bg-slate-50 px-1.5 py-0.5 font-mono text-[10px]">Ctrl+S</kbd> to save · {editContent.split('\n').length} lines
+        </p>
+      {/if}
+    </div>
+
+    {#if !editLoading && !editIsBinary}
+      <div class="mt-4 flex items-center justify-between border-t border-slate-200 pt-3">
+        <div class="text-xs text-slate-500">
+          {#if editDirty}
+            <span class="text-amber-600">Unsaved changes</span>
+          {:else}
+            <span class="text-green-600">All changes saved</span>
+          {/if}
+        </div>
+        <div class="flex items-center gap-2">
+          <button type="button" onclick={() => {
+            if (editDirty && !confirm('Discard unsaved changes?')) return;
+            showEditModal = false; editFile = null; editContent = ''; editOriginalContent = '';
+          }} class="rounded-lg border border-slate-300 bg-white px-4 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50">
+            Cancel
+          </button>
+          <button type="button" onclick={handleSaveEdit} disabled={!editDirty || editSaving} class="inline-flex items-center gap-2 rounded-lg bg-green-600 px-4 py-2 text-sm font-medium text-white hover:bg-green-700 disabled:opacity-60">
+            {#if editSaving}<Spinner size="sm" label="" />{:else}<Save size={14} />{/if}
+            Save
+          </button>
+        </div>
+      </div>
+    {/if}
   </Modal>
 {/if}
 
