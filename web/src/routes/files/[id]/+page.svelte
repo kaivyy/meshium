@@ -468,7 +468,7 @@
 
 <!-- File Preview Modal -->
 {#if showPreview && selectedFile}
-  <Modal title={selectedFile.name} onClose={() => { showPreview = false; selectedFile = null; fileContent = null; }}>
+  <Modal open={true} title={selectedFile.name} onClose={() => { showPreview = false; selectedFile = null; fileContent = null; }}>
     <div class="max-h-[60vh] overflow-auto">
       {#if loadingContent}
         <div class="flex items-center justify-center py-8"><Spinner label="Loading file..." /></div>
@@ -512,7 +512,7 @@
 
 <!-- Upload Modal -->
 {#if showUploadModal}
-  <Modal title="Upload File" onClose={() => { showUploadModal = false; uploadFile_input = null; uploadPath = ''; }}>
+  <Modal open={true} title="Upload File" onClose={() => { showUploadModal = false; uploadFile_input = null; uploadPath = ''; }}>
     <div class="space-y-4">
       <div>
         <label class="mb-1 block text-sm font-medium text-slate-700">File</label>
@@ -542,7 +542,7 @@
 
 <!-- New Folder Modal -->
 {#if showMkdirModal}
-  <Modal title="New Folder" onClose={() => { showMkdirModal = false; mkdirPath = ''; }}>
+  <Modal open={true} title="New Folder" onClose={() => { showMkdirModal = false; mkdirPath = ''; }}>
     <div class="space-y-4">
       <div>
         <label class="mb-1 block text-sm font-medium text-slate-700">Folder Name</label>
@@ -563,7 +563,7 @@
 
 <!-- Rename Modal -->
 {#if showRenameModal && actionTarget}
-  <Modal title="Rename / Move" onClose={() => { showRenameModal = false; actionTarget = null; renameNewPath = ''; }}>
+  <Modal open={true} title="Rename / Move" onClose={() => { showRenameModal = false; actionTarget = null; renameNewPath = ''; }}>
     <div class="space-y-4">
       <div>
         <label class="mb-1 block text-sm font-medium text-slate-700">New Path</label>
@@ -582,7 +582,7 @@
 
 <!-- Delete Confirmation Modal -->
 {#if showDeleteModal && actionTarget}
-  <Modal title="Confirm Delete" onClose={() => { showDeleteModal = false; actionTarget = null; }}>
+  <Modal open={true} title="Confirm Delete" onClose={() => { showDeleteModal = false; actionTarget = null; }}>
     <div class="space-y-3">
       <div class="flex items-start gap-3">
         <div class="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg bg-red-50 text-red-600"><AlertCircle size={20} /></div>
@@ -609,7 +609,7 @@
 
 <!-- Edit File Modal -->
 {#if showEditModal && editFile}
-  <Modal title="Edit File" onClose={() => {
+  <Modal open={true} title="Edit File" onClose={() => {
     if (editDirty && !confirm('Discard unsaved changes?')) return;
     showEditModal = false; editFile = null; editContent = ''; editOriginalContent = '';
   }}>
