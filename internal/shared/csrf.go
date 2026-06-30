@@ -6,8 +6,17 @@ import (
 )
 
 // CSRFMiddleware validates that state-changing requests (POST, PUT, DELETE, PATCH)
-// have a Content-Type of application/json. This prevents CSRF attacks because
-// cross-origin forms cannot set custom Content-Type headers.
+// have an acceptable Content-Type. This prevents CSRF attacks because cross-origin
+// forms cannot set custom Content-Type headers like application/json.
+//
+// Allowed Content-Types for state-changing methods:
+//   - application/json (standard API requests)
+//   - multipart/form-data (file uploads)
+//   - empty (action endpoints with no body, e.g., POST /api/auth/lock)
+//
+// This is safe because the API uses Bearer token authentication, not cookies.
+// Cross-origin requests cannot set the Authorization header without a CORS
+// preflight, which we do not allow.
 //
 // For GET/HEAD/OPTIONS requests, the middleware is a no-op.
 func CSRFMiddleware(next http.Handler) http.Handler {
@@ -15,10 +24,12 @@ func CSRFMiddleware(next http.Handler) http.Handler {
 		// Only validate state-changing methods
 		switch r.Method {
 		case http.MethodPost, http.MethodPut, http.MethodDelete, http.MethodPatch:
-			// Check Content-Type header
 			contentType := r.Header.Get("Content-Type")
-			if !strings.HasPrefix(contentType, "application/json") {
-				WriteError(w, http.StatusUnsupportedMediaType, "content-type must be application/json", "INVALID_CONTENT_TYPE")
+			// Allow application/json, multipart/form-data, and empty Content-Type
+			if contentType != "" &&
+				!strings.HasPrefix(contentType, "application/json") &&
+				!strings.HasPrefix(contentType, "multipart/form-data") {
+				WriteError(w, http.StatusUnsupportedMediaType, "unsupported content-type", "INVALID_CONTENT_TYPE")
 				return
 			}
 		}

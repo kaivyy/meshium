@@ -7,13 +7,27 @@ import (
 	"meshium/internal/shared"
 )
 
+// PoolInvalidator allows the server service to invalidate cached SSH connections
+// when a server's configuration changes or is deleted.
+type PoolInvalidator interface {
+	Close(serverID int) error
+}
+
 type Service struct {
 	repo    Repo
 	authSvc *auth.Service
+	pool    PoolInvalidator
 }
 
 func NewService(repo Repo, authSvc *auth.Service) *Service {
 	return &Service{repo: repo, authSvc: authSvc}
+}
+
+// SetPoolInvalidator sets the SSH pool invalidator. When set, the service will
+// invalidate cached SSH connections for a server whenever its configuration
+// is updated or the server is deleted.
+func (s *Service) SetPoolInvalidator(p PoolInvalidator) {
+	s.pool = p
 }
 
 func (s *Service) encryptCredential(plaintext string) (string, error) {
@@ -187,10 +201,18 @@ func (s *Service) Update(id int, req UpdateRequest) error {
 		srv.Passphrase = encrypted
 	}
 
+	// Invalidate cached SSH connection since server config may have changed
+	if s.pool != nil {
+		s.pool.Close(id)
+	}
 	return s.repo.Update(id, *srv)
 }
 
 func (s *Service) Delete(id int) error {
+	// Invalidate cached SSH connection before deleting the server
+	if s.pool != nil {
+		s.pool.Close(id)
+	}
 	return s.repo.Delete(id)
 }
 

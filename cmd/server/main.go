@@ -56,6 +56,9 @@ func main() {
 	})
 	knownHosts := ssh.NewKnownHostsStore(database)
 
+	// Invalidate cached SSH connections when server config changes
+	serverSvc.SetPoolInvalidator(sshPool)
+
 	discoverySvc := discovery.NewService(discovery.NewPoolAdapter(sshPool), serverRepo, authSvc, knownHosts)
 	discoveryHandler := discovery.NewHandler(discoverySvc)
 
@@ -153,6 +156,7 @@ func main() {
 	fileHandler := handler.NewFileHandler(fileService)
 
 	// 5. Setup graceful shutdown
+	httpServer := &http.Server{}
 	go func() {
 		sigCh := make(chan os.Signal, 1)
 		signal.Notify(sigCh, syscall.SIGINT, syscall.SIGTERM)
@@ -163,6 +167,9 @@ func main() {
 		defer shutdownCancel()
 		if err := engine.Stop(shutdownCtx); err != nil {
 			fmt.Fprintf(os.Stderr, "Job engine shutdown error: %v\n", err)
+		}
+		if err := httpServer.Shutdown(shutdownCtx); err != nil {
+			fmt.Fprintf(os.Stderr, "HTTP server shutdown error: %v\n", err)
 		}
 	}()
 
@@ -192,7 +199,9 @@ func main() {
 
 	addr := ":" + cfg.ServerPort
 	fmt.Printf("Meshium server starting on %s\n", addr)
-	if err := http.ListenAndServe(addr, protectedMux); err != nil {
+	httpServer.Addr = addr
+	httpServer.Handler = protectedMux
+	if err := httpServer.ListenAndServe(); err != nil && err != http.ErrServerClosed {
 		fmt.Fprintf(os.Stderr, "Server error: %v\n", err)
 		os.Exit(1)
 	}

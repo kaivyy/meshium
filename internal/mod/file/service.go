@@ -5,6 +5,7 @@ import (
 	"encoding/base64"
 	"fmt"
 	"path/filepath"
+	"regexp"
 	"strconv"
 	"strings"
 	"time"
@@ -14,6 +15,20 @@ import (
 	"meshium/internal/mod/transport"
 	"meshium/internal/shared"
 )
+
+// validFileMode is a regex that matches valid octal file permission modes (e.g., "644", "755", "0644").
+var validFileMode = regexp.MustCompile(`^[0-7]{3,4}$`)
+
+// validateFileMode returns an error if mode is non-empty and not a valid octal mode.
+func validateFileMode(mode string) error {
+	if mode == "" {
+		return nil
+	}
+	if !validFileMode.MatchString(mode) {
+		return fmt.Errorf("invalid file mode: %s (must be 3-4 octal digits, e.g., 0644)", mode)
+	}
+	return nil
+}
 
 // Service provides file operations on remote servers via SSH.
 type Service struct {
@@ -351,6 +366,9 @@ func (s *Service) WriteFile(ctx context.Context, serverID int, req WriteFileRequ
 
 	// Set mode if specified
 	if req.Mode != "" {
+		if err := validateFileMode(req.Mode); err != nil {
+			return err
+		}
 		chmodCmd := fmt.Sprintf("chmod %s %s", req.Mode, shellEscape(req.Path))
 		if _, stderr, _, err := sshClient.ExecContext(ctx, chmodCmd); err != nil {
 			fmt.Printf("warning: chmod failed: %s\n", stderr)
@@ -428,6 +446,9 @@ func (s *Service) Mkdir(ctx context.Context, serverID int, req MkdirRequest) err
 
 	var mkdirCmd string
 	if req.Mode != "" {
+		if err := validateFileMode(req.Mode); err != nil {
+			return err
+		}
 		mkdirCmd = fmt.Sprintf("mkdir -p -m %s %s", req.Mode, shellEscape(req.Path))
 	} else {
 		mkdirCmd = fmt.Sprintf("mkdir -p %s", shellEscape(req.Path))

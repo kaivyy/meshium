@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"meshium/internal/mod/transport"
+	"meshium/internal/shared"
 )
 
 // --- DockerCollector ---
@@ -215,7 +216,7 @@ func (c *ServiceCollector) Collect(ctx context.Context, exec transport.SSHExecut
 		svc := SystemService{Name: name}
 
 		// Get service properties
-		propsCmd := fmt.Sprintf(`systemctl show '%s' --property=Description,LoadState,ActiveState,SubState,Type,After,Requires 2>/dev/null`, name)
+		propsCmd := fmt.Sprintf(`systemctl show %s --property=Description,LoadState,ActiveState,SubState,Type,After,Requires 2>/dev/null`, shared.ShellQuote(name))
 		if propsOut, _, _, perr := exec.ExecContext(ctx, propsCmd); perr == nil {
 			for _, prop := range strings.Split(strings.TrimSpace(propsOut), "\n") {
 				if parts := strings.SplitN(prop, "=", 2); len(parts) == 2 {
@@ -306,7 +307,7 @@ func (c *DatabaseCollector) Collect(ctx context.Context, exec transport.SSHExecu
 // detectDatabase checks if a database is running and collects its info.
 func detectDatabase(ctx context.Context, exec transport.SSHExecuter, dbType, processName, versionCmd string) (*DatabaseInfo, error) {
 	// Check if the process is running
-	cmd := fmt.Sprintf("pgrep -x '%s' > /dev/null 2>&1 && echo yes || echo no", processName)
+	cmd := fmt.Sprintf("pgrep -x %s > /dev/null 2>&1 && echo yes || echo no", shared.ShellQuote(processName))
 	out, _, _, err := exec.ExecContext(ctx, cmd)
 	if err != nil {
 		return nil, err
@@ -327,7 +328,7 @@ func detectDatabase(ctx context.Context, exec transport.SSHExecuter, dbType, pro
 	}
 
 	// Get port from process
-	portCmd := fmt.Sprintf(`ss -tlnp 2>/dev/null | grep '%s' | awk '{print $4}' | head -1`, processName)
+	portCmd := fmt.Sprintf(`ss -tlnp 2>/dev/null | grep %s | awk '{print $4}' | head -1`, shared.ShellQuote(processName))
 	if portOut, _, _, perr := exec.ExecContext(ctx, portCmd); perr == nil {
 		_, portStr := parseAddrPort(strings.TrimSpace(portOut))
 		if port, perr := strconv.Atoi(portStr); perr == nil {
@@ -527,7 +528,7 @@ func parseSSLCert(ctx context.Context, exec transport.SSHExecuter, certPath stri
 	cert := &SSLCert{Path: certPath}
 
 	// Get expiry date and issuer
-	cmd := fmt.Sprintf(`openssl x509 -in '%s' -noout -enddate -issuer 2>/dev/null`, certPath)
+	cmd := fmt.Sprintf(`openssl x509 -in %s -noout -enddate -issuer 2>/dev/null`, shared.ShellQuote(certPath))
 	out, _, _, err := exec.ExecContext(ctx, cmd)
 	if err != nil {
 		return nil

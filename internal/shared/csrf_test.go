@@ -45,7 +45,10 @@ func TestCSRFMiddlewareAllowsPostWithJSONContentType(t *testing.T) {
 	}
 }
 
-func TestCSRFMiddlewareBlocksPostWithoutContentType(t *testing.T) {
+func TestCSRFMiddlewareAllowsPostWithoutContentType(t *testing.T) {
+	// Empty Content-Type is allowed for action endpoints that don't need a body
+	// (e.g., POST /api/auth/lock, POST /api/jobs/{id}/cancel).
+	// This is safe because the API uses Bearer token authentication, not cookies.
 	handlerCalled := false
 	handler := CSRFMiddleware(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		handlerCalled = true
@@ -56,11 +59,11 @@ func TestCSRFMiddlewareBlocksPostWithoutContentType(t *testing.T) {
 	w := httptest.NewRecorder()
 	handler.ServeHTTP(w, req)
 
-	if handlerCalled {
-		t.Error("POST without Content-Type should be blocked")
+	if !handlerCalled {
+		t.Error("POST without Content-Type should be allowed (action endpoints with no body)")
 	}
-	if w.Code != http.StatusUnsupportedMediaType {
-		t.Errorf("expected 415, got %d", w.Code)
+	if w.Code != http.StatusOK {
+		t.Errorf("expected 200, got %d", w.Code)
 	}
 }
 
@@ -84,7 +87,30 @@ func TestCSRFMiddlewareBlocksPostWithFormContentType(t *testing.T) {
 	}
 }
 
-func TestCSRFMiddlewareBlocksPutWithoutContentType(t *testing.T) {
+func TestCSRFMiddlewareAllowsMultipartFormData(t *testing.T) {
+	// multipart/form-data is allowed for file upload endpoints.
+	// This is safe because the API uses Bearer token authentication, not cookies.
+	handlerCalled := false
+	handler := CSRFMiddleware(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		handlerCalled = true
+		w.WriteHeader(http.StatusOK)
+	}))
+
+	req := httptest.NewRequest("POST", "/api/test", nil)
+	req.Header.Set("Content-Type", "multipart/form-data; boundary=----WebKitFormBoundary")
+	w := httptest.NewRecorder()
+	handler.ServeHTTP(w, req)
+
+	if !handlerCalled {
+		t.Error("POST with multipart/form-data should be allowed")
+	}
+	if w.Code != http.StatusOK {
+		t.Errorf("expected 200, got %d", w.Code)
+	}
+}
+
+func TestCSRFMiddlewareAllowsPutWithoutContentType(t *testing.T) {
+	// Empty Content-Type is allowed for PUT requests with no body.
 	handlerCalled := false
 	handler := CSRFMiddleware(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		handlerCalled = true
@@ -95,15 +121,16 @@ func TestCSRFMiddlewareBlocksPutWithoutContentType(t *testing.T) {
 	w := httptest.NewRecorder()
 	handler.ServeHTTP(w, req)
 
-	if handlerCalled {
-		t.Error("PUT without Content-Type should be blocked")
+	if !handlerCalled {
+		t.Error("PUT without Content-Type should be allowed")
 	}
-	if w.Code != http.StatusUnsupportedMediaType {
-		t.Errorf("expected 415, got %d", w.Code)
+	if w.Code != http.StatusOK {
+		t.Errorf("expected 200, got %d", w.Code)
 	}
 }
 
-func TestCSRFMiddlewareBlocksDeleteWithoutContentType(t *testing.T) {
+func TestCSRFMiddlewareAllowsDeleteWithoutContentType(t *testing.T) {
+	// Empty Content-Type is allowed for DELETE requests with no body.
 	handlerCalled := false
 	handler := CSRFMiddleware(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		handlerCalled = true
@@ -114,15 +141,16 @@ func TestCSRFMiddlewareBlocksDeleteWithoutContentType(t *testing.T) {
 	w := httptest.NewRecorder()
 	handler.ServeHTTP(w, req)
 
-	if handlerCalled {
-		t.Error("DELETE without Content-Type should be blocked")
+	if !handlerCalled {
+		t.Error("DELETE without Content-Type should be allowed")
 	}
-	if w.Code != http.StatusUnsupportedMediaType {
-		t.Errorf("expected 415, got %d", w.Code)
+	if w.Code != http.StatusOK {
+		t.Errorf("expected 200, got %d", w.Code)
 	}
 }
 
-func TestCSRFMiddlewareBlocksPatchWithoutContentType(t *testing.T) {
+func TestCSRFMiddlewareAllowsPatchWithoutContentType(t *testing.T) {
+	// Empty Content-Type is allowed for PATCH requests with no body.
 	handlerCalled := false
 	handler := CSRFMiddleware(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		handlerCalled = true
@@ -133,11 +161,11 @@ func TestCSRFMiddlewareBlocksPatchWithoutContentType(t *testing.T) {
 	w := httptest.NewRecorder()
 	handler.ServeHTTP(w, req)
 
-	if handlerCalled {
-		t.Error("PATCH without Content-Type should be blocked")
+	if !handlerCalled {
+		t.Error("PATCH without Content-Type should be allowed")
 	}
-	if w.Code != http.StatusUnsupportedMediaType {
-		t.Errorf("expected 415, got %d", w.Code)
+	if w.Code != http.StatusOK {
+		t.Errorf("expected 200, got %d", w.Code)
 	}
 }
 

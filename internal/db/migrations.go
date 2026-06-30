@@ -152,5 +152,20 @@ func Migrate(db *sql.DB) error {
 		tx.Exec(stmt)
 	}
 
+	// Add indexes for common query patterns
+	indexStatements := []string{
+		`CREATE INDEX IF NOT EXISTS idx_servers_favorite_name ON servers(favorite, name)`,
+		`CREATE INDEX IF NOT EXISTS idx_migrations_status_created ON migrations(status, created_at)`,
+		`CREATE INDEX IF NOT EXISTS idx_migrations_source ON migrations(source_id)`,
+		`CREATE INDEX IF NOT EXISTS idx_migrations_target ON migrations(target_id)`,
+		`CREATE INDEX IF NOT EXISTS idx_migration_steps_migration ON migration_steps(migration_id, status)`,
+	}
+
+	for _, stmt := range indexStatements {
+		if _, err := tx.Exec(stmt); err != nil {
+			return err
+		}
+	}
+
 	return tx.Commit()
 }
