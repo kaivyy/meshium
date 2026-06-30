@@ -158,11 +158,12 @@ func parseLSOutput(output, basePath string) []FileInfo {
 			continue
 		}
 
-		// Parse ls -la output format:
-		// drwxr-xr-x  2 user group 4096 Jan 15 10:30 dirname
-		// -rw-r--r--  1 user group 1234 Jan 15 10:30 filename
+		// Parse ls -la --time-style=+%s output format:
+		// drwxr-xr-x  2 root root 4096 1234567890 dirname
+		// -rw-r--r--  1 root root 1234 1234567890 filename
+		// lrwxrwxrwx  1 root root 7    1234567890 link -> target
 		fields := strings.Fields(line)
-		if len(fields) < 9 {
+		if len(fields) < 7 {
 			continue
 		}
 
@@ -172,12 +173,11 @@ func parseLSOutput(output, basePath string) []FileInfo {
 		group := fields[3]
 		size, _ := strconv.ParseInt(fields[4], 10, 64)
 
-		// Date/time fields: fields[5], fields[6], fields[7]
-		// For our format, fields[5] is timestamp (seconds since epoch)
+		// With --time-style=+%s, fields[5] is the timestamp (seconds since epoch)
 		timestamp, _ := strconv.ParseInt(fields[5], 10, 64)
 		modTime := time.Unix(timestamp, 0)
 
-		// Name is everything after the date
+		// Name is everything after the timestamp
 		name := strings.Join(fields[6:], " ")
 
 		// Skip . and .. entries
