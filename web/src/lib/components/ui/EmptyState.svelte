@@ -11,7 +11,7 @@
   let { title, description, icon, action }: Props = $props();
 </script>
 
-<div class="flex flex-col items-center text-center rounded-2xl bg-white px-6 py-8">
+<div class="flex flex-col items-center text-center rounded-2xl bg-white px-6 py-8" role="status">
   {#if icon}
     <div class="inline-flex items-center justify-center rounded-full bg-slate-100 p-3 text-slate-500">
       {@render icon()}

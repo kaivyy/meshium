@@ -86,8 +86,15 @@ export const migrationApi = {
     api.post('/diff', { sourceId, targetId, categories: categories || [] }) as Promise<DiffResult>,
 };
 
+function buildWsUrl(path: string): string {
+  const proto = location.protocol === 'https:' ? 'wss' : 'ws';
+  const token = typeof localStorage !== 'undefined' ? localStorage.getItem('meshium_session_token') : null;
+  const tokenParam = token ? `?token=${encodeURIComponent(token)}` : '';
+  return `${proto}://${location.host}${path}${tokenParam}`;
+}
+
 export function wsPlan(req: PlanRequest, onMessage: (msg: WSMessage) => void, onClose?: () => void, onError?: () => void): WebSocket {
-  const ws = new WebSocket(`ws://${window.location.host}/ws/plan`);
+  const ws = new WebSocket(buildWsUrl('/ws/plan'));
   ws.onopen = () => {
     ws.send(JSON.stringify(req));
   };
@@ -101,7 +108,7 @@ export function wsPlan(req: PlanRequest, onMessage: (msg: WSMessage) => void, on
 }
 
 export function wsExecute(migrationId: number, onMessage: (msg: WSMessage) => void, onClose?: () => void, onError?: () => void): WebSocket {
-  const ws = new WebSocket(`ws://${window.location.host}/ws/migrate/${migrationId}`);
+  const ws = new WebSocket(buildWsUrl(`/ws/migrate/${migrationId}`));
   ws.onmessage = (event) => {
     const msg = JSON.parse(event.data) as WSMessage;
     onMessage(msg);
@@ -112,7 +119,7 @@ export function wsExecute(migrationId: number, onMessage: (msg: WSMessage) => vo
 }
 
 export function wsRollback(migrationId: number, onMessage: (msg: WSMessage) => void, onClose?: () => void, onError?: () => void): WebSocket {
-  const ws = new WebSocket(`ws://${window.location.host}/ws/migrate/${migrationId}/rollback`);
+  const ws = new WebSocket(buildWsUrl(`/ws/migrate/${migrationId}/rollback`));
   ws.onmessage = (event) => {
     const msg = JSON.parse(event.data) as WSMessage;
     onMessage(msg);
@@ -123,7 +130,7 @@ export function wsRollback(migrationId: number, onMessage: (msg: WSMessage) => v
 }
 
 export function wsDryRun(migrationId: number, onMessage: (msg: WSMessage) => void, onClose?: () => void, onError?: () => void): WebSocket {
-  const ws = new WebSocket(`ws://${window.location.host}/ws/dryrun/${migrationId}`);
+  const ws = new WebSocket(buildWsUrl(`/ws/dryrun/${migrationId}`));
   ws.onmessage = (event) => {
     const msg = JSON.parse(event.data) as WSMessage;
     onMessage(msg);

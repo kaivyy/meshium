@@ -72,3 +72,15 @@ export function formatDateTime(iso: string): string {
     ' ' +
     d.toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', hour12: false });
 }
+
+/**
+ * Format a snake_case or lowercase status string into Title Case.
+ * @example formatLabel("docker_transfer") → "Docker Transfer"
+ * @example formatLabel("rolled_back") → "Rolled Back"
+ */
+export function formatLabel(value: string): string {
+  return value
+    .split('_')
+    .map((word) => word.charAt(0).toUpperCase() + word.slice(1))
+    .join(' ');
+}

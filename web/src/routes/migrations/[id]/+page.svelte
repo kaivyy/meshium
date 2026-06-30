@@ -1,14 +1,18 @@
 <script lang="ts">
   import { onMount, onDestroy } from 'svelte';
   import { page } from '$app/stores';
+  import { goto } from '$app/navigation';
   import { api } from '$lib/api/client';
   import { migrationApi, wsExecute, wsRollback, wsDryRun, type WSMessage, type MigrationPlan, type MigrationStep, type DryRunResult } from '$lib/api/migrations';
+  import type { Server } from '$lib/stores/servers';
   import { ArrowLeft, AlertTriangle, Ban, CheckCircle2, Download, Eye, GitCompare, Play, Trash2, Undo2 } from 'lucide-svelte';
   import { toast } from '$lib/stores/toast';
+  import { formatLabel } from '$lib/utils/format';
 
   const migrationId = parseInt($page.params.id);
   let plan: MigrationPlan | null = null;
   let steps: MigrationStep[] = [];
+  let servers: Server[] = [];
   let loading = true;
   let executing = false;
   let rollingBack = false;
@@ -23,8 +27,14 @@
 
   onMount(async () => {
     try {
-      plan = await migrationApi.get(migrationId);
-      steps = await migrationApi.getSteps(migrationId);
+      const [p, s, svrs] = await Promise.all([
+        migrationApi.get(migrationId),
+        migrationApi.getSteps(migrationId),
+        api.get('/servers') as Promise<Server[]>,
+      ]);
+      plan = p;
+      steps = s;
+      servers = svrs;
       void runPreflight();
     } catch {
       // handle error
@@ -135,20 +145,43 @@
     }
   }
 
+  function serverName(id: number): string {
+    const server = servers.find((s) => s.id === id);
+    return server ? server.name : `Server #${id}`;
+  }
+
   async function deleteMigration() {
     if (!confirm('Delete this migration? This cannot be undone.')) return;
 
     try {
       await migrationApi.delete(migrationId);
       toast.success('Migration deleted');
-      window.location.href = '/migrations';
+      goto('/migrations');
     } catch {
       toast.error('Failed to delete migration');
     }
   }
 
-  function exportMigration() {
-    window.open(`/api/migrations/${migrationId}/export`, '_blank');
+  async function exportMigration() {
+    try {
+      const res = await fetch(`/api/migrations/${migrationId}/export`, {
+        headers: {
+          Authorization: `Bearer ${localStorage.getItem('meshium_session_token')}`,
+        },
+      });
+      if (!res.ok) throw new Error('Export failed');
+      const blob = await res.blob();
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `migration-${migrationId}.json`;
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      URL.revokeObjectURL(url);
+    } catch {
+      toast.error('Failed to export migration');
+    }
   }
 
   function statusColor(status: string): string {
@@ -241,7 +274,7 @@
       <div>
         <h1 class="text-xl font-bold text-slate-900">Migration #{plan.id}</h1>
         <p class="text-sm text-slate-500">
-          Source: Server #{plan.sourceServerId} → Target: Server #{plan.targetServerId}
+          Source: {serverName(plan.sourceServerId)} → Target: {serverName(plan.targetServerId)}
         </p>
       </div>
       <div class="flex flex-wrap items-center gap-2">
@@ -255,7 +288,7 @@
           </button>
           <button
             on:click={startExecution}
-            disabled={executing || preflightLoading || preflightErrors.length > 0}
+            disabled={executing || preflightLoading || preflightErrors.length > 0 || !!preflightError}
             class="flex items-center gap-1 px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-50 text-sm font-medium"
           >
             <Play size={16} /> {executing ? 'Executing...' : 'Execute'}
@@ -296,7 +329,7 @@
          plan.status === 'running' ? 'bg-blue-100 text-blue-700' :
          plan.status === 'rolled_back' ? 'bg-yellow-100 text-yellow-700' :
          'bg-slate-100 text-slate-700'}">
-        {plan.status}
+        {formatLabel(plan.status)}
       </span>
     </div>
 
@@ -361,7 +394,7 @@
                  'bg-slate-300'}">
               </span>
               <span class="font-mono text-slate-700">{step.category}:{step.action}</span>
-              <span class={statusColor(step.status)}>{step.status}</span>
+              <span class={statusColor(step.status)}>{formatLabel(step.status)}</span>
               {#if step.error}
                 <span class="text-red-500 break-all">→ {step.error}</span>
               {/if}
