@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"strings"
 	"time"
 
 	"meshium/internal/mod/server"
@@ -89,6 +90,8 @@ func (rm *RollbackManager) Rollback(ctx context.Context, migrationID int, onProg
 	}
 
 	// 5. Rollback each category (in reverse order)
+	// Track failures so we can report the correct final status.
+	var rollbackErrors []string
 	for i := len(backups) - 1; i >= 0; i-- {
 		if ctx.Err() != nil {
 			rm.repo.UpdateMigrationStatus(migrationID, StatusRollbackFailed, "cancelled")
@@ -115,6 +118,7 @@ func (rm *RollbackManager) Rollback(ctx context.Context, migrationID int, onProg
 				Status: "error",
 				Error:  "failed to parse backup data",
 			})
+			rollbackErrors = append(rollbackErrors, fmt.Sprintf("%s: failed to parse backup data", backup.Category))
 			continue
 		}
 
@@ -126,6 +130,7 @@ func (rm *RollbackManager) Rollback(ctx context.Context, migrationID int, onProg
 				Status: "error",
 				Error:  fmt.Sprintf("rollback failed: %v", err),
 			})
+			rollbackErrors = append(rollbackErrors, fmt.Sprintf("%s: %v", backup.Category, err))
 			// Continue with other categories even if one fails
 			continue
 		}
@@ -137,8 +142,14 @@ func (rm *RollbackManager) Rollback(ctx context.Context, migrationID int, onProg
 		})
 	}
 
-	// 6. Update status to rolled_back
+	// 6. Update status based on whether any rollbacks failed
 	now := time.Now().Format(time.RFC3339)
+	if len(rollbackErrors) > 0 {
+		errMsg := fmt.Sprintf("rollback failed for %d categor(ies): %s", len(rollbackErrors), strings.Join(rollbackErrors, "; "))
+		rm.repo.UpdateMigrationStatus(migrationID, StatusRollbackFailed, errMsg)
+		onProgress(WSMessage{Step: "rollback", Status: "error", Error: errMsg})
+		return fmt.Errorf("%s", errMsg)
+	}
 	rm.repo.UpdateMigrationStatus(migrationID, StatusRolledBack, "")
 	rm.repo.SetMigrationRolledBackAt(migrationID, now)
 

@@ -128,6 +128,10 @@ type MigrationPlan struct {
 	ID string `json:"id"`
 	// CreatedAt is when the plan was generated.
 	CreatedAt time.Time `json:"createdAt"`
+	// SourceID is the database ID of the source server.
+	SourceID int `json:"sourceId"`
+	// TargetID is the database ID of the target server.
+	TargetID int `json:"targetId"`
 	// Source is a summary of the source server.
 	Source ServerSummary `json:"source"`
 	// Target is a summary of the target server.

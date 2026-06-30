@@ -20,17 +20,18 @@ func NewMiddleware(svc *Service) *Middleware {
 
 // authExemptPaths are paths that don't require authentication.
 var authExemptPaths = map[string]bool{
-	"/api/auth/setup":   true,
-	"/api/auth/unlock":  true,
-	"/api/auth/status":  true,
-	"/api/health":       true,
+	"/api/auth/setup":  true,
+	"/api/auth/unlock": true,
+	"/api/auth/status": true,
+	"/api/health":      true,
 }
 
 // RequireAuth returns middleware that checks for a valid session token.
 // If the app is not set up, it allows requests through (setup mode).
 // If the app is locked, it returns 403 Forbidden.
 // If the app is unlocked, API requests are allowed (unlocked = authenticated).
-// Session tokens are still validated for WebSocket endpoints to prevent CSRF.
+// Session tokens are validated for WebSocket endpoints to prevent CSRF.
+// WebSocket routes (/ws/) require a valid token in the "token" query parameter.
 func (m *Middleware) RequireAuth(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		// Allow exempt paths (auth endpoints, health check)
@@ -39,8 +40,11 @@ func (m *Middleware) RequireAuth(next http.Handler) http.Handler {
 			return
 		}
 
-		// Allow static file serving (non-API routes)
-		if !strings.HasPrefix(r.URL.Path, "/api/") {
+		isAPI := strings.HasPrefix(r.URL.Path, "/api/")
+		isWS := strings.HasPrefix(r.URL.Path, "/ws/")
+
+		// Allow static file serving (non-API, non-WS routes)
+		if !isAPI && !isWS {
 			next.ServeHTTP(w, r)
 			return
 		}
@@ -64,8 +68,24 @@ func (m *Middleware) RequireAuth(next http.Handler) http.Handler {
 			return
 		}
 
-		// App is unlocked — allow API access.
-		// If a token is provided, validate it (reject invalid tokens).
+		// WebSocket routes require a valid session token (from query param).
+		// Unlike API routes, WS connections cannot rely on "unlocked = authenticated"
+		// because browsers can't set Authorization headers on WebSocket connections.
+		if isWS {
+			token := extractToken(r)
+			if token == "" {
+				shared.WriteError(w, http.StatusUnauthorized, "missing session token", "UNAUTHORIZED")
+				return
+			}
+			if !m.svc.ValidateSessionToken(token) {
+				shared.WriteError(w, http.StatusUnauthorized, "invalid session token", "UNAUTHORIZED")
+				return
+			}
+			next.ServeHTTP(w, r)
+			return
+		}
+
+		// API routes: if a token is provided, validate it (reject invalid tokens).
 		// If no token is provided, allow access (unlocked = authenticated).
 		// This prevents reload loops where the frontend has no token after
 		// a server restart but the app is still unlocked.

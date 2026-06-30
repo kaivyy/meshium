@@ -5,8 +5,8 @@ import (
 	"encoding/json"
 	"fmt"
 	"log"
+	"sync"
 	"time"
-
 	"meshium/internal/mod/server"
 
 	xssh "golang.org/x/crypto/ssh"
@@ -20,6 +20,10 @@ type Executor struct {
 	pool     ConnectionPool
 	authSvc  AESKeyProvider
 	hosts    HostKeyStore
+
+	// runningMigrations prevents concurrent execution of the same migration ID.
+	// The key is the migration ID; the value is a placeholder struct{}.
+	runningMigrations sync.Map
 }
 
 // NewExecutor creates an Executor.
@@ -86,6 +90,13 @@ func (e *Executor) Resume(ctx context.Context, migrationID int, onProgress StepC
 		return fmt.Errorf("migration not in interrupted state: %s", migration.Status)
 	}
 
+	// Prevent concurrent execution of the same migration
+	if !e.tryAcquire(migrationID) {
+		sendError(onProgress, "resume", "migration is already running")
+		return fmt.Errorf("migration %d is already running", migrationID)
+	}
+	defer e.release(migrationID)
+
 	// Get already-applied categories to skip
 	appliedCats, err := e.repo.GetAppliedCategories(migrationID)
 	if err != nil {
@@ -133,6 +144,19 @@ func (e *Executor) RecoverInterrupted() ([]int, error) {
 	return recovered, nil
 }
 
+// tryAcquire atomically marks a migration as running in the in-memory map.
+// Returns true if this caller acquired the lock, false if another caller
+// already holds it.
+func (e *Executor) tryAcquire(migrationID int) bool {
+	_, loaded := e.runningMigrations.LoadOrStore(migrationID, struct{}{})
+	return !loaded
+}
+
+// release removes the migration from the in-memory running map.
+func (e *Executor) release(migrationID int) {
+	e.runningMigrations.Delete(migrationID)
+}
+
 // executeWithSkip is the core execution logic. If skip is non-nil,
 // categories in the skip map are skipped (already applied). This is
 // used by both Execute (skip=nil) and Resume (skip=applied categories).
@@ -154,9 +178,28 @@ func (e *Executor) executeWithSkip(ctx context.Context, migrationID int, onProgr
 		return fmt.Errorf("migration not in planned/resuming state: %s", migration.Status)
 	}
 
-	// 2. Update status to running
-	if err := e.repo.UpdateMigrationStatus(migrationID, StatusRunning, ""); err != nil {
-		log.Printf("failed to update migration %d status to running: %v", migrationID, err)
+	// 2. Atomically update status to running — prevents double execution.
+	// If the atomic CAS fails, another caller is already running this migration.
+	if skip != nil {
+		// Resume path: already acquired the lock in Resume()
+		if err := e.repo.UpdateMigrationStatus(migrationID, StatusRunning, ""); err != nil {
+			log.Printf("failed to update migration %d status to running: %v", migrationID, err)
+		}
+	} else {
+		// Fresh execute path: try atomic CAS
+		if !e.tryAcquire(migrationID) {
+			sendError(onProgress, "execute", "migration is already running")
+			return fmt.Errorf("migration %d is already running", migrationID)
+		}
+		defer e.release(migrationID)
+
+		acquired, err := e.repo.TryUpdateMigrationStatus(migrationID, StatusPlanned, StatusRunning, "")
+		if err != nil {
+			log.Printf("failed to atomically update migration %d status to running: %v", migrationID, err)
+		} else if !acquired {
+			sendError(onProgress, "execute", "migration is already running (atomic check failed)")
+			return fmt.Errorf("migration %d is already running (atomic check failed)", migrationID)
+		}
 	}
 	onProgress(WSMessage{Step: "execute", Status: "progress", Value: "Starting migration..."})
 
@@ -365,6 +408,9 @@ func (e *Executor) rollbackAll(ctx context.Context, migrationID int, sshClient S
 		Value:  fmt.Sprintf("Rolling back %d applied categories...", len(appliedOrder)),
 	})
 
+	// Track rollback failures
+	rollbackFailed := false
+
 	// Roll back in reverse order of application
 	for i := len(appliedOrder) - 1; i >= 0; i-- {
 		catName := appliedOrder[i]
@@ -401,6 +447,7 @@ func (e *Executor) rollbackAll(ctx context.Context, migrationID int, sshClient S
 		})
 
 		if err := mod.Applier.Rollback(ctx, sshClient, backup); err != nil {
+			rollbackFailed = true
 			onProgress(WSMessage{
 				Step:   "rollback:" + catName,
 				Status: "error",
@@ -426,11 +473,19 @@ func (e *Executor) rollbackAll(ctx context.Context, migrationID int, sshClient S
 		}
 	}
 
-	onProgress(WSMessage{
-		Step:   "rollback",
-		Status: "complete",
-		Value:  "Rollback of all applied categories complete",
-	})
+	if rollbackFailed {
+		onProgress(WSMessage{
+			Step:   "rollback",
+			Status: "error",
+			Error:  "one or more categories failed to roll back — target may be in an inconsistent state",
+		})
+	} else {
+		onProgress(WSMessage{
+			Step:   "rollback",
+			Status: "complete",
+			Value:  "Rollback of all applied categories complete",
+		})
+	}
 }
 
 // getSSHClient obtains an SSH connection for the given server.

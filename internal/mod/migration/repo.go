@@ -21,6 +21,10 @@ type Repo interface {
 	GetMigration(id int) (*Migration, error)
 	ListMigrations() ([]Migration, error)
 	UpdateMigrationStatus(id int, status, errMsg string) error
+	// TryUpdateMigrationStatus atomically updates the status only if the
+	// current status matches expectedStatus. Returns true if the update
+	// was applied, false if the current status did not match.
+	TryUpdateMigrationStatus(id int, expectedStatus, newStatus, errMsg string) (bool, error)
 	SetMigrationPlan(id int, plan MigrationPlan) error
 	SetMigrationCompletedAt(id int, ts string) error
 	SetMigrationRolledBackAt(id int, ts string) error
@@ -122,6 +126,21 @@ func (r *sqliteRepo) UpdateMigrationStatus(id int, status, errMsg string) error 
 		status, errMsg, id,
 	)
 	return err
+}
+
+func (r *sqliteRepo) TryUpdateMigrationStatus(id int, expectedStatus, newStatus, errMsg string) (bool, error) {
+	res, err := r.db.Exec(
+		"UPDATE migrations SET status = ?, error = ? WHERE id = ? AND status = ?",
+		newStatus, errMsg, id, expectedStatus,
+	)
+	if err != nil {
+		return false, err
+	}
+	rows, err := res.RowsAffected()
+	if err != nil {
+		return false, err
+	}
+	return rows > 0, nil
 }
 
 func (r *sqliteRepo) SetMigrationPlan(id int, plan MigrationPlan) error {
@@ -230,7 +249,7 @@ func (r *sqliteRepo) CreateBackup(migrationID, serverID int, category, data stri
 func (r *sqliteRepo) GetBackups(migrationID int) ([]MigrationBackup, error) {
 	rows, err := r.db.Query(
 		`SELECT id, migration_id, server_id, category, backup_path, created_at
-		 FROM migration_backups WHERE migration_id = ?`,
+		 FROM migration_backups WHERE migration_id = ? ORDER BY id ASC`,
 		migrationID,
 	)
 	if err != nil {

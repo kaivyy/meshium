@@ -5,7 +5,9 @@ export function wsConnect(
   onClose?: () => void
 ): WebSocket {
   const proto = location.protocol === 'https:' ? 'wss' : 'ws';
-  const url = `${proto}://${location.host}/ws/connect/${serverId}`;
+  const token = typeof localStorage !== 'undefined' ? localStorage.getItem('meshium_session_token') : null;
+  const tokenParam = token ? `?token=${encodeURIComponent(token)}` : '';
+  const url = `${proto}://${location.host}/ws/connect/${serverId}${tokenParam}`;
   const ws = new WebSocket(url);
 
   ws.onmessage = (e) => {

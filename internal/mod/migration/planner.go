@@ -86,6 +86,7 @@ func (p *Planner) Plan(ctx context.Context, req PlanRequest, onProgress StepCall
 	}
 
 	// 4. Collect data for each category
+	collectionErrors := 0
 	for _, catName := range req.Categories {
 		if ctx.Err() != nil {
 			return nil, ctx.Err()
@@ -98,6 +99,7 @@ func (p *Planner) Plan(ctx context.Context, req PlanRequest, onProgress StepCall
 				Status: "error",
 				Error:  "unknown category: " + catName,
 			})
+			collectionErrors++
 			continue
 		}
 
@@ -107,21 +109,32 @@ func (p *Planner) Plan(ctx context.Context, req PlanRequest, onProgress StepCall
 			Value:  "Collecting " + catName + "...",
 		})
 
-		// For configs, set the paths
+		// For configs, create a per-request copy with the specified paths
+		// to avoid mutating the shared singleton (race condition fix).
+		var collector Collector = mod.Collector
 		if catName == "configs" {
 			if cc, ok := mod.Collector.(*ConfigsCollector); ok {
-				cc.Paths = req.ConfigPaths
+				paths := cc.Paths // copy existing paths from the singleton
+				if len(req.ConfigPaths) > 0 {
+					paths = req.ConfigPaths
+				}
+				collector = &ConfigsCollector{Paths: paths}
 			}
 		}
 
-		data, err := mod.Collector.Collect(ctx, sshClient)
+		data, err := collector.Collect(ctx, sshClient)
 		if err != nil {
 			onProgress(WSMessage{
 				Step:   "plan:" + catName,
 				Status: "error",
 				Error:  fmt.Sprintf("collect failed: %v", err),
 			})
-			p.repo.CreateStep(planID, catName, "collect", "")
+			// Record the failed step with error data so the executor
+			// can detect it and refuse to execute the migration.
+			p.repo.CreateStep(planID, catName, "collect", fmt.Sprintf(`{"error":"collect failed: %s"}`, err.Error()))
+			// Mark the migration as failed — collection errors are fatal.
+			p.repo.UpdateMigrationStatus(planID, StatusFailed, fmt.Sprintf("collection failed for %s: %v", catName, err))
+			collectionErrors++
 			continue
 		}
 
@@ -136,8 +149,17 @@ func (p *Planner) Plan(ctx context.Context, req PlanRequest, onProgress StepCall
 		})
 	}
 
-	// 5. Update plan status
-	p.repo.UpdateMigrationStatus(planID, StatusPlanned, "")
+	// 5. Update plan status — only set to "planned" if all collections succeeded.
+	// If any collection failed, the migration is already marked as "failed" above.
+	if collectionErrors == 0 {
+		p.repo.UpdateMigrationStatus(planID, StatusPlanned, "")
+	} else {
+		onProgress(WSMessage{
+			Step:   "plan",
+			Status: "error",
+			Error:  fmt.Sprintf("migration plan has %d collection error(s) — cannot execute", collectionErrors),
+		})
+	}
 
 	onProgress(WSMessage{Step: "plan", Status: "complete", Value: "Migration plan created"})
 

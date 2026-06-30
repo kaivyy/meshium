@@ -14,6 +14,7 @@ import (
 	"meshium/internal/jobengine"
 	"meshium/internal/mod/auth"
 	"meshium/internal/mod/discovery"
+	"meshium/internal/mod/file"
 	"meshium/internal/mod/migration"
 	"meshium/internal/mod/planner"
 	"meshium/internal/mod/server"
@@ -68,6 +69,9 @@ func main() {
 	migrationRunner := migration.NewCompositeRunner(migrationPlanner, migrationExecutor, migrationRollback)
 	migrationHandler := migration.NewHandler(migrationRunner, migrationRepo)
 
+	// New typed-state Engine (Phase 2) for the job engine path
+	migrationEngine := migration.NewEngine(migrationRepo.(migration.JobRepository), serverRepo, poolAdapter, authSvc, knownHosts, migrationRegistry)
+
 	// --- Phase 8: Job Engine, Planner, Discovery REST handlers ---
 
 	// 1. Instantiate stores and ensure tables exist
@@ -103,6 +107,8 @@ func main() {
 		sshPool,
 		authSvc,
 		knownHosts,
+		migrationRepo,
+		migrationEngine,
 	)
 
 	// 3. Create and start the job engine
@@ -124,12 +130,27 @@ func main() {
 	}
 	fmt.Printf("Job engine started (maxWorkers=1)\n")
 
+	// Recover interrupted migrations from a previous crash/restart.
+	// This marks any migrations stuck in "running" state as "interrupted"
+	// so they can be resumed by the user.
+	recoveredIDs, err := migrationExecutor.RecoverInterrupted()
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Warning: failed to recover interrupted migrations: %v\n", err)
+	} else if len(recoveredIDs) > 0 {
+		fmt.Printf("Recovered %d interrupted migration(s): %v\n", len(recoveredIDs), recoveredIDs)
+	}
+
 	// 4. Create HTTP handlers
 	defaultPlanner := planner.NewDefaultPlanner()
 	jobHTTPHandler := handler.NewJobHandler(engine, jobStore)
 	planHTTPHandler := handler.NewPlanHandler(defaultPlanner, planStore, snapshotStore, engine)
 	discoveryRESTHandler := handler.NewDiscoveryHandler(snapshotStore, engine)
 	terminalHandler := handler.NewTerminalHandler(handlerFactory, authSvc, serverRepo)
+
+	// File explorer service and handler
+	filePoolAdapter := &file.PoolAdapter{Inner: sshPool}
+	fileService := file.NewService(serverRepo, filePoolAdapter, authSvc, knownHosts)
+	fileHandler := handler.NewFileHandler(fileService)
 
 	// 5. Setup graceful shutdown
 	go func() {
@@ -159,6 +180,7 @@ func main() {
 	planHTTPHandler.RegisterRoutes(mux)
 	discoveryRESTHandler.RegisterRoutes(mux)
 	terminalHandler.RegisterRoutes(mux)
+	fileHandler.RegisterRoutes(mux)
 
 	mux.Handle("/", staticHandler())
 

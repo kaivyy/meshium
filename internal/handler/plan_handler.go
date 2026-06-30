@@ -151,6 +151,8 @@ func (h *PlanHandler) handleCreate(w http.ResponseWriter, r *http.Request) {
 		shared.WriteError(w, http.StatusInternalServerError, "failed to create plan", "INTERNAL")
 		return
 	}
+	plan.SourceID = req.SourceID
+	plan.TargetID = req.TargetID
 
 	// Save plan
 	if err := h.planStore.SavePlan(r.Context(), plan); err != nil {
@@ -200,8 +202,10 @@ func (h *PlanHandler) handleExecute(w http.ResponseWriter, r *http.Request, plan
 
 	// Submit migration job
 	jobReq := jobengine.JobRequest{
-		Type:   jobengine.JobTypeMigration,
-		PlanID: planID,
+		Type:     jobengine.JobTypeMigration,
+		PlanID:   planID,
+		SourceID: plan.SourceID,
+		TargetID: plan.TargetID,
 	}
 
 	job, err := h.engine.Submit(r.Context(), jobReq)

@@ -6,6 +6,7 @@ import (
 
 	"meshium/internal/jobengine"
 	"meshium/internal/mod/discovery"
+	"meshium/internal/mod/migration"
 	"meshium/internal/mod/planner"
 	"meshium/internal/mod/server"
 	"meshium/internal/mod/ssh"
@@ -17,12 +18,14 @@ import (
 // It creates JobHandler instances for discovery, compat_check, and
 // migration jobs based on the job type and request parameters.
 type HandlerFactoryImpl struct {
-	snapshotStore discovery.SnapshotStore
-	planStore     planner.PlanStore
-	serverRepo    server.Repo
-	pool          *ssh.Pool
-	authSvc       transport.AESKeyProvider
-	knownHosts    transport.HostKeyStore
+	snapshotStore  discovery.SnapshotStore
+	planStore      planner.PlanStore
+	serverRepo     server.Repo
+	pool           *ssh.Pool
+	authSvc        transport.AESKeyProvider
+	knownHosts     transport.HostKeyStore
+	migrationRepo  migration.Repo
+	migrationEngine *migration.Engine
 }
 
 // NewHandlerFactory creates a HandlerFactoryImpl.
@@ -33,14 +36,18 @@ func NewHandlerFactory(
 	pool *ssh.Pool,
 	authSvc transport.AESKeyProvider,
 	knownHosts transport.HostKeyStore,
+	migrationRepo migration.Repo,
+	migrationEngine *migration.Engine,
 ) *HandlerFactoryImpl {
 	return &HandlerFactoryImpl{
-		snapshotStore: snapshotStore,
-		planStore:     planStore,
-		serverRepo:    serverRepo,
-		pool:          pool,
-		authSvc:       authSvc,
-		knownHosts:    knownHosts,
+		snapshotStore:   snapshotStore,
+		planStore:       planStore,
+		serverRepo:      serverRepo,
+		pool:            pool,
+		authSvc:         authSvc,
+		knownHosts:      knownHosts,
+		migrationRepo:   migrationRepo,
+		migrationEngine: migrationEngine,
 	}
 }
 
@@ -90,22 +97,41 @@ func (f *HandlerFactoryImpl) createMigrationHandler(job *jobengine.Job) (jobengi
 	if job.PlanID == "" {
 		return nil, fmt.Errorf("migration job missing plan ID")
 	}
+	if job.SourceID == 0 || job.TargetID == 0 {
+		return nil, fmt.Errorf("migration job missing source/target server ID")
+	}
 
-	// Load the plan to get source and target server info
-	_, err := f.planStore.LoadPlan(context.Background(), job.PlanID)
+	// Load the plan to get step details
+	plan, err := f.planStore.LoadPlan(context.Background(), job.PlanID)
 	if err != nil {
 		return nil, fmt.Errorf("load plan %s: %w", job.PlanID, err)
 	}
 
-	// Migration jobs via the job engine require SSH connections to both
-	// source and target servers. The plan stores server summaries (hostname,
-	// OS, etc.) but not server IDs, so we cannot resolve SSH connections
-	// from the plan alone.
-	//
-	// For now, migration jobs should use the existing WebSocket handler
-	// at /ws/migrate/{id} which has full access to the migration runner.
-	// The job engine migration path will be fully wired in a future phase.
-	return nil, fmt.Errorf("migration jobs via job engine not yet supported — use /ws/migrate/{id} instead")
+	// Create SSH connections to source and target
+	sourceSSH, err := f.getSSHExecuter(job.SourceID)
+	if err != nil {
+		return nil, fmt.Errorf("get SSH executer for source server %d: %w", job.SourceID, err)
+	}
+	targetSSH, err := f.getSSHExecuter(job.TargetID)
+	if err != nil {
+		return nil, fmt.Errorf("get SSH executer for target server %d: %w", job.TargetID, err)
+	}
+
+	// If the migration hasn't been created yet, create it now
+	if job.MigrationID == 0 {
+		// Extract category names from the plan steps
+		categories := make([]string, 0, len(plan.Steps))
+		for _, step := range plan.Steps {
+			categories = append(categories, string(step.Type))
+		}
+		migrationID, err := f.migrationRepo.CreateMigration(job.SourceID, job.TargetID, categories)
+		if err != nil {
+			return nil, fmt.Errorf("create migration record: %w", err)
+		}
+		job.MigrationID = migrationID
+	}
+
+	return jobengine.NewMigrationJobHandler(f.planStore, f.migrationEngine, sourceSSH, targetSSH), nil
 }
 
 // getSSHExecuter creates an SSH connection to the given server.

@@ -50,6 +50,17 @@ func (m *mockRepo) UpdateMigrationStatus(id int, status, errMsg string) error {
 	return ErrMigrationNotFound
 }
 
+func (m *mockRepo) TryUpdateMigrationStatus(id int, expectedStatus, newStatus, errMsg string) (bool, error) {
+	for i := range m.migrations {
+		if m.migrations[i].ID == id && m.migrations[i].Status == expectedStatus {
+			m.migrations[i].Status = newStatus
+			m.migrations[i].Error = errMsg
+			return true, nil
+		}
+	}
+	return false, nil
+}
+
 func (m *mockRepo) SetMigrationPlan(id int, plan MigrationPlan) error { return nil }
 func (m *mockRepo) SetMigrationCompletedAt(id int, ts string) error   { return nil }
 func (m *mockRepo) SetMigrationRolledBackAt(id int, ts string) error  { return nil }

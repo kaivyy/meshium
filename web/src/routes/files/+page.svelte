@@ -3,7 +3,7 @@
   import { goto } from '$app/navigation';
   import {
     FolderTree, HardDrive, RefreshCw, Server as ServerIcon,
-    Search, Filter, ChevronDown, ChevronUp, AlertCircle, Folder
+    Search, Filter, ChevronDown, ChevronUp, AlertCircle, Folder, FolderOpen
   } from 'lucide-svelte';
   import { api } from '$lib/api/client';
   import { type ServerSnapshot, type DiskPartition } from '$lib/api/discovery';
@@ -162,6 +162,29 @@
     </Card>
   </div>
 
+  <!-- Server Browser Section -->
+  {#if !loading && servers.length > 0}
+    <div class="mb-6">
+      <h2 class="mb-3 text-sm font-semibold uppercase tracking-wide text-slate-500">Browse Files by Server</h2>
+      <div class="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
+        {#each servers as srv (srv.id)}
+          <Card padding="lg" hoverable>
+            <button type="button" onclick={() => goto(`/files/${srv.id}`)} class="flex w-full items-center gap-3 text-left">
+              <div class="flex h-10 w-10 items-center justify-center rounded-lg bg-blue-50 text-blue-600">
+                <FolderOpen size={20} />
+              </div>
+              <div class="min-w-0 flex-1">
+                <p class="truncate text-sm font-medium text-slate-900">{srv.name}</p>
+                <p class="truncate font-mono text-xs text-slate-500">{srv.host}:{srv.port || 22}</p>
+              </div>
+              <FolderTree size={16} class="text-slate-400" />
+            </button>
+          </Card>
+        {/each}
+      </div>
+    </div>
+  {/if}
+
   <!-- Search and Filters -->
   <div class="mb-6">
     <Card>
@@ -232,6 +255,9 @@
             <div class="shrink-0 text-right">
               <p class="text-sm font-medium text-slate-700">{formatGB(item.partition.usedGb)} / {formatGB(item.partition.sizeGb)}</p>
               <p class="text-xs text-slate-400">{formatGB(item.partition.availGb)} free</p>
+              <button type="button" onclick={() => goto(`/files/${item.serverId}`)} class="mt-2 inline-flex items-center gap-1.5 rounded-lg bg-blue-50 px-3 py-1.5 text-xs font-medium text-blue-600 hover:bg-blue-100">
+                <FolderOpen size={14} /> Browse Files
+              </button>
             </div>
           </div>
           <div class="mt-3">
