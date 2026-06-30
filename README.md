@@ -10,7 +10,7 @@ Migrate packages, configurations, services, and users across Linux servers — s
 [![SvelteKit](https://img.shields.io/badge/SvelteKit-2.x-FF3E00?style=flat-square&logo=svelte)](https://svelte.dev)
 [![CI](https://img.shields.io/badge/CI-GitHub%20Actions-2088FF?style=flat-square&logo=githubactions)](https://github.com/kaivyy/meshium/actions)
 [![License](https://img.shields.io/badge/License-MIT-22c55e?style=flat-square)](LICENSE)
-[![Release](https://img.shields.io/badge/Release-v1.3.0-22c55e?style=flat-square)](https://github.com/kaivyy/meshium/releases)
+[![Release](https://img.shields.io/badge/Release-v1.4.0-22c55e?style=flat-square)](https://github.com/kaivyy/meshium/releases)
 [![Tests](https://img.shields.io/badge/Tests-220%2B%20passing%20with%20%2Drace-22c55e?style=flat-square)](#testing)
 
 </div>
@@ -61,6 +61,8 @@ No agents. No daemons on target machines. Just SSH.
 - **Automatic Rollback** — Every migration creates backups. If something fails, Meshium rolls back automatically.
 - **Multi-Distro Support** — Detects the source distro and translates package names for the target distro.
 - **Export Migration Plans** — Download migration plans as JSON for audit or import on another instance.
+- **File Explorer** — Browse, read, edit, upload, download, delete, rename, and create directories on remote servers directly from the web UI. No SSH terminal needed.
+- **In-Browser File Editor** — Edit remote files with line numbers, Ctrl+S save, unsaved changes indicator, and binary file detection. No need for nano/vim/cat.
 - **Secure by Design** — AES-256-GCM encrypted credentials at rest, SSH key management, known-hosts verification.
 - **Single Binary** — Frontend is embedded in the Go binary. Deploy with one file.
 - **SQLite Storage** — No external database needed. Everything in one file.
@@ -182,6 +184,10 @@ meshium/
 │   ├── mod/
 │   │   ├── auth/             # Password auth, session management
 │   │   ├── ssh/              # SSH client, pool, keypair, known-hosts
+│   │   ├── file/             # File explorer service (SSH-based)
+│   │   │   ├── model.go           # FileInfo, request/response types
+│   │   │   ├── service.go         # List, read, write, delete, rename, mkdir, stat, download
+│   │   │   └── pool_adapter.go    # SSH pool → transport.ConnectionPool adapter
 │   │   ├── server/           # Server CRUD (the "server manager")
 │   │   ├── discovery/        # Discovery engine (Phase 4)
 │   │   │   ├── model.go           # SystemInfo, WSMessage, StepResult
@@ -193,6 +199,10 @@ meshium/
 │   │   │   ├── graph.go           # Dependency graph builder + topo sort
 │   │   │   ├── compat.go          # Compatibility checker
 │   │   │   └── store.go          # SQLite + Noop snapshot stores
+│   │   ├── file/             # File explorer service
+│   │   │   ├── model.go           # FileInfo, request/response types
+│   │   │   ├── service.go         # SSH-based file operations (list, read, write, delete, rename, mkdir, stat, download)
+│   │   │   └── pool_adapter.go    # SSH pool adapter for file service
 │   │   ├── discoverystep/    # DiscoveryStep + CompatibilityStep (Phase 4)
 │   │   │   └── step.go            # MigrationStep implementations
 │   │   ├── planner/         # Migration planner (Phase 5)
@@ -375,6 +385,15 @@ Data is stored in `~/.meshium/` by default:
 | `GET` | `/api/migrations/{id}/preflight` | Pre-flight validation checks |
 | `GET` | `/api/migrations/{id}/export` | Export migration plan as JSON |
 | `POST` | `/api/diff` | Compare source vs target servers |
+| `GET` | `/api/servers/{id}/files` | List directory contents (params: `path`, `hidden`) |
+| `GET` | `/api/servers/{id}/files/content` | Read file content (params: `path`, `maxSize`) |
+| `GET` | `/api/servers/{id}/files/download` | Download a file |
+| `POST` | `/api/servers/{id}/files/upload` | Upload a file (multipart form, 100MB max) |
+| `POST` | `/api/servers/{id}/files` | Write file content (JSON body) |
+| `DELETE` | `/api/servers/{id}/files` | Delete file/directory (param: `recursive`) |
+| `PUT` | `/api/servers/{id}/files` | Rename/move a file |
+| `POST` | `/api/servers/{id}/files/mkdir` | Create a directory |
+| `GET` | `/api/servers/{id}/files/stat` | Get file metadata |
 
 ### WebSocket Endpoints
 

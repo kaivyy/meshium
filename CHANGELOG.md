@@ -7,6 +7,94 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [1.4.0] — 2026-06-30
+
+The File Explorer update. Browse, read, edit, upload, download, and manage files on remote servers directly from the web UI — no SSH terminal required. Also includes P0-P2 migration flow security fixes and bug fixes.
+
+### File Explorer
+
+#### Added — Backend File Service
+- **File Service** (`internal/mod/file/`) — SSH-based file operations on remote servers
+  - `ListDirectory` — List directory contents with `ls -la --time-style=+%s`, parse permissions, ownership, timestamps, symlinks
+  - `ReadFile` — Read file content with binary/text detection via MIME type, truncation for large files (>100KB text, >1MB binary)
+  - `WriteFile` — Write file content using base64 encoding for safe shell transmission, with overwrite protection and chmod support
+  - `Delete` — Delete files/directories with recursive flag
+  - `Rename` — Move/rename files with automatic parent directory creation
+  - `Mkdir` — Create directories with optional mode
+  - `Stat` — Get file metadata (size, type, permissions, owner, group, timestamps)
+  - `DownloadFile` — Download file content as base64 for HTTP response
+  - Credential decryption using `shared.Decrypt()` for password, SSH keys, passphrases
+  - Bastion/jump host support mirroring migration executor pattern
+  - Pool adapter for SSH connection pool integration
+
+#### Added — File HTTP Handler
+- **9 REST endpoints** (`internal/handler/file_handler.go`)
+  - `GET /api/servers/{id}/files` — List directory (with `path`, `hidden` query params)
+  - `GET /api/servers/{id}/files/content` — Read file content (with `path`, `maxSize` params)
+  - `GET /api/servers/{id}/files/download` — Download file with proper Content-Disposition headers
+  - `POST /api/servers/{id}/files/upload` — Upload file via multipart form (100MB max)
+  - `POST /api/servers/{id}/files` — Write file content (JSON body)
+  - `DELETE /api/servers/{id}/files` — Delete file/directory (with `recursive` param)
+  - `PUT /api/servers/{id}/files` — Rename/move file
+  - `POST /api/servers/{id}/files/mkdir` — Create directory
+  - `GET /api/servers/{id}/files/stat` — Get file metadata
+
+#### Added — Frontend File Browser
+- **File API Client** (`web/src/lib/api/files.ts`) — TypeScript client with `listFiles`, `getFileContent`, `downloadFile`, `uploadFile`, `writeFile`, `deleteFile`, `renameFile`, `mkdir`, `statFile`, plus helper functions (`formatFileSize`, `getFileIcon`, `isPreviewable`)
+- **File Browser Page** (`web/src/routes/files/[id]/+page.svelte`)
+  - Breadcrumb navigation with clickable path segments
+  - File list with type-specific icons (folder, code, image, archive, terminal, symlink)
+  - Sortable columns (name, size, modified date) with asc/desc toggle
+  - Search/filter by filename
+  - Show/hide hidden files toggle
+  - File preview modal with syntax-highlighted code display
+  - Binary file detection with MIME type display
+  - Download, rename, delete, mkdir actions
+  - Upload modal with drag-and-drop file selection, overwrite flag, remote path configuration
+  - Stats bar showing folder count, file count, total size
+  - Loading skeletons and empty states
+
+#### Added — File Editor
+- **In-browser file editor** — Edit remote files directly without nano/vim/cat
+  - Edit button (pencil icon) on each file row and in preview modal
+  - Full-screen editor modal with monospace textarea
+  - Line numbers gutter with scroll sync
+  - **Ctrl+S / Cmd+S** keyboard shortcut to save
+  - Unsaved changes indicator (amber dot) and saved state (green dot)
+  - Binary file detection prevents editing
+  - Confirm dialog when closing with unsaved changes
+  - File info bar showing path, MIME type, size, and save status
+
+#### Added — Files Index Page
+- **Server browser section** — Grid of server cards with "Browse Files" buttons linking to per-server file browser
+- **Browse Files button** on each partition card in the disk usage view
+
+### Migration Flow Fixes (P0-P2)
+
+#### Security
+- **P0-1: WebSocket auth via session token** — All WebSocket endpoints (`/ws/plan`, `/ws/migrate`, `/ws/dryrun`, `/ws/diff`) now validate session tokens from query parameters, preventing unauthorized WebSocket access
+- **P0-1b: Token validation on migration WS handlers** — Migration WebSocket handlers (handleMigrateWS, handlePlanWS, handleDryRunWS, handleDiffWS) validate session tokens before upgrading to WebSocket
+- **P0-1c: Frontend WS token injection** — All frontend WebSocket connections (wsPlan, wsExecute, wsRollback, wsDryRun) now send session token as query parameter
+
+#### Migration Engine
+- **P0-2: Wire createMigrationHandler** — Migration job handler is now properly wired to create a MigrationJobHandler with migration engine, repo, and SSH connections (previously returned "not yet supported" error)
+- **P0-3: RecoverInterrupted on startup** — `RecoverInterrupted()` is now called after migration components are created but before server starts, automatically recovering interrupted migrations on application restart
+- **P0-4: Atomic migration execution lock** — In-memory lock (sync.Map) in executor prevents concurrent execution of the same migration. DB-level atomic check (UPDATE...WHERE status='planned') prevents double execution across restarts
+
+#### Rollback
+- **P1-1: Rollback error tracking** — Rollback failures are no longer silently swallowed. Status is set to `rollback_failed` if any category fails, instead of always `rolled_back`
+- **P1-2: Backup query ordering** — `GetBackups()` now has `ORDER BY id ASC` so LIFO rollback iteration is correct (previously had no ordering, causing non-deterministic rollback order)
+
+#### Planner
+- **P2-1: ConfigsCollector singleton mutation** — Planner now creates a new ConfigsCollector instance per plan instead of mutating the shared singleton's Paths field, preventing race conditions
+- **P2-2: Fatal collection failures** — Failed collection in planner now prevents migration execution (previously created a step with empty data that was silently skipped by executor)
+
+### Bug Fixes
+- **ls parser field count** — Parser for `ls -la --time-style=+%s` output required 9 fields (standard ls format) but the `--time-style=+%s` flag produces only 7 fields (timestamp is single epoch field). This caused all regular directories to be skipped — only symlinks (with extra fields from ` -> target`) passed the check. Fixed minimum field count from 9 to 7.
+- **Modal open prop** — All 6 Modal components in the file browser page were missing the `open` prop (defaults to `false`), preventing any modal from rendering. Added `open={true}` to all modals (preview, upload, mkdir, rename, delete, edit).
+
+---
+
 ## [1.3.0] — 2026-06-29
 
 The first major update since v1.2.0. Includes Discovery Engine, Migration Planner, Job Engine, security hardening, frontend UX improvements, Docker deployment, and structured logging.
@@ -526,6 +614,7 @@ The first complete release of Meshium — a self-hosted server migration engine 
 
 | Version | Date | Highlights |
 |---------|------|------------|
+| 1.4.0 | 2026-06-30 | File explorer (browse, read, edit, upload, download, delete, rename, mkdir), in-browser file editor with line numbers & Ctrl+S, P0-P2 migration flow security fixes, bug fixes |
 | 1.3.0 | 2026-06-29 | Security hardening, discovery engine, migration planner, job engine, transfer engine, state machine, crash recovery, Docker deployment, structured logging, frontend UX fixes |
 | 1.2.0 | 2026-06-28 | Mobile bottom navbar, SSH host key auto-accept, API null→[] fix |
 | 1.1.0 | 2026-06-28 | Docker migration, dry run, diff view, bastion/jump host, pre-flight validation, config exclusion, CI/CD, SSH pool concurrency |
