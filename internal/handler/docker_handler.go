@@ -219,7 +219,7 @@ func (h *DockerHandler) handleGetContainerLogs(w http.ResponseWriter, r *http.Re
 
 func parseServerID(w http.ResponseWriter, r *http.Request) (int, bool) {
 	serverID, err := strconv.Atoi(r.PathValue("id"))
-	if err != nil {
+	if err != nil || serverID <= 0 {
 		shared.WriteError(w, http.StatusBadRequest, "invalid server id", "BAD_REQUEST")
 		return 0, false
 	}

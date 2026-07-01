@@ -124,7 +124,11 @@ func (h *FileHandler) handleGetContent(w http.ResponseWriter, r *http.Request) {
 	maxSizeStr := r.URL.Query().Get("maxSize")
 	var maxSize int64 = 0
 	if maxSizeStr != "" {
-		maxSize, _ = strconv.ParseInt(maxSizeStr, 10, 64)
+		maxSize, err = strconv.ParseInt(maxSizeStr, 10, 64)
+		if err != nil {
+			shared.WriteError(w, http.StatusBadRequest, "invalid maxSize", "VALIDATION_ERROR")
+			return
+		}
 	}
 
 	resp, err := h.service.ReadFile(r.Context(), serverID, path, maxSize)

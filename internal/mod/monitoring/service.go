@@ -144,15 +144,9 @@ func (s *Service) GetMetrics(ctx context.Context, serverID int) (*ServerMetrics,
 func (s *Service) GetMetricsHistory(ctx context.Context, serverID int, points int) ([]ServerMetrics, error) {
 	_ = ctx
 	_ = serverID
+	_ = points
 
-	if points <= 0 {
-		points = 10
-	}
-	if points > 100 {
-		points = 100
-	}
-
-	return []ServerMetrics{}, nil
+	return nil, fmt.Errorf("metrics history storage is not yet implemented")
 }
 
 func (s *Service) GetNetworkInterfaces(ctx context.Context, serverID int) ([]NetworkInterface, error) {

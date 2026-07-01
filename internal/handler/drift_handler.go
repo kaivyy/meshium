@@ -37,7 +37,7 @@ func (h *DriftHandler) handleGetLatest(w http.ResponseWriter, r *http.Request) {
 	}
 
 	serverID, err := strconv.Atoi(r.PathValue("id"))
-	if err != nil {
+	if err != nil || serverID <= 0 {
 		shared.WriteError(w, http.StatusBadRequest, "invalid server id", "VALIDATION_ERROR")
 		return
 	}
@@ -63,7 +63,7 @@ func (h *DriftHandler) handleHistory(w http.ResponseWriter, r *http.Request) {
 	}
 
 	serverID, err := strconv.Atoi(r.PathValue("id"))
-	if err != nil {
+	if err != nil || serverID <= 0 {
 		shared.WriteError(w, http.StatusBadRequest, "invalid server id", "VALIDATION_ERROR")
 		return
 	}
@@ -92,7 +92,7 @@ func (h *DriftHandler) handleCheck(w http.ResponseWriter, r *http.Request) {
 	}
 
 	serverID, err := strconv.Atoi(r.PathValue("id"))
-	if err != nil {
+	if err != nil || serverID <= 0 {
 		shared.WriteError(w, http.StatusBadRequest, "invalid server id", "VALIDATION_ERROR")
 		return
 	}
@@ -123,7 +123,7 @@ func (h *DriftHandler) handleCompareSnapshots(w http.ResponseWriter, r *http.Req
 	}
 
 	serverID, err := strconv.Atoi(r.PathValue("id"))
-	if err != nil {
+	if err != nil || serverID <= 0 {
 		shared.WriteError(w, http.StatusBadRequest, "invalid server id", "VALIDATION_ERROR")
 		return
 	}

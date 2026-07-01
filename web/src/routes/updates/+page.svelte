@@ -256,7 +256,7 @@
           disabled={!canManage || statusLoading || packagesLoading}
         >
           {#if statusLoading || packagesLoading}
-            <Spinner size="sm" />
+            <Spinner size="sm" label="Loading" />
           {:else}
             <RefreshCw size={16} />
           {/if}
@@ -311,7 +311,7 @@
                 disabled={!canManage || installAllBusy || statusLoading}
               >
                 {#if installAllBusy}
-                  <Spinner size="sm" />
+                  <Spinner size="sm" label="Loading" />
                 {:else}
                   <ShieldAlert size={16} />
                 {/if}
@@ -325,7 +325,7 @@
                 disabled={!canManage || installAllBusy || statusLoading}
               >
                 {#if installAllBusy}
-                  <Spinner size="sm" />
+                  <Spinner size="sm" label="Loading" />
                 {:else}
                   <Wrench size={16} />
                 {/if}
@@ -402,7 +402,7 @@
               disabled={!canManage || statusLoading}
             >
               {#if statusLoading}
-                <Spinner size="sm" />
+                <Spinner size="sm" label="Loading" />
               {:else}
                 <RefreshCw size={16} />
               {/if}
@@ -479,7 +479,7 @@
                           disabled={actionBusyPackage === update.name}
                         >
                           {#if actionBusyPackage === update.name}
-                            <Spinner size="sm" />
+                            <Spinner size="sm" label="Loading" />
                           {:else}
                             <Download size={16} />
                           {/if}
@@ -582,7 +582,7 @@
                             disabled={actionBusyPackage === pkg.name}
                           >
                             {#if actionBusyPackage === pkg.name}
-                              <Spinner size="sm" />
+                              <Spinner size="sm" label="Loading" />
                             {:else}
                               <Download size={16} />
                             {/if}
@@ -704,7 +704,7 @@
       disabled={installModalBusy || !installPackageName.trim()}
     >
       {#if installModalBusy}
-        <Spinner size="sm" />
+        <Spinner size="sm" label="Loading" />
       {:else}
         <Download size={16} />
       {/if}

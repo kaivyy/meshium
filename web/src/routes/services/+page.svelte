@@ -241,7 +241,8 @@
     {/snippet}
   </PageHeader>
 
-  <Card padding="lg" class="mb-6">
+  <div class="mb-6">
+  <Card padding="lg">
     <div class="grid gap-4 lg:grid-cols-2">
       <label class="block">
         <span class="mb-1 block text-xs font-semibold uppercase tracking-wide text-slate-500">Server</span>
@@ -280,6 +281,7 @@
       </div>
     {/if}
   </Card>
+  </div>
 
   <div class="mb-6 grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
     <Card padding="lg">

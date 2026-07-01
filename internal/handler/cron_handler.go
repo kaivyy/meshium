@@ -30,7 +30,7 @@ func (h *CronHandler) RegisterRoutes(mux *http.ServeMux) {
 
 func (h *CronHandler) handleList(w http.ResponseWriter, r *http.Request) {
 	serverID, err := strconv.Atoi(r.PathValue("id"))
-	if err != nil {
+	if err != nil || serverID <= 0 {
 		shared.WriteError(w, http.StatusBadRequest, "invalid server id", "BAD_REQUEST")
 		return
 	}
@@ -46,7 +46,7 @@ func (h *CronHandler) handleList(w http.ResponseWriter, r *http.Request) {
 
 func (h *CronHandler) handleCreate(w http.ResponseWriter, r *http.Request) {
 	serverID, err := strconv.Atoi(r.PathValue("id"))
-	if err != nil {
+	if err != nil || serverID <= 0 {
 		shared.WriteError(w, http.StatusBadRequest, "invalid server id", "BAD_REQUEST")
 		return
 	}
@@ -68,7 +68,7 @@ func (h *CronHandler) handleCreate(w http.ResponseWriter, r *http.Request) {
 
 func (h *CronHandler) handleUpdate(w http.ResponseWriter, r *http.Request) {
 	serverID, err := strconv.Atoi(r.PathValue("id"))
-	if err != nil {
+	if err != nil || serverID <= 0 {
 		shared.WriteError(w, http.StatusBadRequest, "invalid server id", "BAD_REQUEST")
 		return
 	}
@@ -96,7 +96,7 @@ func (h *CronHandler) handleUpdate(w http.ResponseWriter, r *http.Request) {
 
 func (h *CronHandler) handleDelete(w http.ResponseWriter, r *http.Request) {
 	serverID, err := strconv.Atoi(r.PathValue("id"))
-	if err != nil {
+	if err != nil || serverID <= 0 {
 		shared.WriteError(w, http.StatusBadRequest, "invalid server id", "BAD_REQUEST")
 		return
 	}

@@ -36,7 +36,7 @@ func (h *FirewallHandler) handleFirewall(w http.ResponseWriter, r *http.Request)
 	}
 
 	serverID, err := strconv.Atoi(r.PathValue("id"))
-	if err != nil {
+	if err != nil || serverID <= 0 {
 		shared.WriteError(w, http.StatusBadRequest, "invalid server id", "VALIDATION_ERROR")
 		return
 	}
@@ -57,7 +57,7 @@ func (h *FirewallHandler) handleFirewallRules(w http.ResponseWriter, r *http.Req
 	}
 
 	serverID, err := strconv.Atoi(r.PathValue("id"))
-	if err != nil {
+	if err != nil || serverID <= 0 {
 		shared.WriteError(w, http.StatusBadRequest, "invalid server id", "VALIDATION_ERROR")
 		return
 	}
@@ -84,7 +84,7 @@ func (h *FirewallHandler) handleFirewallRuleByID(w http.ResponseWriter, r *http.
 	}
 
 	serverID, err := strconv.Atoi(r.PathValue("id"))
-	if err != nil {
+	if err != nil || serverID <= 0 {
 		shared.WriteError(w, http.StatusBadRequest, "invalid server id", "VALIDATION_ERROR")
 		return
 	}
@@ -110,7 +110,7 @@ func (h *FirewallHandler) handleFirewallEnable(w http.ResponseWriter, r *http.Re
 	}
 
 	serverID, err := strconv.Atoi(r.PathValue("id"))
-	if err != nil {
+	if err != nil || serverID <= 0 {
 		shared.WriteError(w, http.StatusBadRequest, "invalid server id", "VALIDATION_ERROR")
 		return
 	}
@@ -130,7 +130,7 @@ func (h *FirewallHandler) handleFirewallDisable(w http.ResponseWriter, r *http.R
 	}
 
 	serverID, err := strconv.Atoi(r.PathValue("id"))
-	if err != nil {
+	if err != nil || serverID <= 0 {
 		shared.WriteError(w, http.StatusBadRequest, "invalid server id", "VALIDATION_ERROR")
 		return
 	}

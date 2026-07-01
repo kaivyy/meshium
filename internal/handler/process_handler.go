@@ -36,7 +36,7 @@ func (h *ProcessHandler) handleListProcesses(w http.ResponseWriter, r *http.Requ
 	}
 
 	serverID, err := strconv.Atoi(r.PathValue("id"))
-	if err != nil {
+	if err != nil || serverID <= 0 {
 		shared.WriteError(w, http.StatusBadRequest, "invalid server ID", "VALIDATION_ERROR")
 		return
 	}
@@ -53,7 +53,7 @@ func (h *ProcessHandler) handleListProcesses(w http.ResponseWriter, r *http.Requ
 
 	processes, err := h.service.ListProcesses(r.Context(), serverID, sortBy)
 	if err != nil {
-		shared.WriteError(w, http.StatusBadRequest, err.Error(), "VALIDATION_ERROR")
+		shared.WriteError(w, http.StatusInternalServerError, err.Error(), "INTERNAL_ERROR")
 		return
 	}
 	if limit > 0 && len(processes) > limit {
@@ -70,7 +70,7 @@ func (h *ProcessHandler) handleTopProcesses(w http.ResponseWriter, r *http.Reque
 	}
 
 	serverID, err := strconv.Atoi(r.PathValue("id"))
-	if err != nil {
+	if err != nil || serverID <= 0 {
 		shared.WriteError(w, http.StatusBadRequest, "invalid server ID", "VALIDATION_ERROR")
 		return
 	}
@@ -87,7 +87,7 @@ func (h *ProcessHandler) handleTopProcesses(w http.ResponseWriter, r *http.Reque
 
 	processes, err := h.service.GetTopProcesses(r.Context(), serverID, limit, sortBy)
 	if err != nil {
-		shared.WriteError(w, http.StatusBadRequest, err.Error(), "VALIDATION_ERROR")
+		shared.WriteError(w, http.StatusInternalServerError, err.Error(), "INTERNAL_ERROR")
 		return
 	}
 
@@ -101,19 +101,19 @@ func (h *ProcessHandler) handleGetProcess(w http.ResponseWriter, r *http.Request
 	}
 
 	serverID, err := strconv.Atoi(r.PathValue("id"))
-	if err != nil {
+	if err != nil || serverID <= 0 {
 		shared.WriteError(w, http.StatusBadRequest, "invalid server ID", "VALIDATION_ERROR")
 		return
 	}
 	pid, err := strconv.Atoi(r.PathValue("pid"))
-	if err != nil {
+	if err != nil || pid <= 0 {
 		shared.WriteError(w, http.StatusBadRequest, "invalid process ID", "VALIDATION_ERROR")
 		return
 	}
 
 	processInfo, err := h.service.GetProcess(r.Context(), serverID, pid)
 	if err != nil {
-		shared.WriteError(w, http.StatusNotFound, err.Error(), "PROCESS_NOT_FOUND")
+		shared.WriteError(w, http.StatusInternalServerError, err.Error(), "INTERNAL_ERROR")
 		return
 	}
 
@@ -127,12 +127,12 @@ func (h *ProcessHandler) handleKillProcess(w http.ResponseWriter, r *http.Reques
 	}
 
 	serverID, err := strconv.Atoi(r.PathValue("id"))
-	if err != nil {
+	if err != nil || serverID <= 0 {
 		shared.WriteError(w, http.StatusBadRequest, "invalid server ID", "VALIDATION_ERROR")
 		return
 	}
 	pid, err := strconv.Atoi(r.PathValue("pid"))
-	if err != nil {
+	if err != nil || pid <= 0 {
 		shared.WriteError(w, http.StatusBadRequest, "invalid process ID", "VALIDATION_ERROR")
 		return
 	}
@@ -148,7 +148,7 @@ func (h *ProcessHandler) handleKillProcess(w http.ResponseWriter, r *http.Reques
 	}
 
 	if err := h.service.KillProcess(r.Context(), serverID, pid, req.Signal); err != nil {
-		shared.WriteError(w, http.StatusBadRequest, err.Error(), "VALIDATION_ERROR")
+		shared.WriteError(w, http.StatusInternalServerError, err.Error(), "INTERNAL_ERROR")
 		return
 	}
 

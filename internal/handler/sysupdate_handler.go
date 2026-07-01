@@ -33,7 +33,7 @@ func (h *SysUpdateHandler) RegisterRoutes(mux *http.ServeMux) {
 
 func (h *SysUpdateHandler) handleCheckUpdates(w http.ResponseWriter, r *http.Request) {
 	serverID, err := strconv.Atoi(r.PathValue("id"))
-	if err != nil {
+	if err != nil || serverID <= 0 {
 		shared.WriteError(w, http.StatusBadRequest, "invalid server id", "VALIDATION_ERROR")
 		return
 	}
@@ -49,7 +49,7 @@ func (h *SysUpdateHandler) handleCheckUpdates(w http.ResponseWriter, r *http.Req
 
 func (h *SysUpdateHandler) handleInstallUpdates(w http.ResponseWriter, r *http.Request) {
 	serverID, err := strconv.Atoi(r.PathValue("id"))
-	if err != nil {
+	if err != nil || serverID <= 0 {
 		shared.WriteError(w, http.StatusBadRequest, "invalid server id", "VALIDATION_ERROR")
 		return
 	}
@@ -72,7 +72,7 @@ func (h *SysUpdateHandler) handleInstallUpdates(w http.ResponseWriter, r *http.R
 
 func (h *SysUpdateHandler) handleListPackages(w http.ResponseWriter, r *http.Request) {
 	serverID, err := strconv.Atoi(r.PathValue("id"))
-	if err != nil {
+	if err != nil || serverID <= 0 {
 		shared.WriteError(w, http.StatusBadRequest, "invalid server id", "VALIDATION_ERROR")
 		return
 	}
@@ -93,7 +93,7 @@ func (h *SysUpdateHandler) handleListPackages(w http.ResponseWriter, r *http.Req
 
 func (h *SysUpdateHandler) handleGetPackage(w http.ResponseWriter, r *http.Request) {
 	serverID, err := strconv.Atoi(r.PathValue("id"))
-	if err != nil {
+	if err != nil || serverID <= 0 {
 		shared.WriteError(w, http.StatusBadRequest, "invalid server id", "VALIDATION_ERROR")
 		return
 	}
@@ -110,7 +110,7 @@ func (h *SysUpdateHandler) handleGetPackage(w http.ResponseWriter, r *http.Reque
 
 func (h *SysUpdateHandler) handleInstallPackage(w http.ResponseWriter, r *http.Request) {
 	serverID, err := strconv.Atoi(r.PathValue("id"))
-	if err != nil {
+	if err != nil || serverID <= 0 {
 		shared.WriteError(w, http.StatusBadRequest, "invalid server id", "VALIDATION_ERROR")
 		return
 	}
@@ -127,7 +127,7 @@ func (h *SysUpdateHandler) handleInstallPackage(w http.ResponseWriter, r *http.R
 
 func (h *SysUpdateHandler) handleRemovePackage(w http.ResponseWriter, r *http.Request) {
 	serverID, err := strconv.Atoi(r.PathValue("id"))
-	if err != nil {
+	if err != nil || serverID <= 0 {
 		shared.WriteError(w, http.StatusBadRequest, "invalid server id", "VALIDATION_ERROR")
 		return
 	}

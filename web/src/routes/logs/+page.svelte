@@ -52,7 +52,7 @@
   let streamStatus = $state<StreamStatus>('idle');
   let streamUrl = $state('');
 
-  let viewerEl: HTMLDivElement | null = null;
+  let viewerEl = $state<HTMLDivElement | null>(null);
   let streamSocket: WebSocket | null = null;
   let streamToken = 0;
   let manualStreamStop = false;

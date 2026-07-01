@@ -381,6 +381,13 @@ func (s *Service) WriteFile(ctx context.Context, serverID int, req WriteFileRequ
 		return fmt.Errorf("file already exists")
 	}
 
+	// Validate mode before writing to avoid partial writes
+	if req.Mode != "" {
+		if err := validateFileMode(req.Mode); err != nil {
+			return err
+		}
+	}
+
 	// Ensure parent directory exists
 	parentDir := filepath.Dir(req.Path)
 	mkdirCmd := fmt.Sprintf("mkdir -p %s", shellEscape(parentDir))
@@ -399,9 +406,6 @@ func (s *Service) WriteFile(ctx context.Context, serverID int, req WriteFileRequ
 
 	// Set mode if specified
 	if req.Mode != "" {
-		if err := validateFileMode(req.Mode); err != nil {
-			return err
-		}
 		chmodCmd := fmt.Sprintf("chmod %s %s", req.Mode, shellEscape(req.Path))
 		if _, stderr, _, err := sshClient.ExecContext(ctx, chmodCmd); err != nil {
 			fmt.Printf("warning: chmod failed: %s\n", stderr)
