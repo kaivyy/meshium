@@ -1,315 +1,986 @@
 <script lang="ts">
-  import { onMount, onDestroy } from 'svelte';
-  import { goto } from '$app/navigation';
+  import { onDestroy, onMount } from 'svelte';
   import {
-    Activity, RefreshCw, Cpu, HardDrive, MemoryStick, AlertCircle,
-    Server as ServerIcon, Clock
+    Activity,
+    Clock,
+    Cpu,
+    HardDrive,
+    Pause,
+    Play,
+    RefreshCw,
+    Server as ServerIcon,
+    Wifi,
+    WifiOff,
   } from 'lucide-svelte';
   import { api } from '$lib/api/client';
-  import { type ServerSnapshot, type DiskPartition } from '$lib/api/discovery';
-  import { snapshotsStore, loadSnapshots, hasSnapshot as hasSnap, invalidateAll } from '$lib/stores/snapshots';
-  import { type Server } from '$lib/stores/servers';
-  import { Badge, Card, EmptyState, PageHeader, Skeleton, Spinner, ProgressBar } from '$lib/components/ui';
+  import { type ProcessInfo, type ServerMetrics } from '$lib/api/metrics';
+  import { wsConnectGeneric, wsURL } from '$lib/api/websocket';
+  import { Badge, Card, EmptyState, PageHeader, Skeleton, Spinner } from '$lib/components/ui';
   import { formatRelativeTime } from '$lib/utils/format';
   import { toast } from '$lib/stores/toast';
+  import { invalidateAll, loadSnapshots, snapshotsStore } from '$lib/stores/snapshots';
+  import { type Server } from '$lib/stores/servers';
 
-  let servers = $state([] as Server[]);
-  let loading = $state(true);
-  let autoRefresh = $state(true);
-  let lastRefresh = $state<Date | null>(null);
-  let refreshTimer: ReturnType<typeof setInterval> | null = null;
+  type StreamStatus = 'idle' | 'connecting' | 'connected' | 'error';
+  type BadgeVariant = 'success' | 'warning' | 'error' | 'neutral' | 'info';
 
-  interface ServerHealth {
-    server: Server;
-    snapshot: ServerSnapshot | null;
-    cpuUsage: number | null;
-    ramUsage: number | null;
-    diskUsage: number | null;
-    diskWarning: boolean;
-    diskCritical: boolean;
+  interface NetworkRate {
+    rxPerSec: number;
+    txPerSec: number;
   }
 
-  const serverHealth = $derived.by(() => {
-    return servers.map(s => {
-      const snap = $snapshotsStore[s.id];
-      let cpuUsage: number | null = null;
-      let ramUsage: number | null = null;
-      let diskUsage: number | null = null;
-      let diskWarning = false;
-      let diskCritical = false;
+  let servers = $state([] as Server[]);
+  let selectedServerId = $state<number | null>(null);
+  let loadingServers = $state(true);
+  let loadingMetrics = $state(false);
+  let topProcessesLoading = $state(false);
+  let streamingEnabled = $state(false);
+  let selectedInterval = $state(5);
+  let streamStatus = $state<StreamStatus>('idle');
+  let streamEndpoint = $state('');
+  let lastUpdated = $state<Date | null>(null);
+  let metrics = $state<ServerMetrics | null>(null);
+  let topProcesses = $state<ProcessInfo[]>([]);
+  let history = $state<ServerMetrics[]>([]);
+  let wsConnection: WebSocket | null = null;
+  let wsGeneration = 0;
 
-      if (snap) {
-        if (snap.hardware?.ramTotalMb && snap.hardware?.ramUsedMb) {
-          ramUsage = (snap.hardware.ramUsedMb / snap.hardware.ramTotalMb) * 100;
-        }
-        if (snap.hardware?.diskTotalGb && snap.hardware?.diskUsedGb) {
-          diskUsage = (snap.hardware.diskUsedGb / snap.hardware.diskTotalGb) * 100;
-          diskWarning = diskUsage > 75;
-          diskCritical = diskUsage > 90;
-        }
-        // Check individual partitions for warnings
-        if (snap.diskUsage) {
-          snap.diskUsage.forEach((p) => {
-            if (p.usePercent > 90) diskCritical = true;
-            else if (p.usePercent > 75) diskWarning = true;
-          });
-        }
-      }
-
-      return { server: s, snapshot: snap, cpuUsage, ramUsage, diskUsage, diskWarning, diskCritical };
-    });
+  const historyWindow = $derived.by(() => history.slice(-30));
+  const selectedServer = $derived.by(() => servers.find((server) => server.id === selectedServerId) ?? null);
+  const selectedSnapshot = $derived.by(() => {
+    if (!selectedServerId) {
+      return null;
+    }
+    return $snapshotsStore[selectedServerId] ?? null;
   });
-
-  const fleetStats = $derived.by(() => {
-    let totalServers = servers.length;
-    let scannedServers = 0;
-    let totalCores = 0;
-    let totalRamMB = 0;
-    let totalDiskGB = 0;
-    let warnings = 0;
-    let critical = 0;
-
-    serverHealth.forEach(h => {
-      if (h.snapshot) {
-        scannedServers++;
-        totalCores += h.snapshot.hardware?.cpuCores || 0;
-        totalRamMB += h.snapshot.hardware?.ramTotalMb || 0;
-        totalDiskGB += h.snapshot.hardware?.diskTotalGb || 0;
-        if (h.diskCritical) critical++;
-        else if (h.diskWarning) warnings++;
-      }
-    });
-
-    return { totalServers, scannedServers, totalCores, totalRamMB, totalDiskGB, warnings, critical };
+  const networkRates = $derived.by(() => computeNetworkRates(historyWindow));
+  const cpuSparkline = $derived.by(() => buildSparkline(historyWindow.map((sample) => sample.cpu.usage)));
+  const memorySparkline = $derived.by(() => buildSparkline(historyWindow.map((sample) => sample.memory.usagePercent)));
+  const streamBadgeVariant = $derived.by((): BadgeVariant => {
+    if (streamStatus === 'connected') return 'success';
+    if (streamStatus === 'connecting') return 'warning';
+    if (streamStatus === 'error') return 'error';
+    return 'neutral';
+  });
+  const streamLabel = $derived.by(() => {
+    if (streamStatus === 'connected') return 'Live';
+    if (streamStatus === 'connecting') return 'Connecting';
+    if (streamStatus === 'error') return 'Disconnected';
+    return 'Paused';
   });
 
   onMount(async () => {
     await loadServers();
-    startAutoRefresh();
   });
 
   onDestroy(() => {
-    if (refreshTimer) clearInterval(refreshTimer);
+    stopStreaming(true);
   });
 
-  function startAutoRefresh() {
-    if (refreshTimer) clearInterval(refreshTimer);
-    refreshTimer = setInterval(async () => {
-      if (autoRefresh && servers.length > 0) {
-        await refreshSnapshots();
-      }
-    }, 30000); // 30 seconds
-  }
-
-  async function refreshSnapshots() {
-    try {
-      // Invalidate all cached snapshots and reload
-      invalidateAll();
-      await loadSnapshots(servers.map(s => s.id));
-      lastRefresh = new Date();
-    } catch {
-      // silent fail on auto-refresh
-    }
-  }
-
   async function loadServers() {
-    loading = true;
+    loadingServers = true;
     try {
-      const data = await api.get('/servers') as Server[];
+      const data = (await api.get('/servers')) as Server[];
       servers = data;
-      await loadSnapshots(data.map(s => s.id));
-      lastRefresh = new Date();
-    } catch {
+      await invalidateAll();
+      await loadSnapshots(data.map((server) => server.id));
+
+      if (data.length > 0) {
+        const stillValid = selectedServerId !== null && data.some((server) => server.id === selectedServerId);
+        const nextServerId = stillValid && selectedServerId !== null ? selectedServerId : data[0].id;
+        selectedServerId = nextServerId;
+        await loadMetricsBundle(nextServerId);
+      }
+    } catch (error) {
+      console.error(error);
       toast.error('Failed to load servers');
     } finally {
-      loading = false;
+      loadingServers = false;
     }
   }
 
-  function ramVariant(usage: number | null): 'default' | 'success' | 'warning' | 'error' {
-    if (usage === null) return 'default';
-    if (usage > 90) return 'error';
-    if (usage > 75) return 'warning';
+  async function loadMetricsBundle(serverId: number | null = selectedServerId) {
+    if (!serverId) {
+      return;
+    }
+
+    loadingMetrics = true;
+    try {
+      const [currentMetrics, processes, historyData] = await Promise.all([
+        api.get(`/servers/${serverId}/metrics`) as Promise<ServerMetrics>,
+        api.get(`/servers/${serverId}/metrics/top?limit=10`) as Promise<ProcessInfo[]>,
+        api.get(`/servers/${serverId}/metrics/history?points=30`) as Promise<ServerMetrics[]>,
+      ]);
+
+      metrics = currentMetrics;
+      topProcesses = processes;
+      history = historyData.length > 0 ? historyData.slice(-30) : [currentMetrics];
+      lastUpdated = new Date(currentMetrics.timestamp * 1000);
+      streamStatus = streamingEnabled ? 'connecting' : 'idle';
+    } catch (error) {
+      console.error(error);
+      toast.error('Failed to load monitoring data');
+    } finally {
+      loadingMetrics = false;
+    }
+  }
+
+  async function refreshTopProcesses() {
+    if (!selectedServerId || topProcessesLoading) {
+      return;
+    }
+
+    topProcessesLoading = true;
+    try {
+      topProcesses = (await api.get(`/servers/${selectedServerId}/metrics/top?limit=10`)) as ProcessInfo[];
+    } catch (error) {
+      console.error(error);
+    } finally {
+      topProcessesLoading = false;
+    }
+  }
+
+  function handleServerChange(event: Event) {
+    const target = event.currentTarget as HTMLSelectElement;
+    const value = Number(target.value);
+    if (!Number.isFinite(value)) {
+      return;
+    }
+
+    selectedServerId = value;
+    history = [];
+    stopStreaming(false);
+
+    void (async () => {
+      await loadMetricsBundle(value);
+      if (streamingEnabled) {
+        openStreaming();
+      }
+    })();
+  }
+
+  function handleIntervalChange(event: Event) {
+    const target = event.currentTarget as HTMLSelectElement;
+    const value = Number(target.value);
+    if (!Number.isFinite(value) || value <= 0) {
+      return;
+    }
+
+    selectedInterval = value;
+    if (streamingEnabled) {
+      openStreaming();
+    }
+  }
+
+  function toggleStreaming() {
+    if (!selectedServerId) {
+      return;
+    }
+
+    streamingEnabled = !streamingEnabled;
+    if (streamingEnabled) {
+      openStreaming();
+      return;
+    }
+
+    stopStreaming(true);
+  }
+
+  function refreshDashboard() {
+    if (!selectedServerId) {
+      return;
+    }
+
+    void loadMetricsBundle(selectedServerId);
+  }
+
+  function stopStreaming(resetToggle = false) {
+    wsGeneration++;
+
+    if (wsConnection) {
+      wsConnection.close();
+      wsConnection = null;
+    }
+
+    streamEndpoint = '';
+    streamStatus = 'idle';
+    if (resetToggle) {
+      streamingEnabled = false;
+    }
+  }
+
+  function openStreaming() {
+    if (!selectedServerId) {
+      return;
+    }
+
+    stopStreaming(false);
+
+    const path = `/ws/monitoring/${selectedServerId}?interval=${selectedInterval}`;
+    streamEndpoint = displayMonitoringEndpoint(path);
+    streamStatus = 'connecting';
+
+    const generation = ++wsGeneration;
+    wsConnection = wsConnectGeneric(
+      path,
+      (message) => {
+        if (generation !== wsGeneration) {
+          return;
+        }
+        handleSocketMessage(message as unknown);
+      },
+      () => {
+        if (generation !== wsGeneration) {
+          return;
+        }
+        if (streamingEnabled) {
+          streamStatus = 'error';
+        }
+      },
+      () => {
+        if (generation !== wsGeneration) {
+          return;
+        }
+        streamStatus = streamingEnabled ? 'error' : 'idle';
+        wsConnection = null;
+      },
+    );
+  }
+
+  function handleSocketMessage(message: unknown) {
+    if (isMonitoringErrorMessage(message)) {
+      toast.error(message.message);
+      streamStatus = 'error';
+      return;
+    }
+
+    if (!isServerMetrics(message)) {
+      return;
+    }
+
+    metrics = message;
+    lastUpdated = new Date(message.timestamp * 1000);
+    history = [...history, message].slice(-60);
+    streamStatus = 'connected';
+    void refreshTopProcesses();
+  }
+
+  function isMonitoringErrorMessage(message: unknown): message is { type: 'error'; message: string } {
+    return (
+      typeof message === 'object' &&
+      message !== null &&
+      (message as { type?: unknown }).type === 'error' &&
+      typeof (message as { message?: unknown }).message === 'string'
+    );
+  }
+
+  function isServerMetrics(message: unknown): message is ServerMetrics {
+    if (typeof message !== 'object' || message === null) {
+      return false;
+    }
+
+    const sample = message as Record<string, unknown>;
+    return (
+      typeof sample.timestamp === 'number' &&
+      typeof sample.cpu === 'object' &&
+      sample.cpu !== null &&
+      typeof sample.memory === 'object' &&
+      sample.memory !== null &&
+      Array.isArray(sample.disk) &&
+      Array.isArray(sample.network)
+    );
+  }
+
+  function displayMonitoringEndpoint(path: string) {
+    const url = new URL(wsURL(path));
+    url.searchParams.delete('token');
+    return `${url.pathname}${url.search}`;
+  }
+
+  function gaugeVariant(value: number, warning = 75, critical = 90): BadgeVariant {
+    if (value >= critical) return 'error';
+    if (value >= warning) return 'warning';
     return 'success';
   }
 
-  function diskVariant(warning: boolean, critical: boolean): 'default' | 'success' | 'warning' | 'error' {
-    if (critical) return 'error';
-    if (warning) return 'warning';
+  function loadVariant(load: number, cores: number): BadgeVariant {
+    if (!cores || cores <= 0) return load >= 5 ? 'error' : load >= 2 ? 'warning' : 'success';
+    if (load >= cores * 1.5) return 'error';
+    if (load >= cores) return 'warning';
     return 'success';
   }
 
-  function formatGB(gb: number): string {
-    if (gb >= 1000) return `${(gb / 1000).toFixed(1)} TB`;
-    return `${Math.round(gb)} GB`;
+  function temperatureVariant(value: number): BadgeVariant {
+    if (value >= 80) return 'error';
+    if (value >= 65) return 'warning';
+    return 'success';
   }
 
-  function formatRAM(mb: number): string {
-    if (mb >= 1024) return `${(mb / 1024).toFixed(1)} GB`;
-    return `${Math.round(mb)} MB`;
+  function formatBytes(bytes: number): string {
+    if (!Number.isFinite(bytes) || bytes <= 0) {
+      return '0 B';
+    }
+
+    const units = ['B', 'KB', 'MB', 'GB', 'TB'];
+    let value = bytes;
+    let unit = 0;
+    while (value >= 1024 && unit < units.length - 1) {
+      value /= 1024;
+      unit += 1;
+    }
+    return `${value.toFixed(value >= 100 ? 0 : value >= 10 ? 1 : 2)} ${units[unit]}`;
   }
 
-  function getSnapshotAge(snap: ServerSnapshot | null | undefined): string {
-    if (!snap?.capturedAt) return 'Never';
-    return formatRelativeTime(snap.capturedAt);
+  function formatRate(bytesPerSecond: number): string {
+    return `${formatBytes(bytesPerSecond)}/s`;
   }
 
+  function formatPercentage(value: number): string {
+    return `${Math.max(0, Math.min(100, value)).toFixed(1)}%`;
+  }
+
+  function formatTemperature(value: number | undefined): string {
+    if (typeof value !== 'number' || !Number.isFinite(value) || value <= 0) {
+      return '—';
+    }
+    return `${value.toFixed(1)}°C`;
+  }
+
+  function formatUptime(seconds: number): string {
+    if (!Number.isFinite(seconds) || seconds <= 0) {
+      return '—';
+    }
+
+    const days = Math.floor(seconds / 86400);
+    const hours = Math.floor((seconds % 86400) / 3600);
+    const minutes = Math.floor((seconds % 3600) / 60);
+    const parts: string[] = [];
+
+    if (days > 0) parts.push(`${days}d`);
+    if (hours > 0 || parts.length > 0) parts.push(`${hours}h`);
+    parts.push(`${minutes}m`);
+    return parts.join(' ');
+  }
+
+  function formatLoad(load: number): string {
+    if (!Number.isFinite(load)) {
+      return '—';
+    }
+    return load.toFixed(2);
+  }
+
+  function formatNumber(value: number): string {
+    if (!Number.isFinite(value)) {
+      return '—';
+    }
+    return new Intl.NumberFormat().format(value);
+  }
+
+  function buildSparkline(values: number[], width = 360, height = 120): string {
+    if (values.length < 2) {
+      return '';
+    }
+
+    const validValues = values.filter((value) => Number.isFinite(value));
+    if (validValues.length < 2) {
+      return '';
+    }
+
+    const min = Math.min(...validValues);
+    const max = Math.max(...validValues);
+    const spread = max - min || 1;
+    const points = validValues.map((value, index) => {
+      const x = (index / (validValues.length - 1)) * width;
+      const normalized = (value - min) / spread;
+      const y = height - normalized * (height - 8) - 4;
+      return `${x.toFixed(1)},${y.toFixed(1)}`;
+    });
+
+    return `M ${points.join(' L ')}`;
+  }
+
+  function computeNetworkRates(samples: ServerMetrics[]): Record<string, NetworkRate> {
+    const rates: Record<string, NetworkRate> = {};
+    if (samples.length < 2) {
+      return rates;
+    }
+
+    const current = samples[samples.length - 1];
+    const previous = samples[samples.length - 2];
+    const elapsed = Math.max((current.timestamp - previous.timestamp) || 1, 1);
+
+    for (const iface of current.network) {
+      const before = previous.network.find((entry) => entry.interface === iface.interface);
+      if (!before) {
+        continue;
+      }
+
+      rates[iface.interface] = {
+        rxPerSec: Math.max(0, iface.rxBytes - before.rxBytes) / elapsed,
+        txPerSec: Math.max(0, iface.txBytes - before.txBytes) / elapsed,
+      };
+    }
+
+    return rates;
+  }
+
+  function processCountLabel(count: number): string {
+    if (!Number.isFinite(count) || count <= 0) {
+      return '—';
+    }
+    return formatNumber(count);
+  }
+
+  function hasNetworkData() {
+    return Boolean(metrics && metrics.network.length > 0);
+  }
 </script>
 
-<svelte:head><title>Monitoring - Meshium</title></svelte:head>
+{#snippet streamHeaderAction()}
+  {#if selectedServer}
+    <Badge variant={streamBadgeVariant}>
+      <span class="inline-flex items-center gap-1.5">
+        <span class={`h-2 w-2 rounded-full ${streamStatus === 'connected' ? 'bg-green-500 animate-pulse' : streamStatus === 'connecting' ? 'bg-amber-500 animate-pulse' : streamStatus === 'error' ? 'bg-red-500' : 'bg-slate-400'}`}></span>
+        {streamLabel}
+      </span>
+    </Badge>
+  {/if}
+{/snippet}
 
-<div class="p-4 sm:p-6 max-w-7xl mx-auto">
-  <PageHeader title="Monitoring" subtitle="Resource utilization and health across your fleet.">
-    {#snippet actions()}
-      <div class="flex items-center gap-3">
-        {#if lastRefresh}
-          <span class="text-xs text-slate-400">Updated {formatRelativeTime(lastRefresh.toISOString())}</span>
-        {/if}
-        <button
-          type="button"
-          onclick={() => { autoRefresh = !autoRefresh; if (autoRefresh) startAutoRefresh(); }}
-          class="inline-flex items-center gap-1.5 rounded-lg border border-slate-300 bg-white px-3 py-2 text-xs font-medium text-slate-600 hover:bg-slate-50"
-        >
-          <span class={`inline-block h-2 w-2 rounded-full ${autoRefresh ? 'bg-green-500' : 'bg-slate-300'}`}></span>
-          Auto {autoRefresh ? 'ON' : 'OFF'}
-        </button>
-        <button type="button" onclick={refreshSnapshots} disabled={loading} class="inline-flex items-center gap-2 rounded-lg border border-slate-300 bg-white px-4 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50 disabled:opacity-60">
-          {#if loading}<Spinner size="sm" label="Refreshing" />{:else}<RefreshCw size={16} />{/if}
-          Refresh
-        </button>
-      </div>
-    {/snippet}
-  </PageHeader>
+{#snippet emptyServersIcon()}
+  <ServerIcon size={20} />
+{/snippet}
 
-  <!-- Fleet stats -->
-  <div class="mb-6 grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
-    <Card padding="lg">
-      <div class="flex items-center gap-3">
-        <div class="flex h-10 w-10 items-center justify-center rounded-lg bg-blue-50 text-blue-600"><ServerIcon size={20} /></div>
-        <div>
-          <p class="text-2xl font-bold text-slate-900">{fleetStats.scannedServers}/{fleetStats.totalServers}</p>
-          <p class="text-xs text-slate-500">Servers Scanned</p>
-        </div>
-      </div>
-    </Card>
-    <Card padding="lg">
-      <div class="flex items-center gap-3">
-        <div class="flex h-10 w-10 items-center justify-center rounded-lg bg-purple-50 text-purple-600"><Cpu size={20} /></div>
-        <div>
-          <p class="text-2xl font-bold text-slate-900">{fleetStats.totalCores}</p>
-          <p class="text-xs text-slate-500">Total CPU Cores</p>
-        </div>
-      </div>
-    </Card>
-    <Card padding="lg">
-      <div class="flex items-center gap-3">
-        <div class="flex h-10 w-10 items-center justify-center rounded-lg bg-green-50 text-green-600"><MemoryStick size={20} /></div>
-        <div>
-          <p class="text-2xl font-bold text-slate-900">{formatRAM(fleetStats.totalRamMB)}</p>
-          <p class="text-xs text-slate-500">Total RAM</p>
-        </div>
-      </div>
-    </Card>
-    <Card padding="lg">
-      <div class="flex items-center gap-3">
-        <div class="flex h-10 w-10 items-center justify-center rounded-lg bg-yellow-50 text-yellow-600"><AlertCircle size={20} /></div>
-        <div>
-          <p class="text-2xl font-bold text-slate-900">{fleetStats.warnings + fleetStats.critical}</p>
-          <p class="text-xs text-slate-500">Alerts ({fleetStats.critical} critical)</p>
-        </div>
-      </div>
-    </Card>
-  </div>
+<svelte:head>
+  <title>Monitoring</title>
+  <meta
+    name="description"
+    content="Live server monitoring with CPU, memory, disk, network, and process insights."
+  />
+</svelte:head>
 
-  <!-- Server health cards -->
-  {#if loading && servers.length === 0}
-    <div class="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
-      {#each Array(6) as _}
-        <Card><div class="space-y-3"><Skeleton width="60%" /><Skeleton width="40%" /><Skeleton height="3rem" rounded /></div></Card>
-      {/each}
+<div class="mx-auto max-w-7xl px-4 py-6 sm:px-6 lg:px-8">
+  <PageHeader
+    title="Monitoring"
+    subtitle="Live server metrics, WebSocket streaming, and historical snapshots in one place."
+    actions={streamHeaderAction}
+  />
+
+  {#if loadingServers && servers.length === 0}
+    <div class="space-y-4">
+      <Skeleton class="h-20 w-full" />
+      <div class="grid gap-4 lg:grid-cols-3">
+        <Skeleton class="h-40 w-full" />
+        <Skeleton class="h-40 w-full" />
+        <Skeleton class="h-40 w-full" />
+      </div>
     </div>
-  {:else if serverHealth.length === 0}
-    <EmptyState title="No servers yet" description="Add servers to monitor their resource utilization." icon={emptyIcon} />
+  {:else if servers.length === 0}
+    <EmptyState
+      title="No servers available"
+      description="Add a server to start collecting live metrics."
+      icon={emptyServersIcon}
+    />
   {:else}
-    <div class="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
-      {#each serverHealth as h (h.server.id)}
-        <Card padding="lg" hoverable>
-          <!-- Header -->
-          <div class="mb-3 flex items-start justify-between gap-2">
-            <div class="min-w-0 flex-1">
-              <div class="flex items-center gap-2">
-                <h3 class="truncate text-sm font-semibold text-slate-900">{h.server.name}</h3>
-                {#if h.diskCritical}<Badge variant="error" size="sm">Critical</Badge>{:else if h.diskWarning}<Badge variant="warning" size="sm">Warning</Badge>{/if}
-              </div>
-              <p class="mt-0.5 truncate text-xs text-slate-500">{h.server.host}:{h.server.port}</p>
+    <div class="mb-4 grid gap-4 xl:grid-cols-[minmax(0,1.8fr)_minmax(0,1fr)]">
+      <Card>
+        <div class="flex flex-col gap-4 lg:flex-row lg:items-end lg:justify-between">
+          <div class="space-y-2">
+            <div class="flex items-center gap-2 text-sm font-medium text-slate-700">
+              <ServerIcon size={16} />
+              Server
             </div>
-            <a href={`/servers/${h.server.id}`} class="text-xs text-blue-600 hover:underline">View →</a>
-          </div>
+            <div class="flex flex-col gap-2 sm:flex-row sm:items-center">
+              <select
+                class="min-w-[260px] rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm text-slate-900 shadow-sm outline-none transition focus:border-blue-500"
+                value={selectedServerId?.toString() ?? ''}
+                onchange={handleServerChange}
+              >
+                <option value="" disabled selected={selectedServerId === null}>Select a server</option>
+                {#each servers as server}
+                  <option value={server.id}>{server.name} · {server.host}</option>
+                {/each}
+              </select>
 
-          {@const snap = $snapshotsStore[h.server.id]}
-          {#if !hasSnap(h.server.id)}
-            <div class="rounded-lg border border-dashed border-slate-200 bg-slate-50 p-4 text-center">
-              <Activity size={20} class="mx-auto text-slate-300" />
-              <p class="mt-2 text-sm text-slate-500">Not scanned yet</p>
-            </div>
-          {:else}
-            <div class="space-y-3">
-              <!-- CPU -->
-              <div>
-                <div class="mb-1 flex items-center justify-between text-xs">
-                  <span class="flex items-center gap-1 text-slate-500"><Cpu size={12} />CPU</span>
-                  <span class="font-medium text-slate-700">{snap!.hardware?.cpuCores || 0} cores</span>
-                </div>
-                <p class="text-xs text-slate-400 truncate">{snap!.hardware?.cpuModel || 'Unknown'}</p>
-              </div>
-
-              <!-- RAM -->
-              <div>
-                <div class="mb-1 flex items-center justify-between text-xs">
-                  <span class="flex items-center gap-1 text-slate-500"><MemoryStick size={12} />RAM</span>
-                  <span class="font-medium text-slate-700">{h.ramUsage !== null ? `${Math.round(h.ramUsage)}%` : '—'}</span>
-                </div>
-                <ProgressBar value={h.ramUsage ?? 0} variant={ramVariant(h.ramUsage)} />
-                <p class="mt-1 text-xs text-slate-400">
-                  {snap!.hardware?.ramUsedMb ? formatRAM(snap!.hardware.ramUsedMb) : '—'} / {snap!.hardware?.ramTotalMb ? formatRAM(snap!.hardware.ramTotalMb) : '—'}
-                </p>
-              </div>
-
-              <!-- Disk -->
-              <div>
-                <div class="mb-1 flex items-center justify-between text-xs">
-                  <span class="flex items-center gap-1 text-slate-500"><HardDrive size={12} />Disk</span>
-                  <span class="font-medium text-slate-700">{h.diskUsage !== null ? `${Math.round(h.diskUsage)}%` : '—'}</span>
-                </div>
-                <ProgressBar value={h.diskUsage ?? 0} variant={diskVariant(h.diskWarning, h.diskCritical)} />
-                <p class="mt-1 text-xs text-slate-400">
-                  {snap!.hardware?.diskUsedGb ? formatGB(snap!.hardware.diskUsedGb) : '—'} / {snap!.hardware?.diskTotalGb ? formatGB(snap!.hardware.diskTotalGb) : '—'}
-                </p>
-              </div>
-
-              <!-- Partitions with warnings -->
-              {#if snap!.diskUsage && snap!.diskUsage.filter(p => p.usePercent > 75).length > 0}
-                <div class="space-y-1.5 border-t border-slate-100 pt-2">
-                  {#each snap!.diskUsage.filter(p => p.usePercent > 75) as part}
-                    <div class="flex items-center justify-between text-xs">
-                      <span class="truncate text-slate-600">{part.mountPoint}</span>
-                      <Badge variant={part.usePercent > 90 ? 'error' : 'warning'} size="sm">{Math.round(part.usePercent)}%</Badge>
-                    </div>
-                  {/each}
+              {#if selectedServer}
+                <div class="flex flex-wrap items-center gap-2">
+                  <Badge variant="neutral">{selectedServer.username}@{selectedServer.host}:{selectedServer.port}</Badge>
+                  {#if selectedServer.environment}
+                    <Badge variant="info">{selectedServer.environment}</Badge>
+                  {/if}
+                  {#if selectedServer.region}
+                    <Badge variant="neutral">{selectedServer.region}</Badge>
+                  {/if}
                 </div>
               {/if}
+            </div>
+          </div>
 
-              <!-- Last scan -->
-              <div class="flex items-center gap-1 text-xs text-slate-400">
-                <Clock size={12} />
-                <span>Scanned {getSnapshotAge(snap)}</span>
+          <div class="grid grid-cols-2 gap-2 sm:flex sm:flex-wrap sm:items-center">
+            <button
+              type="button"
+              class="inline-flex items-center justify-center gap-2 rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm font-medium text-slate-700 transition hover:border-slate-300 hover:bg-slate-50"
+              onclick={toggleStreaming}
+              disabled={!selectedServerId}
+            >
+              {#if streamingEnabled}
+                <Pause size={16} />
+                Stop live
+              {:else}
+                <Play size={16} />
+                Start live
+              {/if}
+            </button>
+
+            <button
+              type="button"
+              class="inline-flex items-center justify-center gap-2 rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm font-medium text-slate-700 transition hover:border-slate-300 hover:bg-slate-50"
+              onclick={refreshDashboard}
+              disabled={!selectedServerId || loadingMetrics || topProcessesLoading}
+            >
+              {#if loadingMetrics || topProcessesLoading}
+                <Spinner size="sm" label="Refreshing monitoring data" />
+              {:else}
+                <RefreshCw size={16} />
+              {/if}
+              Refresh
+            </button>
+
+            <select
+              class="rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm text-slate-700 shadow-sm outline-none transition focus:border-blue-500"
+              value={selectedInterval.toString()}
+              onchange={handleIntervalChange}
+              disabled={!selectedServerId}
+            >
+              <option value="1">1s</option>
+              <option value="5">5s</option>
+              <option value="10">10s</option>
+              <option value="30">30s</option>
+            </select>
+          </div>
+        </div>
+
+        <div class="mt-4 flex flex-wrap items-center gap-3 text-xs text-slate-500">
+          <Badge variant={streamBadgeVariant}>{streamLabel}</Badge>
+          {#if streamEndpoint}
+            <span class="font-mono">{streamEndpoint}</span>
+          {/if}
+          {#if lastUpdated}
+            <span>Last updated {formatRelativeTime(lastUpdated.toISOString())}</span>
+          {/if}
+        </div>
+      </Card>
+
+      <Card>
+        <div class="flex h-full flex-col justify-between gap-4">
+          <div>
+            <h2 class="text-sm font-semibold text-slate-900">Live history</h2>
+            <p class="mt-1 text-sm text-slate-500">CPU and memory samples from the current session.</p>
+          </div>
+
+          {#if historyWindow.length > 1}
+            <div class="rounded-xl border border-slate-200 bg-slate-50 p-3">
+              <svg viewBox="0 0 360 120" class="h-28 w-full" preserveAspectRatio="none" aria-hidden="true">
+                <path d={cpuSparkline} fill="none" stroke="currentColor" stroke-width="3" class="text-blue-500" />
+                <path d={memorySparkline} fill="none" stroke="currentColor" stroke-width="3" class="text-emerald-500" />
+                <line x1="0" y1="116" x2="360" y2="116" stroke="currentColor" stroke-width="1" class="text-slate-200" />
+              </svg>
+              <div class="mt-2 flex items-center justify-between text-xs text-slate-500">
+                <span><span class="inline-block h-2 w-2 rounded-full bg-blue-500"></span> CPU</span>
+                <span><span class="inline-block h-2 w-2 rounded-full bg-emerald-500"></span> Memory</span>
+                <span>{historyWindow.length} samples</span>
               </div>
+            </div>
+          {:else}
+            <div class="rounded-xl border border-dashed border-slate-200 bg-slate-50 p-4 text-sm text-slate-500">
+              Start live streaming to build a session history.
+            </div>
+          {/if}
+        </div>
+      </Card>
+    </div>
+
+    {#if loadingMetrics && !metrics}
+      <div class="mb-6 grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
+        <Skeleton class="h-40 w-full" />
+        <Skeleton class="h-40 w-full" />
+        <Skeleton class="h-40 w-full" />
+        <Skeleton class="h-40 w-full" />
+      </div>
+    {:else if metrics}
+      <div class="mb-6 grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
+        <Card>
+          <div class="flex items-start justify-between gap-4">
+            <div>
+              <p class="text-sm font-medium text-slate-500">CPU usage</p>
+              <p class="mt-2 text-3xl font-bold text-slate-900">{metrics.cpu.usage.toFixed(1)}%</p>
+              <p class="mt-1 text-sm text-slate-500">{metrics.cpu.cores} cores · {metrics.cpu.model || 'Unknown model'}</p>
+            </div>
+            <Badge variant={gaugeVariant(metrics.cpu.usage)}>{formatPercentage(metrics.cpu.usage)}</Badge>
+          </div>
+
+          <div class="mt-4 flex items-center justify-center">
+            <svg viewBox="0 0 120 120" class="h-32 w-32">
+              <defs>
+                <linearGradient id="cpu-gauge" x1="0%" x2="100%" y1="0%" y2="100%">
+                  <stop offset="0%" stop-color="currentColor" class={metrics.cpu.usage >= 90 ? 'text-red-500' : metrics.cpu.usage >= 75 ? 'text-amber-500' : 'text-emerald-500'} />
+                  <stop offset="100%" stop-color="currentColor" class={metrics.cpu.usage >= 90 ? 'text-red-400' : metrics.cpu.usage >= 75 ? 'text-amber-400' : 'text-emerald-400'} />
+                </linearGradient>
+              </defs>
+              <circle cx="60" cy="60" r="46" fill="none" stroke="currentColor" stroke-width="12" class="text-slate-100" />
+              <circle
+                cx="60"
+                cy="60"
+                r="46"
+                fill="none"
+                stroke="url(#cpu-gauge)"
+                stroke-width="12"
+                stroke-linecap="round"
+                transform="rotate(-90 60 60)"
+                style={`stroke-dasharray: ${2 * Math.PI * 46 * (metrics.cpu.usage / 100)} ${2 * Math.PI * 46};`}
+              />
+              <text x="60" y="57" text-anchor="middle" class="fill-slate-900 text-lg font-bold">{metrics.cpu.usage.toFixed(0)}%</text>
+              <text x="60" y="74" text-anchor="middle" class="fill-slate-500 text-[10px]">utilization</text>
+            </svg>
+          </div>
+        </Card>
+
+        <Card>
+          <div class="flex items-start justify-between gap-4">
+            <div>
+              <p class="text-sm font-medium text-slate-500">Memory</p>
+              <p class="mt-2 text-3xl font-bold text-slate-900">{metrics.memory.usagePercent.toFixed(1)}%</p>
+              <p class="mt-1 text-sm text-slate-500">
+                {formatBytes(metrics.memory.used * 1024 * 1024)} used of {formatBytes(metrics.memory.total * 1024 * 1024)}
+              </p>
+            </div>
+            <Badge variant={gaugeVariant(metrics.memory.usagePercent)}>{formatPercentage(metrics.memory.usagePercent)}</Badge>
+          </div>
+
+          <div class="mt-4 h-3 overflow-hidden rounded-full bg-slate-100">
+            <div
+              class={`h-full rounded-full ${metrics.memory.usagePercent >= 90 ? 'bg-red-500' : metrics.memory.usagePercent >= 75 ? 'bg-amber-500' : 'bg-emerald-500'}`}
+              style={`width: ${Math.min(100, metrics.memory.usagePercent)}%;`}
+            ></div>
+          </div>
+
+          <dl class="mt-4 grid grid-cols-2 gap-3 text-sm">
+            <div>
+              <dt class="text-slate-500">Free</dt>
+              <dd class="font-medium text-slate-900">{formatBytes(metrics.memory.free * 1024 * 1024)}</dd>
+            </div>
+            <div>
+              <dt class="text-slate-500">Available</dt>
+              <dd class="font-medium text-slate-900">{formatBytes(metrics.memory.available * 1024 * 1024)}</dd>
+            </div>
+            <div>
+              <dt class="text-slate-500">Swap</dt>
+              <dd class="font-medium text-slate-900">{formatBytes(metrics.memory.swapUsed * 1024 * 1024)} / {formatBytes(metrics.memory.swapTotal * 1024 * 1024)}</dd>
+            </div>
+            <div>
+              <dt class="text-slate-500">Cached</dt>
+              <dd class="font-medium text-slate-900">{formatBytes(metrics.memory.cached * 1024 * 1024)}</dd>
+            </div>
+          </dl>
+        </Card>
+
+        <Card>
+          <div class="flex items-start justify-between gap-4">
+            <div>
+              <p class="text-sm font-medium text-slate-500">System</p>
+              <p class="mt-2 text-3xl font-bold text-slate-900">{formatUptime(metrics.uptime)}</p>
+              <p class="mt-1 text-sm text-slate-500">{processCountLabel(metrics.processCount)} processes</p>
+            </div>
+            <div class="flex flex-col items-end gap-2">
+              <Badge variant={temperatureVariant(metrics.temperature ?? 0)}>{formatTemperature(metrics.temperature)}</Badge>
+              <Badge variant={loadVariant(metrics.load.load1, metrics.cpu.cores)}>{formatLoad(metrics.load.load1)} load</Badge>
+            </div>
+          </div>
+
+          <div class="mt-4 grid grid-cols-3 gap-2 text-center text-sm">
+            <div class="rounded-lg bg-slate-50 px-3 py-2">
+              <p class="text-xs text-slate-500">1m</p>
+              <p class="font-semibold text-slate-900">{formatLoad(metrics.load.load1)}</p>
+            </div>
+            <div class="rounded-lg bg-slate-50 px-3 py-2">
+              <p class="text-xs text-slate-500">5m</p>
+              <p class="font-semibold text-slate-900">{formatLoad(metrics.load.load5)}</p>
+            </div>
+            <div class="rounded-lg bg-slate-50 px-3 py-2">
+              <p class="text-xs text-slate-500">15m</p>
+              <p class="font-semibold text-slate-900">{formatLoad(metrics.load.load15)}</p>
+            </div>
+          </div>
+        </Card>
+
+        <Card>
+          <div class="flex items-start justify-between gap-4">
+            <div>
+              <p class="text-sm font-medium text-slate-500">Disk</p>
+              <p class="mt-2 text-3xl font-bold text-slate-900">{metrics.disk.length}</p>
+              <p class="mt-1 text-sm text-slate-500">Mounted filesystems</p>
+            </div>
+            <HardDrive class="text-slate-400" size={24} />
+          </div>
+
+          <div class="mt-4 space-y-3">
+            {#each metrics.disk.slice(0, 3) as partition}
+              <div>
+                <div class="mb-1 flex items-center justify-between text-xs text-slate-500">
+                  <span class="truncate">{partition.mount}</span>
+                  <span>{formatPercentage(partition.usagePercent)}</span>
+                </div>
+                <div class="h-2 overflow-hidden rounded-full bg-slate-100">
+                  <div
+                    class={`h-full rounded-full ${partition.usagePercent >= 90 ? 'bg-red-500' : partition.usagePercent >= 75 ? 'bg-amber-500' : 'bg-emerald-500'}`}
+                    style={`width: ${Math.min(100, partition.usagePercent)}%;`}
+                  ></div>
+                </div>
+              </div>
+            {/each}
+          </div>
+        </Card>
+      </div>
+    {/if}
+
+    <div class="grid gap-6 xl:grid-cols-[minmax(0,1.4fr)_minmax(0,1fr)]">
+      <div class="space-y-6">
+        <Card>
+          <div class="flex items-center justify-between gap-4">
+            <div>
+              <h2 class="text-base font-semibold text-slate-900">Network interfaces</h2>
+              <p class="mt-1 text-sm text-slate-500">Live RX/TX counters and estimated transfer rates.</p>
+            </div>
+            <div class="flex items-center gap-2 text-sm text-slate-500">
+              {#if hasNetworkData()}
+                <Wifi size={16} class="text-emerald-500" />
+              {:else}
+                <WifiOff size={16} class="text-slate-400" />
+              {/if}
+            </div>
+          </div>
+
+          {#if metrics && metrics.network.length > 0}
+            <div class="mt-4 grid gap-3 md:grid-cols-2">
+              {#each metrics.network as iface}
+                <div class="rounded-xl border border-slate-200 bg-slate-50 p-4">
+                  <div class="flex items-start justify-between gap-3">
+                    <div>
+                      <p class="font-medium text-slate-900">{iface.interface}</p>
+                      <p class="mt-1 text-xs text-slate-500">{formatBytes(iface.rxBytes)} RX · {formatBytes(iface.txBytes)} TX</p>
+                    </div>
+                    <Badge variant="info">
+                      {networkRates[iface.interface] ? `${formatRate(networkRates[iface.interface].rxPerSec)} · ${formatRate(networkRates[iface.interface].txPerSec)}` : 'warming up'}
+                    </Badge>
+                  </div>
+
+                  <div class="mt-3 space-y-2 text-sm">
+                    <div>
+                      <div class="mb-1 flex items-center justify-between text-xs text-slate-500">
+                        <span>RX</span>
+                        <span>{networkRates[iface.interface] ? formatRate(networkRates[iface.interface].rxPerSec) : '—'}</span>
+                      </div>
+                      <div class="h-2 rounded-full bg-slate-200">
+                        <div class="h-2 rounded-full bg-blue-500" style="width: 100%; opacity: 0.35;"></div>
+                      </div>
+                    </div>
+                    <div>
+                      <div class="mb-1 flex items-center justify-between text-xs text-slate-500">
+                        <span>TX</span>
+                        <span>{networkRates[iface.interface] ? formatRate(networkRates[iface.interface].txPerSec) : '—'}</span>
+                      </div>
+                      <div class="h-2 rounded-full bg-slate-200">
+                        <div class="h-2 rounded-full bg-emerald-500" style="width: 100%; opacity: 0.35;"></div>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              {/each}
+            </div>
+          {:else}
+            <div class="mt-4 rounded-xl border border-dashed border-slate-200 bg-slate-50 p-4 text-sm text-slate-500">
+              No network interface data available.
             </div>
           {/if}
         </Card>
-      {/each}
+
+        <Card>
+          <div class="flex items-center justify-between gap-4">
+            <div>
+              <h2 class="text-base font-semibold text-slate-900">Historical snapshot</h2>
+              <p class="mt-1 text-sm text-slate-500">Latest discovery scan, if available, shown as a baseline.</p>
+            </div>
+            <Badge variant={selectedSnapshot ? 'info' : 'neutral'}>
+              {selectedSnapshot ? formatRelativeTime(selectedSnapshot.capturedAt) : 'No snapshot'}
+            </Badge>
+          </div>
+
+          {#if selectedSnapshot}
+            <div class="mt-4 grid gap-4 lg:grid-cols-2">
+              <div class="rounded-xl border border-slate-200 bg-slate-50 p-4">
+                <div class="flex items-center gap-2 text-sm font-medium text-slate-700">
+                  <Cpu size={16} />
+                  Hardware
+                </div>
+                <dl class="mt-3 grid grid-cols-2 gap-3 text-sm">
+                  <div>
+                    <dt class="text-slate-500">CPU</dt>
+                    <dd class="font-medium text-slate-900">{selectedSnapshot.hardware.cpuModel}</dd>
+                  </div>
+                  <div>
+                    <dt class="text-slate-500">Cores</dt>
+                    <dd class="font-medium text-slate-900">{selectedSnapshot.hardware.cpuCores}</dd>
+                  </div>
+                  <div>
+                    <dt class="text-slate-500">RAM</dt>
+                    <dd class="font-medium text-slate-900">{selectedSnapshot.hardware.ramUsedMb} / {selectedSnapshot.hardware.ramTotalMb} MB</dd>
+                  </div>
+                  <div>
+                    <dt class="text-slate-500">Disk</dt>
+                    <dd class="font-medium text-slate-900">{selectedSnapshot.hardware.diskUsedGb.toFixed(1)} / {selectedSnapshot.hardware.diskTotalGb.toFixed(1)} GB</dd>
+                  </div>
+                </dl>
+              </div>
+
+              <div class="rounded-xl border border-slate-200 bg-slate-50 p-4">
+                <div class="flex items-center gap-2 text-sm font-medium text-slate-700">
+                  <Clock size={16} />
+                  Snapshot details
+                </div>
+                <dl class="mt-3 grid grid-cols-2 gap-3 text-sm">
+                  <div>
+                    <dt class="text-slate-500">Captured</dt>
+                    <dd class="font-medium text-slate-900">{formatRelativeTime(selectedSnapshot.capturedAt)}</dd>
+                  </div>
+                  <div>
+                    <dt class="text-slate-500">Hostname</dt>
+                    <dd class="font-medium text-slate-900">{selectedSnapshot.os.hostname}</dd>
+                  </div>
+                  <div>
+                    <dt class="text-slate-500">Kernel</dt>
+                    <dd class="font-medium text-slate-900">{selectedSnapshot.os.kernel}</dd>
+                  </div>
+                  <div>
+                    <dt class="text-slate-500">Uptime</dt>
+                    <dd class="font-medium text-slate-900">{formatUptime(selectedSnapshot.os.uptimeSeconds)}</dd>
+                  </div>
+                </dl>
+              </div>
+            </div>
+
+            {#if selectedSnapshot.diskUsage.length > 0}
+              <div class="mt-4 space-y-3">
+                {#each selectedSnapshot.diskUsage.slice(0, 4) as partition}
+                  <div>
+                    <div class="mb-1 flex items-center justify-between text-xs text-slate-500">
+                      <span>{partition.mountPoint}</span>
+                      <span>{partition.usePercent.toFixed(0)}%</span>
+                    </div>
+                    <div class="h-2 overflow-hidden rounded-full bg-slate-100">
+                      <div
+                        class={`h-full rounded-full ${partition.usePercent >= 90 ? 'bg-red-500' : partition.usePercent >= 75 ? 'bg-amber-500' : 'bg-emerald-500'}`}
+                        style={`width: ${Math.min(100, partition.usePercent)}%;`}
+                      ></div>
+                    </div>
+                  </div>
+                {/each}
+              </div>
+            {/if}
+          {:else}
+            <div class="mt-4 rounded-xl border border-dashed border-slate-200 bg-slate-50 p-4 text-sm text-slate-500">
+              Discovery snapshots will appear here after a scan completes.
+            </div>
+          {/if}
+        </Card>
+      </div>
+
+      <div class="space-y-6">
+        <Card>
+          <div class="flex items-center justify-between gap-4">
+            <div>
+              <h2 class="text-base font-semibold text-slate-900">Top processes</h2>
+              <p class="mt-1 text-sm text-slate-500">Sorted by CPU usage.</p>
+            </div>
+            {#if topProcessesLoading}
+              <Spinner size="sm" label="Loading top processes" />
+            {/if}
+          </div>
+
+          {#if topProcesses.length > 0}
+            <div class="mt-4 overflow-hidden rounded-xl border border-slate-200">
+              <table class="min-w-full divide-y divide-slate-200 text-sm">
+                <thead class="bg-slate-50 text-left text-xs uppercase tracking-wide text-slate-500">
+                  <tr>
+                    <th class="px-3 py-2">PID</th>
+                    <th class="px-3 py-2">User</th>
+                    <th class="px-3 py-2 text-right">CPU</th>
+                    <th class="px-3 py-2 text-right">MEM</th>
+                    <th class="px-3 py-2">Command</th>
+                  </tr>
+                </thead>
+                <tbody class="divide-y divide-slate-100 bg-white">
+                  {#each topProcesses as process}
+                    <tr>
+                      <td class="px-3 py-2 font-mono text-xs text-slate-700">{process.pid}</td>
+                      <td class="px-3 py-2 text-slate-700">{process.user}</td>
+                      <td class="px-3 py-2 text-right font-medium {gaugeVariant(process.cpu, 50, 80) === 'error' ? 'text-red-600' : gaugeVariant(process.cpu, 50, 80) === 'warning' ? 'text-amber-600' : 'text-emerald-600'}">
+                        {process.cpu.toFixed(1)}%
+                      </td>
+                      <td class="px-3 py-2 text-right font-medium {gaugeVariant(process.memory, 50, 80) === 'error' ? 'text-red-600' : gaugeVariant(process.memory, 50, 80) === 'warning' ? 'text-amber-600' : 'text-emerald-600'}">
+                        {process.memory.toFixed(1)}%
+                      </td>
+                      <td class="px-3 py-2 text-slate-700">
+                        <span class="block max-w-[240px] truncate font-mono text-xs" title={process.command}>{process.command}</span>
+                      </td>
+                    </tr>
+                  {/each}
+                </tbody>
+              </table>
+            </div>
+          {:else}
+            <div class="mt-4 rounded-xl border border-dashed border-slate-200 bg-slate-50 p-4 text-sm text-slate-500">
+              Top process information will appear once metrics are collected.
+            </div>
+          {/if}
+        </Card>
+
+        <Card>
+          <div class="flex items-center gap-2 text-sm font-medium text-slate-700">
+            <Activity size={16} />
+            Current session
+          </div>
+          <dl class="mt-4 grid grid-cols-2 gap-4 text-sm">
+            <div>
+              <dt class="text-slate-500">Samples</dt>
+              <dd class="mt-1 text-lg font-semibold text-slate-900">{historyWindow.length}</dd>
+            </div>
+            <div>
+              <dt class="text-slate-500">Process count</dt>
+              <dd class="mt-1 text-lg font-semibold text-slate-900">{metrics ? processCountLabel(metrics.processCount) : '—'}</dd>
+            </div>
+            <div>
+              <dt class="text-slate-500">Temp</dt>
+              <dd class="mt-1 text-lg font-semibold text-slate-900">{metrics ? formatTemperature(metrics.temperature) : '—'}</dd>
+            </div>
+            <div>
+              <dt class="text-slate-500">Load 1m</dt>
+              <dd class="mt-1 text-lg font-semibold text-slate-900">{metrics ? formatLoad(metrics.load.load1) : '—'}</dd>
+            </div>
+          </dl>
+        </Card>
+      </div>
     </div>
   {/if}
 </div>
 
-{#snippet emptyIcon()}<Activity size={22} />{/snippet}
+{#if !selectedServerId && servers.length > 0}
+  <div class="fixed bottom-4 right-4 rounded-full bg-slate-900 px-4 py-2 text-xs text-white shadow-lg">
+    Select a server to begin monitoring
+  </div>
+{/if}
+
+<style>
+  :global(body) {
+    background: #f8fafc;
+  }
+</style>

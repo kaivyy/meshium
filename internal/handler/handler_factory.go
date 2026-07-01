@@ -6,6 +6,7 @@ import (
 
 	"meshium/internal/jobengine"
 	"meshium/internal/mod/discovery"
+	"meshium/internal/mod/docker"
 	"meshium/internal/mod/migration"
 	"meshium/internal/mod/planner"
 	"meshium/internal/mod/server"
@@ -18,13 +19,13 @@ import (
 // It creates JobHandler instances for discovery, compat_check, and
 // migration jobs based on the job type and request parameters.
 type HandlerFactoryImpl struct {
-	snapshotStore  discovery.SnapshotStore
-	planStore      planner.PlanStore
-	serverRepo     server.Repo
-	pool           *ssh.Pool
-	authSvc        transport.AESKeyProvider
-	knownHosts     transport.HostKeyStore
-	migrationRepo  migration.Repo
+	snapshotStore   discovery.SnapshotStore
+	planStore       planner.PlanStore
+	serverRepo      server.Repo
+	pool            *ssh.Pool
+	authSvc         transport.AESKeyProvider
+	knownHosts      transport.HostKeyStore
+	migrationRepo   migration.Repo
 	migrationEngine *migration.Engine
 }
 
@@ -39,6 +40,9 @@ func NewHandlerFactory(
 	migrationRepo migration.Repo,
 	migrationEngine *migration.Engine,
 ) *HandlerFactoryImpl {
+	dockerService := docker.NewService(serverRepo, pool, authSvc, knownHosts)
+	setDockerRoutesHandler(NewDockerHandler(dockerService))
+
 	return &HandlerFactoryImpl{
 		snapshotStore:   snapshotStore,
 		planStore:       planStore,

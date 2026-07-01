@@ -12,6 +12,7 @@ import (
 
 	"meshium/internal/mod/server"
 	modssh "meshium/internal/mod/ssh"
+	"meshium/internal/mod/sysupdate"
 	"meshium/internal/mod/transport"
 	"meshium/internal/shared"
 )
@@ -36,6 +37,7 @@ type Service struct {
 	pool    transport.ConnectionPool
 	authSvc transport.AESKeyProvider
 	hosts   transport.HostKeyStore
+	updates *sysupdate.Service
 }
 
 // NewService creates a new file service.
@@ -45,15 +47,46 @@ func NewService(
 	authSvc transport.AESKeyProvider,
 	hosts transport.HostKeyStore,
 ) *Service {
-	return &Service{
+	service := &Service{
 		srvRepo: srvRepo,
 		pool:    pool,
 		authSvc: authSvc,
 		hosts:   hosts,
 	}
+
+	if adapter, ok := pool.(*PoolAdapter); ok {
+		if rawPool, ok := adapter.Inner.(*modssh.Pool); ok {
+			service.updates = sysupdate.NewService(srvRepo, rawPool, authSvc, hosts)
+		}
+	}
+
+	return service
 }
 
+// ServerRepo exposes the underlying server repository.
+func (s *Service) ServerRepo() server.Repo { return s.srvRepo }
+
+// SSHPool returns the concrete SSH pool when available.
+func (s *Service) SSHPool() *modssh.Pool {
+	if adapter, ok := s.pool.(*PoolAdapter); ok {
+		if pool, ok := adapter.Inner.(*modssh.Pool); ok {
+			return pool
+		}
+	}
+	return nil
+}
+
+// AuthSvc exposes the credential provider.
+func (s *Service) AuthSvc() transport.AESKeyProvider { return s.authSvc }
+
+// KnownHosts exposes the host key store.
+func (s *Service) KnownHosts() transport.HostKeyStore { return s.hosts }
+
 // getSSHClient obtains an SSH connection for the given server.
+func (s *Service) SysUpdateService() *sysupdate.Service {
+	return s.updates
+}
+
 func (s *Service) getSSHClient(serverID int, srv *server.Server) (transport.SSHExecuter, error) {
 	aesKey := s.authSvc.GetAESKey()
 	if aesKey == nil {

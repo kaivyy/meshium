@@ -139,6 +139,8 @@ export interface ServerSnapshot {
   hardware: HardwareInfo;
   docker: DockerInfo | null;
   services: SystemService[];
+  packages: string[];
+  users: string[];
   databases: DatabaseInfo[];
   nginx: NginxInfo | null;
   diskUsage: DiskPartition[];

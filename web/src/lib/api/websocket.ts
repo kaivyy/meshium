@@ -20,9 +20,12 @@ function getSessionToken(): string | null {
  */
 export function wsURL(path: string): string {
   const proto = location.protocol === 'https:' ? 'wss' : 'ws';
+  const url = new URL(path, `${proto}://${location.host}`);
   const token = getSessionToken();
-  const tokenParam = token ? `?token=${encodeURIComponent(token)}` : '';
-  return `${proto}://${location.host}${path}${tokenParam}`;
+  if (token) {
+    url.searchParams.set('token', token);
+  }
+  return url.toString();
 }
 
 /**
@@ -34,18 +37,20 @@ export function wsURL(path: string): string {
  * @param onError - Optional error callback
  * @param onClose - Optional close callback
  */
-export function wsConnectGeneric(
+export function wsConnectGeneric<T = WSMessage>(
   path: string,
-  onMessage: (msg: WSMessage) => void,
+  onMessage: (msg: T) => void,
   onError?: (err: Event) => void,
-  onClose?: () => void
+  onClose?: () => void,
+  onOpen?: () => void
 ): WebSocket {
   const url = wsURL(path);
   const ws = new WebSocket(url);
 
+  ws.onopen = () => onOpen?.();
   ws.onmessage = (e) => {
     try {
-      const msg = JSON.parse(e.data) as WSMessage;
+      const msg = JSON.parse(e.data) as T;
       onMessage(msg);
     } catch {
       // Ignore non-JSON messages

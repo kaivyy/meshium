@@ -12,11 +12,17 @@ import (
 	"meshium/internal/db"
 	"meshium/internal/handler"
 	"meshium/internal/jobengine"
+	"meshium/internal/mod/ai"
 	"meshium/internal/mod/auth"
 	"meshium/internal/mod/discovery"
+	"meshium/internal/mod/drift"
 	"meshium/internal/mod/file"
+	"meshium/internal/mod/firewall"
+	"meshium/internal/mod/logview"
 	"meshium/internal/mod/migration"
+	"meshium/internal/mod/monitoring"
 	"meshium/internal/mod/planner"
+	"meshium/internal/mod/process"
 	"meshium/internal/mod/server"
 	"meshium/internal/mod/ssh"
 	"meshium/internal/shared"
@@ -150,10 +156,33 @@ func main() {
 	discoveryRESTHandler := handler.NewDiscoveryHandler(snapshotStore, engine)
 	terminalHandler := handler.NewTerminalHandler(handlerFactory, authSvc, serverRepo)
 
+	aiService := ai.NewService(snapshotStore, serverRepo, sshPool, authSvc, knownHosts)
+	aiHandler := handler.NewAIHandler(aiService)
+
 	// File explorer service and handler
 	filePoolAdapter := &file.PoolAdapter{Inner: sshPool}
 	fileService := file.NewService(serverRepo, filePoolAdapter, authSvc, knownHosts)
 	fileHandler := handler.NewFileHandler(fileService)
+
+	// Log viewer service and handler
+	logViewService := logview.NewService(serverRepo, sshPool, authSvc, knownHosts)
+	logViewHandler := handler.NewLogViewHandler(logViewService, authSvc)
+
+	// Firewall manager service and handler
+	firewallService := firewall.NewService(serverRepo, sshPool, authSvc, knownHosts)
+	firewallHandler := handler.NewFirewallHandler(firewallService)
+
+	// Process manager service and handler
+	processService := process.NewService(serverRepo, sshPool, authSvc, knownHosts)
+	processHandler := handler.NewProcessHandler(processService)
+
+	// Drift detection service and handler
+	driftService := drift.NewService(snapshotStore, serverRepo, sshPool, authSvc, knownHosts)
+	driftHandler := handler.NewDriftHandler(driftService)
+
+	// Monitoring service and handler
+	monitoringService := monitoring.NewService(serverRepo, sshPool, authSvc, knownHosts)
+	monitoringHandler := handler.NewMonitoringHandler(monitoringService, authSvc)
 
 	// 5. Setup graceful shutdown
 	httpServer := &http.Server{}
@@ -186,8 +215,14 @@ func main() {
 	jobHTTPHandler.RegisterRoutes(mux)
 	planHTTPHandler.RegisterRoutes(mux)
 	discoveryRESTHandler.RegisterRoutes(mux)
+	aiHandler.RegisterRoutes(mux)
 	terminalHandler.RegisterRoutes(mux)
 	fileHandler.RegisterRoutes(mux)
+	logViewHandler.RegisterRoutes(mux)
+	firewallHandler.RegisterRoutes(mux)
+	processHandler.RegisterRoutes(mux)
+	driftHandler.RegisterRoutes(mux)
+	monitoringHandler.RegisterRoutes(mux)
 
 	mux.Handle("/", staticHandler())
 

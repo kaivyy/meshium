@@ -5,6 +5,7 @@
   import { api } from '$lib/api/client';
   import {
     LayoutDashboard, Server, Search, ArrowRightLeft, Briefcase,
+    Bot, Cpu, ScrollText, Clock, Shield, Download, GitBranch,
     Container, FolderTree, Terminal, Activity, Bell, Settings, LogOut,
     ChevronLeft, ChevronRight, ClipboardList, GitCompare,
     Grid, X
@@ -53,6 +54,7 @@
       label: 'Compare',
       items: [
         { href: '/servers/compare', label: 'Compare', icon: GitCompare },
+        { href: '/drift', label: 'Drift', icon: GitBranch },
       ]
     },
     {
@@ -61,12 +63,24 @@
         { href: '/docker', label: 'Docker', icon: Container },
         { href: '/files', label: 'Files', icon: FolderTree },
         { href: '/terminal', label: 'Terminal', icon: Terminal },
+        { href: '/services', label: 'Services', icon: Settings },
+        { href: '/processes', label: 'Processes', icon: Cpu },
+      ]
+    },
+    {
+      label: 'System',
+      items: [
+        { href: '/logs', label: 'Logs', icon: ScrollText },
+        { href: '/cron', label: 'Cron', icon: Clock },
+        { href: '/firewall', label: 'Firewall', icon: Shield },
+        { href: '/updates', label: 'Updates', icon: Download },
       ]
     },
     {
       label: 'Insights',
       items: [
         { href: '/monitoring', label: 'Monitoring', icon: Activity },
+        { href: '/assistant', label: 'Assistant', icon: Bot },
         { href: '/alerts', label: 'Alerts', icon: Bell },
       ]
     },

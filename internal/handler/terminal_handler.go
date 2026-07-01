@@ -12,6 +12,7 @@ import (
 	"github.com/gorilla/websocket"
 
 	"meshium/internal/mod/auth"
+	servicesvc "meshium/internal/mod/service"
 	"meshium/internal/mod/server"
 	"meshium/internal/mod/transport"
 	"meshium/internal/shared"
@@ -70,9 +71,21 @@ func NewTerminalHandler(handlerFactory *HandlerFactoryImpl, authSvc *auth.Servic
 	}
 }
 
-// RegisterRoutes registers terminal routes on the mux.
+// RegisterRoutes registers terminal and service routes on the mux.
 func (h *TerminalHandler) RegisterRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("/ws/terminal/", h.handleTerminalWS)
+
+	if h == nil || h.handlerFactory == nil {
+		return
+	}
+
+	serviceHandler := NewServiceHandler(servicesvc.NewService(
+		h.handlerFactory.serverRepo,
+		h.handlerFactory.pool,
+		h.handlerFactory.authSvc,
+		h.handlerFactory.knownHosts,
+	))
+	serviceHandler.RegisterRoutes(mux)
 }
 
 func (h *TerminalHandler) handleTerminalWS(w http.ResponseWriter, r *http.Request) {

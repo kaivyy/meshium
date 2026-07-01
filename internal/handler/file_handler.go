@@ -8,6 +8,7 @@ import (
 	"strconv"
 	"strings"
 
+	cronmod "meshium/internal/mod/cron"
 	"meshium/internal/mod/file"
 	"meshium/internal/shared"
 )
@@ -15,41 +16,63 @@ import (
 // FileHandler handles HTTP requests for file operations.
 type FileHandler struct {
 	service *file.Service
+	cron    *CronHandler
 }
 
 // NewFileHandler creates a new file handler.
 func NewFileHandler(service *file.Service) *FileHandler {
-	return &FileHandler{service: service}
+	h := &FileHandler{service: service}
+	if service != nil {
+		if pool := service.SSHPool(); pool != nil {
+			if cronSvc := cronmod.NewService(service.ServerRepo(), pool, service.AuthSvc(), service.KnownHosts()); cronSvc != nil {
+				h.cron = NewCronHandler(cronSvc)
+			}
+		}
+	}
+	return h
 }
 
 // RegisterRoutes registers file routes on the given mux.
 func (h *FileHandler) RegisterRoutes(mux *http.ServeMux) {
 	// List directory
 	mux.HandleFunc("GET /api/servers/{id}/files", h.handleList)
-	
+
 	// Read file content
 	mux.HandleFunc("GET /api/servers/{id}/files/content", h.handleGetContent)
-	
+
 	// Download file
 	mux.HandleFunc("GET /api/servers/{id}/files/download", h.handleDownload)
-	
+
 	// Upload file
 	mux.HandleFunc("POST /api/servers/{id}/files/upload", h.handleUpload)
-	
+
 	// Write file
 	mux.HandleFunc("POST /api/servers/{id}/files", h.handleWrite)
-	
+
 	// Delete file
 	mux.HandleFunc("DELETE /api/servers/{id}/files", h.handleDelete)
-	
+
 	// Rename/move file
 	mux.HandleFunc("PUT /api/servers/{id}/files", h.handleRename)
-	
+
 	// Create directory
 	mux.HandleFunc("POST /api/servers/{id}/files/mkdir", h.handleMkdir)
-	
+
 	// Get file stats
 	mux.HandleFunc("GET /api/servers/{id}/files/stat", h.handleStat)
+
+	if h.cron != nil {
+		h.cron.RegisterRoutes(mux)
+	}
+
+	if h.service != nil {
+		if updatesSvc := h.service.SysUpdateService(); updatesSvc != nil {
+			NewSysUpdateHandler(updatesSvc).RegisterRoutes(mux)
+		}
+	}
+
+	// Register other route groups that are initialized alongside the file handler.
+	registerDockerRoutes(mux)
 }
 
 // handleList handles GET /api/servers/{id}/files?path=/path/to/dir
@@ -159,7 +182,7 @@ func (h *FileHandler) handleUpload(w http.ResponseWriter, r *http.Request) {
 	// Parse multipart form
 	maxSize := int64(100 * 1024 * 1024) // 100MB max
 	r.Body = http.MaxBytesReader(w, r.Body, maxSize)
-	
+
 	err = r.ParseMultipartForm(maxSize)
 	if err != nil {
 		shared.WriteError(w, http.StatusBadRequest, "failed to parse form: "+err.Error(), "BAD_REQUEST")

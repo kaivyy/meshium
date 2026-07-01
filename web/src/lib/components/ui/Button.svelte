@@ -14,6 +14,7 @@
     type?: ButtonType;
     children?: Snippet;
     icon?: Snippet;
+    onclick?: (event: MouseEvent) => void;
   }
 
   let {
@@ -23,7 +24,8 @@
     disabled = false,
     type = 'button',
     children,
-    icon
+    icon,
+    onclick
   }: Props = $props();
 
   const variantClass = $derived(
@@ -53,6 +55,7 @@
   disabled={isDisabled}
   aria-disabled={isDisabled}
   aria-busy={loading}
+  onclick={onclick}
   class={`rounded-lg font-medium transition-colors inline-flex items-center justify-center gap-2 ${sizeClass} ${variantClass} ${isDisabled ? 'opacity-50 cursor-not-allowed' : ''}`}
 >
   {#if loading}

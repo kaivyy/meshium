@@ -17,6 +17,10 @@ type ServerSnapshot struct {
 	Docker *DockerInfo `json:"docker,omitempty"`
 	// Services holds systemd services that are active.
 	Services []SystemService `json:"services,omitempty"`
+	// Packages holds installed package names.
+	Packages []string `json:"packages,omitempty"`
+	// Users holds local user account names.
+	Users []string `json:"users,omitempty"`
 	// Databases holds detected database instances.
 	Databases []DatabaseInfo `json:"databases,omitempty"`
 	// Nginx holds Nginx configuration information.
