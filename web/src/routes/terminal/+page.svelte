@@ -447,36 +447,40 @@
             </div>
           </div>
 
-          <!-- Terminal body -->
-          {#if connectionStatus !== 'connected'}
-            <div class="flex min-h-[500px] flex-col items-center justify-center bg-slate-900 p-4">
-              {#if connectionStatus === 'connecting'}
-                <div class="flex items-center gap-3 text-slate-400">
-                  <Loader2 size={20} class="animate-spin" />
-                  <span class="text-sm">Connecting to {selectedServer.name}...</span>
-                </div>
-              {:else if connectionStatus === 'failed'}
-                <div class="text-center">
-                  <WifiOff size={28} class="mx-auto text-red-500" />
-                  <p class="mt-3 text-sm text-red-400">Connection failed</p>
-                  <p class="mt-1 text-xs text-slate-500">Check that the server is online and SSH credentials are correct.</p>
-                </div>
-              {:else}
-                <div class="text-center">
-                  <TerminalIcon size={28} class="mx-auto text-slate-600" />
-                  <p class="mt-3 text-sm text-slate-500">Ready to connect</p>
-                  <p class="mt-1 text-xs text-slate-600">Click "Connect" to start a real interactive SSH terminal session.</p>
-                  <p class="mt-2 text-xs text-slate-600">Full PTY support — interactive commands, colors, streaming output.</p>
-                </div>
-              {/if}
-            </div>
-          {:else}
-            <!-- xterm.js terminal -->
+          <!-- Terminal body — container ALWAYS in DOM so term.open() has a valid element.
+               Overlay (connecting/failed/idle) is absolute-positioned on top. -->
+          <div class="relative">
+            <!-- xterm.js terminal container — always rendered -->
             <div
               bind:this={terminalContainer}
               class="h-[500px] bg-slate-900 p-2"
             ></div>
-          {/if}
+
+            <!-- Overlay: shown when not yet connected -->
+            {#if connectionStatus !== 'connected'}
+              <div class="absolute inset-0 flex flex-col items-center justify-center bg-slate-900 p-4">
+                {#if connectionStatus === 'connecting'}
+                  <div class="flex items-center gap-3 text-slate-400">
+                    <Loader2 size={20} class="animate-spin" />
+                    <span class="text-sm">Connecting to {selectedServer.name}...</span>
+                  </div>
+                {:else if connectionStatus === 'failed'}
+                  <div class="text-center">
+                    <WifiOff size={28} class="mx-auto text-red-500" />
+                    <p class="mt-3 text-sm text-red-400">Connection failed</p>
+                    <p class="mt-1 text-xs text-slate-500">Check that the server is online and SSH credentials are correct.</p>
+                  </div>
+                {:else}
+                  <div class="text-center">
+                    <TerminalIcon size={28} class="mx-auto text-slate-600" />
+                    <p class="mt-3 text-sm text-slate-500">Ready to connect</p>
+                    <p class="mt-1 text-xs text-slate-600">Click "Connect" to start a real interactive SSH terminal session.</p>
+                    <p class="mt-2 text-xs text-slate-600">Full PTY support — interactive commands, colors, streaming output.</p>
+                  </div>
+                {/if}
+              </div>
+            {/if}
+          </div>
 
           <!-- Action bar -->
           <div class="flex items-center justify-between border-t border-slate-700 bg-slate-800 px-4 py-2.5">
