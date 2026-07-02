@@ -600,10 +600,10 @@ func (e *Engine) failAndRollback(ctx context.Context, sm *StateMachine, migratio
 	}
 
 	// Transition to Restored
-	if err := sm.Transition(StateRestored); err != nil {
-		sm.ForceTransition(StateRestored)
+	if err := sm.Transition(StateRolledBack); err != nil {
+		sm.ForceTransition(StateRolledBack)
 	}
-	e.repo.SetMigrationStateContext(ctx, migrationID, StateRestored)
+	e.repo.SetMigrationStateContext(ctx, migrationID, StateRolledBack)
 	onProgress(WSMessage{Step: "engine", Status: "complete", Value: "Rollback complete — target restored"})
 }
 

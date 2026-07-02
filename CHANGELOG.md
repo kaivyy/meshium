@@ -7,6 +7,122 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [1.5.0] — 2026-07-03
+
+The zero-downtime migration update. Adds a complete 14-stage pipeline engine with 10 specialized engines, 11-step guided wizard, real-time monitoring dashboard, and automatic rollback — enabling production-grade server migrations with near-zero downtime.
+
+### Zero-Downtime Migration Pipeline
+
+#### Added — Pipeline Engine (`internal/mod/migration/pipeline.go`)
+- **14-stage pipeline engine** — Orchestrates the full migration lifecycle: Planning → Discovery → CompatibilityCheck → RiskAssessment → Backup → ProvisionTarget → InstallDependencies → InitialSync → LiveReplication → Verification → PreCutover → TrafficSwitch → PostVerification → Observation → Committed
+- **State machine** with 20+ states and strict transition validation — any state can transition to Failed/Interrupted, Failed → Rollback → RolledBack
+- **Checkpoint persistence** — pipeline can resume from last checkpoint after interruption
+- **LIFO rollback** — reverses changes in reverse order on failure
+- **Configurable retry** — max retries, retry delay, auto-rollback thresholds
+
+#### Added — Health Engine (`internal/mod/migration/health.go`)
+- **11 health check types** — HTTP, HTTPS, TCP, DNS, SSL, Docker, Disk, Memory, CPU, Process, Custom
+- **Health scoring** (0–100) based on latency thresholds
+- **Context-aware DNS resolution** — respects cancellation
+- **SSL certificate expiry** checking with configurable warning days
+
+#### Added — Traffic Switch Engine (`internal/mod/migration/traffic.go`)
+- **7 traffic providers** — Cloudflare (DNS API), Nginx, Traefik, HAProxy, Caddy, Docker Compose, DNS
+- **Config backup & restore** — original config saved before switch, restored on rollback
+- **Health-check-gated switching** — verifies target health before completing switch
+
+#### Added — Replication Engine (`internal/mod/migration/replication.go`)
+- **4 database types** — MySQL (master/replica), PostgreSQL (streaming), Redis (REPLICAOF), MongoDB (replica set)
+- **Lag monitoring** — tracks replication lag in seconds
+- **Catch-up detection** — signals when replica is within threshold
+
+#### Added — Sync Engine (`internal/mod/migration/sync.go`)
+- **rsync-based file sync** with delta transfer support
+- **Checksum verification** — SHA256 post-sync validation
+- **Bandwidth limiting** and parallel transfer support
+
+#### Added — Queue Engine (`internal/mod/migration/queue.go`)
+- **BullMQ** and **RabbitMQ** drain support
+- **Pause → Drain → Verify → Resume** lifecycle
+- **Job counting** and sync verification
+
+#### Added — Provision Engine (`internal/mod/migration/provision.go`)
+- **20+ components** — Docker, Compose, Nginx, Caddy, HAProxy, Redis, MySQL, PostgreSQL, MongoDB, Node.js, Certbot, etc.
+- **Install → Configure → Verify** lifecycle per component
+- **Version detection** and compatibility checking
+
+#### Added — Risk Engine (`internal/mod/migration/risk_engine.go`)
+- **10 risk factors** — data size, database size, containers, replication, network, resource mismatch, compatibility, queue depth, volume count, config complexity
+- **Risk classification** — low / medium / high / critical
+- **Downtime estimation** — predicts expected downtime window
+- **Rollback complexity assessment** — simple / moderate / complex / very_complex
+
+#### Added — Compatibility Engine (`internal/mod/migration/compatibility.go`)
+- **20+ compatibility checks** — architecture, RAM, disk, Docker, kernel, OS, package manager, OpenSSL, storage driver, SELinux, ports, timezone, glibc, systemd, swap, etc.
+- **Severity classification** — info / warning / high / critical
+- **Critical blockers** — prevent migration from proceeding
+
+#### Added — Cutover & Observation Engines (`internal/mod/migration/cutover.go`, `observation.go`)
+- **Cutover sequence** — freeze writes → delta sync → catch-up → drain queues → health check → switch traffic → promote → resume writes
+- **Observation monitoring** — configurable duration, health score threshold, auto-rollback trigger
+
+#### Added — Pipeline API (`internal/mod/migration/pipeline_handler.go`)
+- **REST endpoints** — session, stages, risk, compatibility, health, replication, sync, queue, provision, metrics, audit, config, control, export
+- **WebSocket** — `/ws/pipeline/{id}` for real-time progress updates
+- **CSRF protection** — WebSocket origin validation with `isSameOrigin`
+
+#### Added — Database Schema (`internal/db/migrations.go`)
+- **14 new tables** — pipeline_stages, replication_status, traffic_switch_configs, health_check_results, risk_reports, compatibility_checks, sync_sessions, queue_states, provision_states, migration_metrics, migration_audit, migration_configs, migration_sessions, migration_checkpoints
+
+#### Added — Pipeline Tests (`internal/mod/migration/pipeline_test.go`, `pipeline_engines_test.go`)
+- **25+ unit tests** for pipeline orchestration, state transitions, checkpoint persistence, error handling, rollback scenarios, resume capability
+- **Engine tests** for health (11 check types), risk (10 factors), compatibility (20+ checks), replication validation
+
+### Frontend — 11-Step Migration Wizard
+
+#### Added — Pipeline API Client (`web/src/lib/api/pipeline.ts`)
+- **15+ data model types** — PipelineStage, ReplicationStatus, TrafficSwitchConfig, HealthCheckResult, RiskReport, CompatibilityCheckResult, SyncSession, QueueState, ProvisionState, ServerResourceMetrics, ContainerHealthInfo, MigrationConfig, MigrationSession, WSMessageExtended, AuditEntry
+- **REST API methods** — session, stages, risk, compatibility, health, replication, sync, queue, provision, metrics, audit, config, control, export
+- **WebSocket client** — real-time pipeline progress with resource metrics (CPU, RAM, disk, network)
+- **Wizard step definitions** — WIZARD_STEPS array with validation gates
+
+#### Added — Migration Wizard (`web/src/routes/migrations/[id]/pipeline/+page.svelte`)
+- **11-step guided wizard** — Discovery → Compatibility → Risk → Plan → Dry Run → Provision → Execute → Live Monitoring → Cutover → Observation → Finish
+- **Validation gates** — each step requires completion before proceeding; critical compatibility failures block progression
+- **Live metrics dashboard** — Progress, Transfer, Speed, ETA, Replication Lag, CPU, RAM, Disk, Queue Status, Container Health, Health Score, Timeline, Logs
+- **Cutover confirmation** — explicit 7-step checklist dialog before traffic switch
+- **Observation timer** — configurable countdown with auto-advance on completion
+- **Auto-advance** — wizard progresses automatically based on pipeline state
+- **State recovery** — resumes to correct step on page reload
+- **Controls** — Pause, Resume, Rollback (with confirmation), Export Report, Diff view
+
+### Flow Integration
+
+#### Changed — Migration List (`web/src/routes/migrations/+page.svelte`)
+- Migration links now point to `/migrations/{id}/pipeline` instead of `/migrations/{id}`
+
+#### Changed — New Migration (`web/src/routes/migrations/new/+page.svelte`)
+- After plan creation, auto-redirects to `/migrations/{id}/pipeline` instead of `/migrations`
+- Backend now returns `migration_id` in the WebSocket plan-complete message
+
+#### Changed — Migration Detail (`web/src/routes/migrations/[id]/+page.svelte`)
+- Replaced with auto-redirect to `/migrations/{id}/pipeline`
+- Old detail page functionality fully superseded by the wizard
+
+#### Changed — Backend Plan Handler (`internal/mod/migration/handler.go`)
+- Plan complete WebSocket message now includes `migration_id:{id}` in value field
+
+### Security Fixes
+- **WebSocket CSRF** — `CheckOrigin` validation with `isSameOrigin` helper for pipeline WebSocket
+- **MigrationID persistence** — fixed `handler_factory.go` to preserve `job.MigrationID`
+- **Engine.Stop() restartability** — `stopCh` is re-created after stop to prevent nil channel panic
+- **Docker nil-panic** — empty data check before JSON unmarshalling in docker.go
+
+### Documentation
+- **docs/flow.md** — comprehensive user flow documentation covering all 11 wizard steps, dashboard metrics, database replication, traffic switching, state machine, and automatic rollback
+
+---
+
 ## [1.4.0] — 2026-07-01
 
 The major management update. Adds real interactive PTY terminal, 10 new server management modules (Docker, Services, Processes, Logs, Cron, Firewall, Monitoring, System Updates, Drift Detection, AI Assistant), file explorer with in-browser editor, security hardening (Phase 0), and comprehensive bug fixes.

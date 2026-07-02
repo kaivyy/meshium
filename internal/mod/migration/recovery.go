@@ -276,13 +276,13 @@ func (rm *RecoveryManager) CancelMigration(ctx context.Context, migrationID int,
 	}
 
 	// Transition to Restored
-	rm.repo.SetMigrationStateContext(ctx, migrationID, StateRestored)
+	rm.repo.SetMigrationStateContext(ctx, migrationID, StateRolledBack)
 	onProgress(WSMessage{Step: "recovery", Status: "complete", Value: "Migration cancelled — target restored to pre-migration state"})
 
 	return &RecoveryResult{
 		Action:      "cancelled",
 		MigrationID: migrationID,
-		FinalState:  StateRestored,
+		FinalState:  StateRolledBack,
 		Message:     "All applied steps rolled back",
 	}, nil
 }

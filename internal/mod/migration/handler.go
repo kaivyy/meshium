@@ -38,7 +38,13 @@ func NewHandler(runner MigrationRunner, repo Repo) *Handler {
 		repo:   repo,
 		upgrader: websocket.Upgrader{
 			CheckOrigin: func(r *http.Request) bool {
-				return true
+				origin := r.Header.Get("Origin")
+				if origin == "" {
+					return true // non-browser clients
+				}
+				host := r.Header.Get("Host")
+				// Allow same-origin requests
+				return isSameOrigin(origin, host)
 			},
 		},
 	}
@@ -255,7 +261,7 @@ func (h *Handler) handlePlanWS(w http.ResponseWriter, r *http.Request) {
 	ctx, cancel := context.WithCancel(r.Context())
 	defer cancel()
 
-	_, err = h.runner.Plan(ctx, req, func(msg WSMessage) {
+	plan, err := h.runner.Plan(ctx, req, func(msg WSMessage) {
 		if writeErr := conn.WriteJSON(msg); writeErr != nil {
 			log.Printf("websocket write failed: %v", writeErr)
 			cancel()
@@ -267,7 +273,11 @@ func (h *Handler) handlePlanWS(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	conn.WriteJSON(WSMessage{Step: "plan", Status: "complete"})
+	migrationID := 0
+	if plan != nil {
+		migrationID = plan.ID
+	}
+	conn.WriteJSON(WSMessage{Step: "plan", Status: "complete", Value: fmt.Sprintf("migration_id:%d", migrationID)})
 }
 
 func (h *Handler) handleMigrateWS(w http.ResponseWriter, r *http.Request) {
@@ -514,4 +524,21 @@ func (h *Handler) handleExport(w http.ResponseWriter, r *http.Request, id int) {
 	w.Header().Set("Content-Type", "application/json")
 	w.Header().Set("Content-Disposition", fmt.Sprintf("attachment; filename=\"migration-%d.json\"", id))
 	json.NewEncoder(w).Encode(export)
+}
+
+// isSameOrigin checks if the Origin header matches the Host header.
+// This prevents CSRF attacks on WebSocket connections while allowing
+// same-origin browser connections and non-browser clients.
+func isSameOrigin(origin, host string) bool {
+	// Strip scheme from origin
+	originHost := origin
+	if after, ok := strings.CutPrefix(origin, "https://"); ok {
+		originHost = after
+	} else if after, ok := strings.CutPrefix(origin, "http://"); ok {
+		originHost = after
+	}
+	// Strip port from both for comparison (allow different ports in dev)
+	originHost = strings.Split(originHost, ":")[0]
+	hostOnly := strings.Split(host, ":")[0]
+	return originHost == hostOnly || originHost == "localhost" || originHost == "127.0.0.1"
 }

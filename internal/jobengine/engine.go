@@ -142,6 +142,10 @@ func (e *Engine) Stop(ctx context.Context) error {
 
 	e.mu.Lock()
 	e.started = false
+	// BUG FIX: Reset stopCh so the engine can be restarted after Stop().
+	// Without this, calling Start() after Stop() panics on close(stopCh)
+	// because the channel is already closed.
+	e.stopCh = make(chan struct{})
 	e.mu.Unlock()
 
 	log.Printf("[engine] Stopped")
