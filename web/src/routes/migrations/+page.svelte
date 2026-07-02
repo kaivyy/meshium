@@ -81,7 +81,7 @@
     <div class="space-y-2">
       {#each migrations as m}
         <a
-          href="/migrations/{m.id}"
+          href="/migrations/{m.id}/pipeline"
           class="block p-4 bg-white rounded-lg border border-slate-200 hover:border-slate-300 transition-colors"
         >
           <div class="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">

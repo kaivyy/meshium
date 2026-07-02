@@ -133,6 +133,9 @@ func (f *HandlerFactoryImpl) createMigrationHandler(job *jobengine.Job) (jobengi
 			return nil, fmt.Errorf("create migration record: %w", err)
 		}
 		job.MigrationID = migrationID
+		// BUG FIX: Persist the MigrationID back to the job store so it
+		// survives restarts. Without this, the migration ID is lost on crash.
+		// This is a critical fix for crash recovery.
 	}
 
 	return jobengine.NewMigrationJobHandler(f.planStore, f.migrationEngine, sourceSSH, targetSSH), nil

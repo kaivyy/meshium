@@ -98,7 +98,16 @@
         if (msg.step === 'plan' && msg.status === 'complete') {
           planning = false;
           toast.success('Migration plan created');
-          setTimeout(() => goto('/migrations'), 1000);
+          // Extract migration ID from the message value (format: "migration_id:123")
+          const match = msg.value?.match(/migration_id:(\d+)/);
+          const newId = match ? match[1] : '';
+          setTimeout(() => {
+            if (newId) {
+              goto(`/migrations/${newId}/pipeline`);
+            } else {
+              goto('/migrations');
+            }
+          }, 1000);
         }
       },
       () => { planning = false; },

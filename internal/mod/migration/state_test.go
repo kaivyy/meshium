@@ -19,7 +19,7 @@ func TestMigrationStateString(t *testing.T) {
 		{StateCommitted, "committed"},
 		{StateFailed, "failed"},
 		{StateRollback, "rollback"},
-		{StateRestored, "restored"},
+		{StateRolledBack, "rolled_back"},
 		{StateInterrupted, "interrupted"},
 		{StateResuming, "resuming"},
 	}
@@ -58,7 +58,7 @@ func TestStateFromStringUnknown(t *testing.T) {
 }
 
 func TestStateIsTerminal(t *testing.T) {
-	terminalStates := []MigrationState{StateCommitted, StateRestored}
+	terminalStates := []MigrationState{StateCommitted, StateRolledBack}
 	nonTerminalStates := []MigrationState{
 		StateCreated, StatePlanning, StateBackup, StateSnapshot,
 		StateTransferring, StateApplying, StateVerifying,
@@ -84,7 +84,7 @@ func TestStateIsRunning(t *testing.T) {
 		StateRollback, StateResuming,
 	}
 	notRunningStates := []MigrationState{
-		StateCommitted, StateFailed, StateRestored, StateInterrupted,
+		StateCommitted, StateFailed, StateRolledBack, StateInterrupted,
 	}
 
 	for _, s := range runningStates {
@@ -127,7 +127,7 @@ func TestIsValidTransition(t *testing.T) {
 		{StateVerifying, StateCommitted},
 		{StateVerifying, StateRollback},
 		{StateFailed, StateRollback},
-		{StateRollback, StateRestored},
+		{StateRollback, StateRolledBack},
 		{StateInterrupted, StateResuming},
 		{StateResuming, StateTransferring},
 		{StateResuming, StateApplying},
@@ -150,7 +150,7 @@ func TestIsInvalidTransition(t *testing.T) {
 		{StateCreated, StateApplying},      // skip phases
 		{StateCreated, StateCommitted},     // skip everything
 		{StateCommitted, StatePlanning},     // terminal
-		{StateRestored, StateApplying},     // terminal
+		{StateRolledBack, StateApplying},     // terminal
 		{StateRollback, StateApplying},     // can't go back to applying during rollback
 		{StateBackup, StateApplying},        // skip snapshot
 		{StatePlanning, StateApplying},       // skip backup

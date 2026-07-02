@@ -7,35 +7,72 @@ import (
 
 // MigrationState is a typed enum representing the lifecycle state of a migration.
 // It replaces string-based status constants with explicit, validated transitions.
+//
+// The full zero-downtime pipeline has 20 states:
+//
+//   Created → Planning → Discovery → CompatibilityCheck → RiskAssessment →
+//   Backup → ProvisionTarget → InstallDependencies → InitialSync →
+//   LiveReplication → Verification → PreCutover → TrafficSwitch →
+//   PostVerification → Observation → Committed
+//
+// Failure at any stage: → Failed → Rollback → RolledBack
+// Interruption: → Interrupted → Resuming → (resume from last checkpoint)
+// User cancel: → Cancelled
 type MigrationState int
 
 const (
-	// StateCreated is the initial state when a migration job is created but not yet started.
+	// StateCreated is the initial state when a migration is created but not yet started.
 	StateCreated MigrationState = iota
 	// StatePlanning: collecting data from the source server and building the plan.
 	StatePlanning
+	// StateDiscovery: running full discovery collectors on source and target.
+	StateDiscovery
+	// StateCompatibilityCheck: comparing source/target for compatibility blockers.
+	StateCompatibilityCheck
+	// StateRiskAssessment: evaluating risk score and downtime estimation.
+	StateRiskAssessment
 	// StateBackup: creating mandatory backups on the target server before any changes.
 	StateBackup
-	// StateSnapshot: recording pre-migration snapshot for verification.
+	// StateSnapshot: creating a snapshot of the source server state (legacy Engine).
 	StateSnapshot
-	// StateTransferring: transferring data from source to target.
+	// StateTransferring: transferring data from source to target (legacy Engine).
 	StateTransferring
-	// StateApplying: applying changes to the target server.
+	// StateApplying: applying collected data to the target server (legacy Engine).
 	StateApplying
-	// StateVerifying: verifying that applied changes are correct.
+	// StateVerifying: verifying applied changes on the target server (legacy Engine).
 	StateVerifying
-	// StateCommitted: all steps completed and verified — migration is done.
+	// StateProvisionTarget: installing Docker, compose, nginx, databases, etc. on target.
+	StateProvisionTarget
+	// StateInstallDependencies: installing packages and configuring target.
+	StateInstallDependencies
+	// StateInitialSync: initial rsync/data transfer from source to target.
+	StateInitialSync
+	// StateLiveReplication: setting up DB/Redis replication and monitoring lag.
+	StateLiveReplication
+	// StateVerification: verifying that all data and services are correctly replicated.
+	StateVerification
+	// StatePreCutover: final delta sync, queue drain, health verify before traffic switch.
+	StatePreCutover
+	// StateTrafficSwitch: switching DNS/proxy/CDN traffic from source to target.
+	StateTrafficSwitch
+	// StatePostVerification: verifying that traffic is flowing to the new target.
+	StatePostVerification
+	// StateObservation: monitoring the new target for errors after traffic switch.
+	StateObservation
+	// StateCommitted: all stages completed — migration is done and traffic is on target.
 	StateCommitted
-	// StateFailed: a step failed and the migration cannot proceed.
+	// StateFailed: a stage failed and the migration cannot proceed.
 	StateFailed
-	// StateRollback: rolling back already-applied steps in LIFO order.
+	// StateRollback: rolling back already-applied changes in LIFO order.
 	StateRollback
-	// StateRestored: rollback completed, target is restored to pre-migration state.
-	StateRestored
+	// StateRolledBack: rollback completed, target/source restored to pre-migration state.
+	StateRolledBack
 	// StateInterrupted: migration was interrupted (crash, disconnect) and can be resumed.
 	StateInterrupted
 	// StateResuming: an interrupted migration is being resumed.
 	StateResuming
+	// StateCancelled: migration was cancelled by the user.
+	StateCancelled
 )
 
 // String returns the human-readable name of the state.
@@ -45,6 +82,12 @@ func (s MigrationState) String() string {
 		return "created"
 	case StatePlanning:
 		return "planning"
+	case StateDiscovery:
+		return "discovery"
+	case StateCompatibilityCheck:
+		return "compatibility_check"
+	case StateRiskAssessment:
+		return "risk_assessment"
 	case StateBackup:
 		return "backup"
 	case StateSnapshot:
@@ -55,18 +98,38 @@ func (s MigrationState) String() string {
 		return "applying"
 	case StateVerifying:
 		return "verifying"
+	case StateProvisionTarget:
+		return "provision_target"
+	case StateInstallDependencies:
+		return "install_dependencies"
+	case StateInitialSync:
+		return "initial_sync"
+	case StateLiveReplication:
+		return "live_replication"
+	case StateVerification:
+		return "verification"
+	case StatePreCutover:
+		return "pre_cutover"
+	case StateTrafficSwitch:
+		return "traffic_switch"
+	case StatePostVerification:
+		return "post_verification"
+	case StateObservation:
+		return "observation"
 	case StateCommitted:
 		return "committed"
 	case StateFailed:
 		return "failed"
 	case StateRollback:
 		return "rollback"
-	case StateRestored:
-		return "restored"
+	case StateRolledBack:
+		return "rolled_back"
 	case StateInterrupted:
 		return "interrupted"
 	case StateResuming:
 		return "resuming"
+	case StateCancelled:
+		return "cancelled"
 	default:
 		return fmt.Sprintf("unknown(%d)", int(s))
 	}
@@ -74,15 +137,18 @@ func (s MigrationState) String() string {
 
 // IsTerminal returns true if the state is a terminal state (no further transitions).
 func (s MigrationState) IsTerminal() bool {
-	return s == StateCommitted || s == StateRestored
+	return s == StateCommitted || s == StateRolledBack || s == StateCancelled
 }
 
 // IsRunning returns true if the migration is actively processing (not terminal, not failed).
 func (s MigrationState) IsRunning() bool {
 	switch s {
-	case StateCreated, StatePlanning, StateBackup, StateSnapshot,
-		StateTransferring, StateApplying, StateVerifying,
-		StateRollback, StateResuming:
+	case StateCreated, StatePlanning, StateDiscovery, StateCompatibilityCheck,
+		StateRiskAssessment, StateBackup, StateSnapshot, StateTransferring,
+		StateApplying, StateVerifying, StateProvisionTarget, StateInstallDependencies,
+		StateInitialSync, StateLiveReplication, StateVerification,
+		StatePreCutover, StateTrafficSwitch, StatePostVerification,
+		StateObservation, StateRollback, StateResuming:
 		return true
 	default:
 		return false
@@ -94,23 +160,36 @@ func (s MigrationState) CanResume() bool {
 	return s == StateInterrupted
 }
 
-// stateString maps MigrationState to the existing string status constants
-// stored in the database. This maintains backward compatibility with the
-// existing migrations table and all code that reads/writes string statuses.
+// stateString maps MigrationState to the string status stored in the database.
+// New states that don't have a legacy equivalent use their own string name.
 var stateString = map[MigrationState]string{
-	StateCreated:     "planned",    // maps to existing StatusPlanned
-	StatePlanning:    "planning",   // new
-	StateBackup:      "backup",     // new
-	StateSnapshot:    "snapshot",   // new
-	StateTransferring: "transferring", // new
-	StateApplying:    "applying",   // new
-	StateVerifying:   "verifying",  // new
-	StateCommitted:   "completed",  // maps to existing StatusCompleted
-	StateFailed:      "failed",     // maps to existing StatusFailed
-	StateRollback:    "rolling_back", // maps to existing StatusRollingBack
-	StateRestored:    "rolled_back",  // maps to existing StatusRolledBack
-	StateInterrupted: "interrupted",   // maps to existing StatusInterrupted
-	StateResuming:    "resuming",      // maps to existing StatusResuming
+	StateCreated:            "planned",              // maps to existing StatusPlanned
+	StatePlanning:           "planning",             // new
+	StateDiscovery:          "discovery",            // new
+	StateCompatibilityCheck: "compatibility_check",  // new
+	StateRiskAssessment:     "risk_assessment",      // new
+	StateBackup:             "backup",               // new
+	StateSnapshot:           "snapshot",             // legacy Engine
+	StateTransferring:       "transferring",         // legacy Engine
+	StateApplying:           "applying",             // legacy Engine
+	StateVerifying:          "verifying",            // legacy Engine
+	StateProvisionTarget:   "provision_target",     // new
+	StateInstallDependencies: "install_dependencies", // new
+	StateInitialSync:        "initial_sync",         // new
+	StateLiveReplication:    "live_replication",     // new
+	StateVerification:       "verification",         // new
+	StatePreCutover:         "pre_cutover",          // new
+	StateTrafficSwitch:      "traffic_switch",       // new
+	StatePostVerification:   "post_verification",    // new
+	StateObservation:        "observation",           // new
+	StateCommitted:          "completed",            // maps to existing StatusCompleted
+	StateFailed:             "failed",               // maps to existing StatusFailed
+	StateRollback:           "rolling_back",         // maps to existing StatusRollingBack
+	StateRolledBack:         "rolled_back",          // maps to existing StatusRolledBack
+	// StateRestored is an alias — same iota value, already covered by StateRolledBack
+	StateInterrupted:        "interrupted",          // maps to existing StatusInterrupted
+	StateResuming:           "resuming",             // maps to existing StatusResuming
+	StateCancelled:          "cancelled",            // new
 }
 
 // stringState is the reverse mapping, populated in init().
@@ -144,20 +223,45 @@ func (s MigrationState) StateString() string {
 // transitionTable defines the valid state transitions.
 // A transition from → to is valid only if to is in the set of allowed
 // successors for from.
+//
+// The pipeline flows linearly through the 14 stages. Each stage can
+// transition to Failed or Interrupted. Failed can transition to Rollback.
+// Rollback transitions to RolledBack. Interrupted can transition to Resuming.
+// Resuming can transition to any stage that was in progress when interrupted.
 var transitionTable = map[MigrationState][]MigrationState{
-	StateCreated:      {StatePlanning},
-	StatePlanning:     {StateBackup, StateFailed, StateInterrupted},
-	StateBackup:       {StateSnapshot, StateFailed, StateInterrupted},
-	StateSnapshot:     {StateTransferring, StateFailed, StateInterrupted},
-	StateTransferring: {StateApplying, StateCommitted, StateFailed, StateInterrupted},
-	StateApplying:     {StateVerifying, StateCommitted, StateFailed, StateInterrupted, StateRollback},
-	StateVerifying:    {StateCommitted, StateApplying, StateFailed, StateInterrupted, StateRollback},
-	StateCommitted:    {}, // terminal
-	StateFailed:       {StateRollback, StateInterrupted},
-	StateRollback:     {StateRestored, StateFailed},
-	StateRestored:     {}, // terminal
-	StateInterrupted:  {StateResuming, StateFailed},
-	StateResuming:     {StateBackup, StateTransferring, StateApplying, StateVerifying, StateFailed, StateInterrupted},
+	StateCreated:             {StatePlanning},
+	StatePlanning:            {StateDiscovery, StateBackup, StateFailed, StateInterrupted},
+	StateDiscovery:           {StateCompatibilityCheck, StateFailed, StateInterrupted},
+	StateCompatibilityCheck:  {StateRiskAssessment, StateFailed, StateInterrupted},
+	StateRiskAssessment:      {StateBackup, StateFailed, StateInterrupted},
+	StateBackup:              {StateProvisionTarget, StateSnapshot, StateFailed, StateInterrupted},
+	StateSnapshot:            {StateTransferring, StateFailed, StateInterrupted},
+	StateTransferring:        {StateApplying, StateCommitted, StateFailed, StateInterrupted},
+	StateApplying:            {StateVerifying, StateCommitted, StateFailed, StateInterrupted, StateRollback},
+	StateVerifying:           {StatePreCutover, StateCommitted, StateApplying, StateFailed, StateInterrupted, StateRollback},
+	StateProvisionTarget:     {StateInstallDependencies, StateFailed, StateInterrupted},
+	StateInstallDependencies: {StateInitialSync, StateFailed, StateInterrupted},
+	StateInitialSync:         {StateLiveReplication, StateFailed, StateInterrupted},
+	StateLiveReplication:     {StateVerification, StateFailed, StateInterrupted},
+	StateVerification:        {StatePreCutover, StateFailed, StateInterrupted},
+	StatePreCutover:          {StateTrafficSwitch, StateFailed, StateInterrupted},
+	StateTrafficSwitch:       {StatePostVerification, StateFailed, StateInterrupted, StateRollback},
+	StatePostVerification:    {StateObservation, StateFailed, StateInterrupted, StateRollback},
+	StateObservation:         {StateCommitted, StateFailed, StateInterrupted, StateRollback},
+	StateCommitted:           {}, // terminal
+	StateFailed:              {StateRollback, StateInterrupted},
+	StateRollback:            {StateRolledBack, StateFailed},
+	StateRolledBack:          {}, // terminal
+	StateInterrupted:         {StateResuming, StateFailed, StateCancelled},
+	StateResuming: {
+		StatePlanning, StateDiscovery, StateCompatibilityCheck, StateRiskAssessment,
+		StateBackup, StateSnapshot, StateTransferring, StateApplying, StateVerifying,
+		StateProvisionTarget, StateInstallDependencies,
+		StateInitialSync, StateLiveReplication, StateVerification,
+		StatePreCutover, StateTrafficSwitch, StatePostVerification,
+		StateObservation, StateFailed, StateInterrupted,
+	},
+	StateCancelled: {}, // terminal
 }
 
 // IsValidTransition returns true if transitioning from → to is allowed.

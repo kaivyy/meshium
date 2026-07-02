@@ -313,8 +313,8 @@ func TestEngineApplyFailureTriggersRollback(t *testing.T) {
 		t.Fatal("expected error from engine.Run, got nil")
 	}
 
-	if result.FinalState != StateRestored {
-		t.Errorf("expected final state %s, got %s", StateRestored, result.FinalState)
+	if result.FinalState != StateRolledBack {
+		t.Errorf("expected final state %s, got %s", StateRolledBack, result.FinalState)
 	}
 
 	// step1 should have been applied and then rolled back
@@ -355,8 +355,8 @@ func TestEnginePrepareFailureTriggersRollback(t *testing.T) {
 		t.Fatal("expected error from engine.Run, got nil")
 	}
 
-	if result.FinalState != StateRestored {
-		t.Errorf("expected final state %s, got %s", StateRestored, result.FinalState)
+	if result.FinalState != StateRolledBack {
+		t.Errorf("expected final state %s, got %s", StateRolledBack, result.FinalState)
 	}
 
 	// step1 should have been rolled back
@@ -389,8 +389,8 @@ func TestEngineVerifyFailureTriggersRollback(t *testing.T) {
 		t.Fatal("expected error from engine.Run, got nil")
 	}
 
-	if result.FinalState != StateRestored {
-		t.Errorf("expected final state %s, got %s", StateRestored, result.FinalState)
+	if result.FinalState != StateRolledBack {
+		t.Errorf("expected final state %s, got %s", StateRolledBack, result.FinalState)
 	}
 
 	// Both steps should have been rolled back (step2 failed verify, step1 was applied)
@@ -622,8 +622,8 @@ func TestEngineRecoveryCancelMigration(t *testing.T) {
 		t.Fatalf("CancelMigration failed: %v", err)
 	}
 
-	if result.FinalState != StateRestored {
-		t.Errorf("expected final state %s, got %s", StateRestored, result.FinalState)
+	if result.FinalState != StateRolledBack {
+		t.Errorf("expected final state %s, got %s", StateRolledBack, result.FinalState)
 	}
 
 	// Verify the migration state in DB
@@ -631,8 +631,8 @@ func TestEngineRecoveryCancelMigration(t *testing.T) {
 	if err != nil {
 		t.Fatalf("failed to get migration state: %v", err)
 	}
-	if dbState != StateRestored {
-		t.Errorf("expected DB state %s, got %s", StateRestored, dbState)
+	if dbState != StateRolledBack {
+		t.Errorf("expected DB state %s, got %s", StateRolledBack, dbState)
 	}
 }
 

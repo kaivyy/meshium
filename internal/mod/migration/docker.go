@@ -206,6 +206,10 @@ func (a *DockerApplier) Backup(ctx context.Context, ssh SSHExecuter) (BackupData
 // Apply pulls images, recreates compose files, and recreates containers on the target.
 func (a *DockerApplier) Apply(ctx context.Context, ssh SSHExecuter, data CategoryData, onProgress StepCallback) error {
 	var dd DockerData
+	if len(data.Data) == 0 {
+		// Docker not present on source — nothing to apply
+		return nil
+	}
 	if err := json.Unmarshal(data.Data, &dd); err != nil {
 		return err
 	}
