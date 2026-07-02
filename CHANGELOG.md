@@ -7,9 +7,91 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
-## [1.4.0] — 2026-06-30
+## [1.4.0] — 2026-07-01
 
-The File Explorer update. Browse, read, edit, upload, download, and manage files on remote servers directly from the web UI — no SSH terminal required. Also includes P0-P2 migration flow security fixes and bug fixes.
+The major management update. Adds real interactive PTY terminal, 10 new server management modules (Docker, Services, Processes, Logs, Cron, Firewall, Monitoring, System Updates, Drift Detection, AI Assistant), file explorer with in-browser editor, security hardening (Phase 0), and comprehensive bug fixes.
+
+### Interactive PTY Terminal
+
+#### Added
+- **Real PTY terminal** (`web/src/routes/terminal/+page.svelte`) — Full interactive SSH terminal using xterm.js
+  - WebSocket-backed PTY session via `/ws/terminal/{serverId}` endpoint
+  - `@xterm/xterm`, `@xterm/addon-fit`, `@xterm/addon-web-links` integrated
+  - Lazy browser-only import of xterm modules (SSR-safe with `browser` guard)
+  - FitAddon auto-resizes terminal to container dimensions
+  - WebLinksAddon makes URLs clickable
+  - Server selector dropdown — connect to any registered server
+  - Connection status badge (Connecting / Connected / Disconnected)
+  - Reconnect button and terminal clear action
+  - PTY resize messages sent to backend on window resize
+
+### Server Management Features
+
+#### Added — Docker Manager (`/docker`)
+- **Container operations** — Start, stop, restart, remove containers with confirmation dialogs
+- **Image management** — List images, pull new images, remove unused images
+- **Log streaming** — Live container logs via WebSocket with tail lines control
+- **Compose projects** — List and manage Docker Compose stacks
+
+#### Added — Service Manager (`/services`)
+- **Systemd service control** — Start, stop, restart, enable, disable services
+- **Service list** — Filter by active/inactive/failed state with search
+- **Status badges** — Color-coded active/inactive/failed/unknown states
+
+#### Added — Process Manager (`/processes`)
+- **Live process table** — List running processes sorted by CPU or memory
+- **Kill/signal** — Send SIGTERM, SIGKILL, or custom signals to PIDs with PID validation
+- **Auto-refresh** — Configurable polling interval for real-time updates
+
+#### Added — Log Viewer (`/logs`)
+- **File log streaming** — Read and tail arbitrary log files via WebSocket
+- **Journalctl integration** — Stream system journal and per-service logs
+- **Search** — Filter log output by keyword
+- **Log file browser** — Common log paths pre-populated (`/var/log/syslog`, nginx, etc.)
+
+#### Added — Cron Manager (`/cron`)
+- **Cron job list** — Read per-user and system crontabs
+- **Add/edit/delete jobs** — CRUD for cron entries with schedule preset picker
+- **Validation** — Schedule expression validation before save
+
+#### Added — Firewall Manager (`/firewall`)
+- **Rule list** — View active ufw/iptables rules
+- **Add/delete rules** — Port, protocol, source IP configuration
+- **Enable/disable** — Toggle firewall on/off with status indicator
+
+#### Added — Monitoring Dashboard (`/monitoring`)
+- **Real-time metrics** — CPU, memory, disk, network I/O, load average streamed via WebSocket
+- **Top processes** — Live top-N processes by CPU/memory from snapshot
+- **History charts** — Time-series sparklines for CPU and memory trends
+
+#### Added — System Update Manager (`/updates`)
+- **Update checker** — Detect available updates for apt/yum/dnf/pacman
+- **Install updates** — Apply all or selected package updates with live output
+- **Package management** — Install/remove arbitrary packages with real-time streaming
+
+#### Added — Drift Detection (`/drift`)
+- **Snapshot comparison** — Compare two server snapshots to detect configuration drift
+- **Server-to-server diff** — Side-by-side diff of services, packages, Docker containers, nginx config
+- **Change summary** — Categorized added/removed/modified items per category
+
+#### Added — AI Assistant (`/assistant`)
+- **Rule-based chat** — Context-aware chat interface with server selector
+- **Command help** — Explains CLI commands and suggests alternatives
+- **Log analysis** — Paste log output for error identification and fix suggestions
+- **Proactive suggestions** — Recommends actions based on snapshot data (high CPU, expiring certs, etc.)
+
+#### Added — Backend (10 new modules)
+- `internal/mod/docker/service.go` — Docker API over SSH (containers, images, volumes, compose)
+- `internal/mod/service/service.go` — systemd unit management via `systemctl`
+- `internal/mod/process/service.go` — Process listing and signal via `/proc` and `kill`
+- `internal/mod/logview/service.go` — File tailing and journalctl streaming
+- `internal/mod/cron/service.go` — Crontab read/write with validation
+- `internal/mod/firewall/service.go` — ufw/iptables rule management
+- `internal/mod/monitoring/service.go` — `/proc`-based metrics collection with WebSocket broadcast
+- `internal/mod/sysupdate/service.go` — Package manager abstraction (apt/yum/dnf/pacman)
+- `internal/mod/drift/service.go` — Snapshot diff engine
+- `internal/mod/ai/service.go` — Rule-based assistant with server context integration
+- All handlers use `shared.ShellQuote()` for shell injection safety
 
 ### File Explorer
 
@@ -89,9 +171,32 @@ The File Explorer update. Browse, read, edit, upload, download, and manage files
 - **P2-1: ConfigsCollector singleton mutation** — Planner now creates a new ConfigsCollector instance per plan instead of mutating the shared singleton's Paths field, preventing race conditions
 - **P2-2: Fatal collection failures** — Failed collection in planner now prevents migration execution (previously created a step with empty data that was silently skipped by executor)
 
+### Security Hardening
+
+#### Phase 0 Refactor
+- **Shell injection prevention** — All new handlers (`cron`, `docker`, `drift`, `firewall`, `process`, `service`, `sysupdate`) use `shared.ShellQuote()` for all user-supplied arguments passed to shell commands
+- **CSRF protection hardening** — Strengthened CSRF token validation; updated CSRF middleware and added `csrf_test.go` with 68 test cases covering token generation, validation, and edge cases
+- **Graceful shutdown** — `cmd/server/main.go` now registers OS signal handler (`SIGINT`, `SIGTERM`) and calls `ShutdownManager.Shutdown()` with 30s timeout before process exit
+- **SSH pool invalidation** — `internal/mod/server/service.go` invalidates SSH pool entries on server credential update or delete, preventing stale connections
+- **WebSocket token validation** — New WebSocket endpoints validate session token from query parameter before upgrading connection (`internal/shared/websocket.go`)
+- **Database indexes** — Added indexes: `migrations(status, created_at)`, `migrations(source_id)`, `migrations(target_id)`, `migration_steps(migration_id, status)`, `servers(favorite, name)` for query performance
+
 ### Bug Fixes
-- **ls parser field count** — Parser for `ls -la --time-style=+%s` output required 9 fields (standard ls format) but the `--time-style=+%s` flag produces only 7 fields (timestamp is single epoch field). This caused all regular directories to be skipped — only symlinks (with extra fields from ` -> target`) passed the check. Fixed minimum field count from 9 to 7.
-- **Modal open prop** — All 6 Modal components in the file browser page were missing the `open` prop (defaults to `false`), preventing any modal from rendering. Added `open={true}` to all modals (preview, upload, mkdir, rename, delete, edit).
+
+#### Audit Fixes
+- **Server ID validation** — Added `serverID <= 0` guard to all new handlers (cron, docker, drift, firewall, process, service, sysupdate) returning 400 on invalid ID
+- **PID validation** — Process handler now validates `pid <= 0` before sending signals, returning 400 instead of sending signal to PID 0
+- **Process error classification** — SSH/backend errors in process handler now return 500 instead of 400/404
+- **WriteFile mode validation** — `WriteFile` now validates file mode before writing to prevent partial writes on invalid mode
+- **File handler maxSize parsing** — Returns 400 on malformed `maxSize` query parameter instead of silently ignoring
+- **Monitoring history endpoint** — Returns proper error instead of empty success response for unimplemented history feature
+- **Logs page reactivity** — `viewerEl` declared with `$state()` for proper Svelte 5 reactivity
+- **Services page Card class** — Wrapped `Card` with `<div>` instead of passing unsupported `class` prop
+- **Updates page Spinner** — Added required `label` prop to all 7 Spinner instances
+
+#### Previous Bug Fixes
+- **ls parser field count** — Parser for `ls -la --time-style=+%s` output required 9 fields but `--time-style=+%s` produces only 7. Caused all regular directories to be skipped — only symlinks passed the check. Fixed minimum field count from 9 to 7.
+- **Modal open prop** — All 6 Modal components in the file browser were missing `open` prop (defaults to `false`), preventing any modal from rendering. Added `open={true}` to all modals.
 
 ---
 
@@ -614,7 +719,7 @@ The first complete release of Meshium — a self-hosted server migration engine 
 
 | Version | Date | Highlights |
 |---------|------|------------|
-| 1.4.0 | 2026-06-30 | File explorer (browse, read, edit, upload, download, delete, rename, mkdir), in-browser file editor with line numbers & Ctrl+S, P0-P2 migration flow security fixes, bug fixes |
+| 1.4.0 | 2026-07-01 | Interactive PTY terminal (xterm.js), 10 new management modules (Docker, Services, Processes, Logs, Cron, Firewall, Monitoring, Updates, Drift, AI Assistant), file explorer + in-browser editor, security hardening (Phase 0), DB indexes, audit bug fixes |
 | 1.3.0 | 2026-06-29 | Security hardening, discovery engine, migration planner, job engine, transfer engine, state machine, crash recovery, Docker deployment, structured logging, frontend UX fixes |
 | 1.2.0 | 2026-06-28 | Mobile bottom navbar, SSH host key auto-accept, API null→[] fix |
 | 1.1.0 | 2026-06-28 | Docker migration, dry run, diff view, bastion/jump host, pre-flight validation, config exclusion, CI/CD, SSH pool concurrency |

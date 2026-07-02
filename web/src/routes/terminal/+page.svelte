@@ -1,5 +1,6 @@
 <script lang="ts">
-  import { onMount, onDestroy } from 'svelte';
+  import { onMount, onDestroy, tick } from 'svelte';
+  import { browser } from '$app/environment';
   import {
     Terminal as TerminalIcon, Server as ServerIcon, RefreshCw,
     Wifi, WifiOff, ChevronRight, Loader2, Maximize2, Copy, Trash2,
@@ -9,6 +10,14 @@
   import { type Server } from '$lib/stores/servers';
   import { Badge, Card, EmptyState, PageHeader, Skeleton, Spinner } from '$lib/components/ui';
   import { toast } from '$lib/stores/toast';
+
+  // xterm CSS — must be imported for the terminal to render
+  import '@xterm/xterm/css/xterm.css';
+
+  // Lazy-load xterm JS only in browser (it needs DOM)
+  let TerminalCtor: any = null;
+  let FitAddonCtor: any = null;
+  let WebLinksAddonCtor: any = null;
 
   // --- Types ---
   type WSMessage =
@@ -35,6 +44,21 @@
 
   // --- Lifecycle ---
   onMount(async () => {
+    // Pre-load xterm modules in the browser
+    if (browser) {
+      try {
+        const [xtermMod, fitMod, linksMod] = await Promise.all([
+          import('@xterm/xterm'),
+          import('@xterm/addon-fit'),
+          import('@xterm/addon-web-links')
+        ]);
+        TerminalCtor = xtermMod.Terminal;
+        FitAddonCtor = fitMod.FitAddon;
+        WebLinksAddonCtor = linksMod.WebLinksAddon;
+      } catch (err) {
+        console.error('Failed to load xterm modules:', err);
+      }
+    }
     await loadServers();
   });
 
@@ -57,18 +81,15 @@
   // --- Terminal connection ---
   async function connectTerminal() {
     if (!selectedServerId) return;
+    if (!TerminalCtor || !FitAddonCtor || !WebLinksAddonCtor) {
+      toast.error('Terminal modules not loaded yet. Please try again.');
+      return;
+    }
     closeConnection();
     connectionStatus = 'connecting';
 
-    // Dynamically import xterm modules
-    const [{ Terminal }, { FitAddon }, { WebLinksAddon }] = await Promise.all([
-      import('@xterm/xterm'),
-      import('@xterm/addon-fit'),
-      import('@xterm/addon-web-links')
-    ]);
-
     // Create xterm instance
-    term = new Terminal({
+    term = new TerminalCtor({
       cols: 80,
       rows: 24,
       cursorBlink: true,
@@ -102,9 +123,9 @@
       convertEol: false
     });
 
-    fitAddon = new FitAddon();
+    fitAddon = new FitAddonCtor();
     term.loadAddon(fitAddon);
-    term.loadAddon(new WebLinksAddon());
+    term.loadAddon(new WebLinksAddonCtor());
 
     // Wait for the container to be in the DOM
     await tick();
@@ -156,8 +177,6 @@
       toast.error('Failed to open WebSocket connection');
       return;
     }
-
-    wsConnection.binaryType = 'arraybuffer';
 
     wsConnection.onopen = () => {
       // Connection established, waiting for "connected" message from server
@@ -239,7 +258,6 @@
 
   function copyAll() {
     if (term) {
-      // Get the terminal content via the buffer
       const buffer = term.buffer.active;
       const lines: string[] = [];
       for (let i = 0; i < buffer.length; i++) {
@@ -279,9 +297,6 @@
       case 'failed': return { label: 'Failed', variant: 'error' as const };
     }
   }
-
-  // Import tick from svelte
-  import { tick } from 'svelte';
 </script>
 
 <svelte:head><title>Terminal - Meshium</title></svelte:head>
@@ -507,19 +522,3 @@
 </div>
 
 {#snippet emptyIcon()}<TerminalIcon size={22} />{/snippet}
-
-<style>
-  :global(.xterm) {
-    height: 100%;
-    padding: 4px;
-  }
-  :global(.xterm-viewport) {
-    background-color: #0f172a !important;
-  }
-  :global(.xterm-screen) {
-    background-color: #0f172a;
-  }
-  :global(.xterm .xterm-rows) {
-    font-feature-settings: "liga" 0;
-  }
-</style>

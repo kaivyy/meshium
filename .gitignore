@@ -1,6 +1,7 @@
 # Binaries
 bin/
 server
+meshium-server
 *.test
 
 # Database
