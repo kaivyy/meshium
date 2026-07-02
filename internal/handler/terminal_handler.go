@@ -2,26 +2,29 @@ package handler
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
+	"io"
 	"log"
 	"net/http"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/gorilla/websocket"
 
 	"meshium/internal/mod/auth"
+	modssh "meshium/internal/mod/ssh"
 	servicesvc "meshium/internal/mod/service"
 	"meshium/internal/mod/server"
 	"meshium/internal/mod/transport"
 	"meshium/internal/shared"
 )
 
-const terminalCommandTimeout = 30 * time.Second
 const terminalInfoTimeout = 5 * time.Second
 
-// TerminalHandler exposes a WebSocket terminal for executing commands on a remote server.
+// TerminalHandler exposes a WebSocket terminal for interactive SSH sessions.
 type TerminalHandler struct {
 	handlerFactory *HandlerFactoryImpl
 	authSvc        *auth.Service
@@ -29,11 +32,15 @@ type TerminalHandler struct {
 	upgrader       websocket.Upgrader
 }
 
+// Client → Server messages
 type terminalClientMessage struct {
-	Type    string `json:"type"`
-	Command string `json:"command,omitempty"`
+	Type string `json:"type"`
+	Data string `json:"data,omitempty"`
+	Cols int    `json:"cols,omitempty"`
+	Rows int    `json:"rows,omitempty"`
 }
 
+// Server → Client messages
 type terminalConnectedMessage struct {
 	Type     string `json:"type"`
 	Hostname string `json:"hostname"`
@@ -41,10 +48,8 @@ type terminalConnectedMessage struct {
 }
 
 type terminalOutputMessage struct {
-	Type     string `json:"type"`
-	Stdout   string `json:"stdout"`
-	Stderr   string `json:"stderr"`
-	ExitCode int    `json:"exitCode"`
+	Type string `json:"type"`
+	Data string `json:"data"`
 }
 
 type terminalErrorMessage struct {
@@ -52,9 +57,9 @@ type terminalErrorMessage struct {
 	Message string `json:"message"`
 }
 
-type terminalEvent struct {
-	message *terminalClientMessage
-	err     error
+type terminalClosedMessage struct {
+	Type string `json:"type"`
+	Data string `json:"data"`
 }
 
 // NewTerminalHandler creates a TerminalHandler.
@@ -123,6 +128,20 @@ func (h *TerminalHandler) handleTerminalWS(w http.ResponseWriter, r *http.Reques
 		return
 	}
 
+	// Parse initial terminal size from query params
+	cols := 80
+	rows := 24
+	if c := r.URL.Query().Get("cols"); c != "" {
+		if parsed, err := strconv.Atoi(c); err == nil && parsed > 0 {
+			cols = parsed
+		}
+	}
+	if r := r.URL.Query().Get("rows"); r != "" {
+		if parsed, err := strconv.Atoi(r); err == nil && parsed > 0 {
+			rows = parsed
+		}
+	}
+
 	conn, err := h.upgrader.Upgrade(w, r, nil)
 	if err != nil {
 		log.Printf("websocket upgrade failed: %v", err)
@@ -130,6 +149,7 @@ func (h *TerminalHandler) handleTerminalWS(w http.ResponseWriter, r *http.Reques
 	}
 	defer conn.Close()
 
+	// Get SSH client from pool
 	sshClient, err := h.handlerFactory.getSSHExecuter(serverID)
 	if err != nil {
 		_ = conn.WriteJSON(terminalErrorMessage{
@@ -139,13 +159,29 @@ func (h *TerminalHandler) handleTerminalWS(w http.ResponseWriter, r *http.Reques
 		return
 	}
 
-	ctx, cancel := context.WithCancel(r.Context())
-	defer cancel()
+	// Type-assert to *modssh.Client to access PTY methods
+	sshConn, ok := sshClient.(*modssh.Client)
+	if !ok {
+		_ = conn.WriteJSON(terminalErrorMessage{
+			Type:    "error",
+			Message: "SSH client does not support interactive terminal sessions",
+		})
+		return
+	}
 
-	events := make(chan terminalEvent, 32)
-	go h.readTerminalMessages(ctx, cancel, conn, events)
+	// Open a PTY shell session
+	shell, err := sshConn.NewShellSession(cols, rows)
+	if err != nil {
+		_ = conn.WriteJSON(terminalErrorMessage{
+			Type:    "error",
+			Message: "Failed to open terminal: " + err.Error(),
+		})
+		return
+	}
+	defer shell.Close()
 
-	hostname, osName := h.loadConnectedInfo(ctx, serverID, sshClient)
+	// Send connected message with hostname info
+	hostname, osName := h.loadConnectedInfo(r.Context(), serverID, sshClient)
 	if err := conn.WriteJSON(terminalConnectedMessage{
 		Type:     "connected",
 		Hostname: hostname,
@@ -155,102 +191,114 @@ func (h *TerminalHandler) handleTerminalWS(w http.ResponseWriter, r *http.Reques
 		return
 	}
 
-	for {
-		select {
-		case <-ctx.Done():
-			return
-		case evt, ok := <-events:
-			if !ok {
+	ctx, cancel := context.WithCancel(r.Context())
+	defer cancel()
+
+	var wg sync.WaitGroup
+	var writeMu sync.Mutex // protects conn.WriteJSON
+
+	// safeWriteJSON writes a JSON message to the WebSocket in a thread-safe manner.
+	safeWriteJSON := func(msg interface{}) error {
+		writeMu.Lock()
+		defer writeMu.Unlock()
+		return conn.WriteJSON(msg)
+	}
+
+	// Goroutine 1: Read stdout from SSH shell → send to WebSocket
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		buf := make([]byte, 8192)
+		for {
+			n, err := shell.Stdout().Read(buf)
+			if n > 0 {
+				if writeErr := safeWriteJSON(terminalOutputMessage{
+					Type: "output",
+					Data: string(buf[:n]),
+				}); writeErr != nil {
+					cancel()
+					return
+				}
+			}
+			if err != nil {
+				if err != io.EOF {
+					log.Printf("terminal stdout read error: %v", err)
+				}
+				_ = safeWriteJSON(terminalClosedMessage{Type: "closed", Data: "Terminal session ended."})
+				cancel()
 				return
 			}
+		}
+	}()
 
-			if evt.err != nil {
-				if websocket.IsCloseError(evt.err, websocket.CloseNormalClosure, websocket.CloseGoingAway, websocket.CloseNoStatusReceived) {
-					return
-				}
-
-				if err := conn.WriteJSON(terminalErrorMessage{
+	// Goroutine 2: Read stderr from SSH shell → send to WebSocket
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		buf := make([]byte, 8192)
+		for {
+			n, err := shell.Stderr().Read(buf)
+			if n > 0 {
+				if writeErr := safeWriteJSON(terminalErrorMessage{
 					Type:    "error",
-					Message: evt.err.Error(),
-				}); err != nil {
-					log.Printf("terminal websocket write failed: %v", err)
-					return
-				}
-				continue
-			}
-
-			if evt.message == nil {
-				continue
-			}
-
-			if err := h.handleTerminalMessage(ctx, conn, sshClient, evt.message); err != nil {
-				if writeErr := conn.WriteJSON(terminalErrorMessage{
-					Type:    "error",
-					Message: err.Error(),
+					Message: string(buf[:n]),
 				}); writeErr != nil {
-					log.Printf("terminal websocket write failed: %v", writeErr)
+					cancel()
 					return
 				}
+			}
+			if err != nil {
+				if err != io.EOF {
+					log.Printf("terminal stderr read error: %v", err)
+				}
+				return
 			}
 		}
-	}
-}
+	}()
 
-func (h *TerminalHandler) readTerminalMessages(ctx context.Context, cancel context.CancelFunc, conn *websocket.Conn, events chan<- terminalEvent) {
-	defer close(events)
-
-	for {
-		var msg terminalClientMessage
-		if err := conn.ReadJSON(&msg); err != nil {
-			var closeErr *websocket.CloseError
-			if errors.As(err, &closeErr) {
+	// Goroutine 3: Read messages from WebSocket → write to SSH shell stdin
+	// This runs in the main goroutine context (blocking read loop)
+	go func() {
+		for {
+			var msg terminalClientMessage
+			if err := conn.ReadJSON(&msg); err != nil {
+				var closeErr *websocket.CloseError
+				if errors.As(err, &closeErr) {
+					cancel()
+					return
+				}
+				if websocket.IsCloseError(err, websocket.CloseNormalClosure, websocket.CloseGoingAway, websocket.CloseNoStatusReceived) {
+					cancel()
+					return
+				}
+				log.Printf("terminal websocket read error: %v", err)
 				cancel()
 				return
 			}
 
-			select {
-			case events <- terminalEvent{err: err}:
-			case <-ctx.Done():
-				return
+			switch msg.Type {
+			case "input":
+				if msg.Data != "" {
+					if _, err := shell.Write([]byte(msg.Data)); err != nil {
+						log.Printf("terminal write to shell failed: %v", err)
+						cancel()
+						return
+					}
+				}
+			case "resize":
+				if msg.Cols > 0 && msg.Rows > 0 {
+					if err := shell.Resize(msg.Cols, msg.Rows); err != nil {
+						log.Printf("terminal resize failed: %v", err)
+					}
+				}
 			}
-			continue
 		}
+	}()
 
-		select {
-		case events <- terminalEvent{message: &msg}:
-		case <-ctx.Done():
-			return
-		}
-	}
-}
-
-func (h *TerminalHandler) handleTerminalMessage(ctx context.Context, conn *websocket.Conn, sshClient transport.SSHExecuter, msg *terminalClientMessage) error {
-	if msg.Type != "command" {
-		return errors.New("unsupported message type")
-	}
-
-	command := strings.TrimSpace(msg.Command)
-	if command == "" {
-		return errors.New("command is required")
-	}
-
-	cmdCtx, cancel := context.WithTimeout(ctx, terminalCommandTimeout)
-	defer cancel()
-
-	stdout, stderr, exitCode, err := sshClient.ExecContext(cmdCtx, command)
-	if err != nil {
-		if errors.Is(err, context.DeadlineExceeded) || errors.Is(err, context.Canceled) {
-			return errors.New("command timed out")
-		}
-		return err
-	}
-
-	return conn.WriteJSON(terminalOutputMessage{
-		Type:     "output",
-		Stdout:   stdout,
-		Stderr:   stderr,
-		ExitCode: exitCode,
-	})
+	// Wait for context to be cancelled (client disconnect or shell exit)
+	<-ctx.Done()
+	shell.Close()
+	wg.Wait()
 }
 
 func (h *TerminalHandler) loadConnectedInfo(ctx context.Context, serverID int, sshClient transport.SSHExecuter) (string, string) {
@@ -284,3 +332,6 @@ func (h *TerminalHandler) loadConnectedInfo(ctx context.Context, serverID int, s
 
 	return hostname, osName
 }
+
+// Ensure json import is used (for potential future use)
+var _ = json.Marshal

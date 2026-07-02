@@ -2,8 +2,8 @@
   import { onMount, onDestroy } from 'svelte';
   import {
     Terminal as TerminalIcon, Server as ServerIcon, RefreshCw,
-    Wifi, WifiOff, ChevronRight, CircleDot, CheckCircle2, XCircle,
-    Loader2, ArrowRight, Trash2, ArrowUp, ArrowDown, Copy
+    Wifi, WifiOff, ChevronRight, Loader2, Maximize2, Copy, Trash2,
+    ExternalLink
   } from 'lucide-svelte';
   import { api } from '$lib/api/client';
   import { type Server } from '$lib/stores/servers';
@@ -11,12 +11,11 @@
   import { toast } from '$lib/stores/toast';
 
   // --- Types ---
-  interface TerminalLine {
-    id: number;
-    type: 'input' | 'output' | 'stderr' | 'error' | 'info' | 'system';
-    content: string;
-    timestamp: Date;
-  }
+  type WSMessage =
+    | { type: 'connected'; hostname: string; os: string }
+    | { type: 'output'; data: string }
+    | { type: 'error'; message: string }
+    | { type: 'closed'; data: string };
 
   // --- State ---
   let servers = $state([] as Server[]);
@@ -26,28 +25,11 @@
   let connectionStatus = $state<'idle' | 'connecting' | 'connected' | 'failed'>('idle');
   let hostname = $state('');
 
-  // Terminal state
-  let lines = $state<TerminalLine[]>([]);
-  let input = $state('');
-  let commandHistory = $state<string[]>([]);
-  let historyIndex = $state(-1);
-  let lineIdCounter = 0;
-  let terminalContainer = $state<HTMLElement | null>(null);
-  let inputElement = $state<HTMLInputElement | null>(null);
-
-  // Quick commands
-  const quickCommands = [
-    { label: 'System Info', cmd: 'uname -a' },
-    { label: 'Disk Usage', cmd: 'df -h' },
-    { label: 'Memory', cmd: 'free -h' },
-    { label: 'CPU Info', cmd: 'lscpu | head -20' },
-    { label: 'Top Processes', cmd: 'ps aux --sort=-%cpu | head -10' },
-    { label: 'Network', cmd: 'ss -tlnp' },
-    { label: 'Docker', cmd: 'docker ps -a' },
-    { label: 'Uptime', cmd: 'uptime' },
-    { label: 'Whoami', cmd: 'whoami && id' },
-    { label: 'OS Release', cmd: 'cat /etc/os-release' },
-  ];
+  // Terminal emulator
+  let terminalContainer = $state<HTMLDivElement | null>(null);
+  let term: any = null;
+  let fitAddon: any = null;
+  let resizeObserver: ResizeObserver | null = null;
 
   const selectedServer = $derived.by(() => servers.find(s => s.id === selectedServerId) || null);
 
@@ -73,16 +55,99 @@
   }
 
   // --- Terminal connection ---
-  function connectTerminal() {
+  async function connectTerminal() {
     if (!selectedServerId) return;
     closeConnection();
-    lines = [];
     connectionStatus = 'connecting';
 
+    // Dynamically import xterm modules
+    const [{ Terminal }, { FitAddon }, { WebLinksAddon }] = await Promise.all([
+      import('@xterm/xterm'),
+      import('@xterm/addon-fit'),
+      import('@xterm/addon-web-links')
+    ]);
+
+    // Create xterm instance
+    term = new Terminal({
+      cols: 80,
+      rows: 24,
+      cursorBlink: true,
+      fontSize: 14,
+      fontFamily: "'JetBrains Mono', 'Fira Code', 'Cascadia Code', 'Source Code Pro', Menlo, Monaco, 'Courier New', monospace",
+      theme: {
+        background: '#0f172a',
+        foreground: '#e2e8f0',
+        cursor: '#38bdf8',
+        cursorAccent: '#0f172a',
+        selectionBackground: '#334155',
+        black: '#1e293b',
+        red: '#ef4444',
+        green: '#22c55e',
+        yellow: '#eab308',
+        blue: '#3b82f6',
+        magenta: '#a855f7',
+        cyan: '#06b6d4',
+        white: '#e2e8f0',
+        brightBlack: '#475569',
+        brightRed: '#f87171',
+        brightGreen: '#4ade80',
+        brightYellow: '#facc15',
+        brightBlue: '#60a5fa',
+        brightMagenta: '#c084fc',
+        brightCyan: '#22d3ee',
+        brightWhite: '#f8fafc'
+      },
+      allowProposedApi: true,
+      scrollback: 5000,
+      convertEol: false
+    });
+
+    fitAddon = new FitAddon();
+    term.loadAddon(fitAddon);
+    term.loadAddon(new WebLinksAddon());
+
+    // Wait for the container to be in the DOM
+    await tick();
+    if (terminalContainer) {
+      term.open(terminalContainer);
+      try {
+        fitAddon.fit();
+      } catch { /* ignore fit errors */ }
+    }
+
+    // Handle user input → send to WebSocket
+    term.onData((data: string) => {
+      if (wsConnection && wsConnection.readyState === WebSocket.OPEN) {
+        wsConnection.send(JSON.stringify({ type: 'input', data }));
+      }
+    });
+
+    // Handle resize → send new size to backend
+    term.onResize(({ cols, rows }: { cols: number; rows: number }) => {
+      if (wsConnection && wsConnection.readyState === WebSocket.OPEN) {
+        wsConnection.send(JSON.stringify({ type: 'resize', cols, rows }));
+      }
+    });
+
+    // Observe container resize
+    if (terminalContainer) {
+      resizeObserver = new ResizeObserver(() => {
+        if (fitAddon && term) {
+          try {
+            fitAddon.fit();
+          } catch { /* ignore */ }
+        }
+      });
+      resizeObserver.observe(terminalContainer);
+    }
+
+    // Connect WebSocket
     const proto = location.protocol === 'https:' ? 'wss' : 'ws';
     const token = typeof localStorage !== 'undefined' ? localStorage.getItem('meshium_session_token') : null;
-    const tokenParam = token ? `?token=${encodeURIComponent(token)}` : '';
-    const url = `${proto}://${location.host}/ws/terminal/${selectedServerId}${tokenParam}`;
+    const tokenParam = token ? `&token=${encodeURIComponent(token)}` : '';
+    const cols = term.cols || 80;
+    const rows = term.rows || 24;
+    const url = `${proto}://${location.host}/ws/terminal/${selectedServerId}?cols=${cols}&rows=${rows}${tokenParam}`;
 
     try {
       wsConnection = new WebSocket(url);
@@ -92,27 +157,34 @@
       return;
     }
 
+    wsConnection.binaryType = 'arraybuffer';
+
     wsConnection.onopen = () => {
-      addLine('system', `Connecting to ${selectedServer?.name || 'server'}...`);
+      // Connection established, waiting for "connected" message from server
     };
 
     wsConnection.onmessage = (event) => {
       try {
-        const msg = JSON.parse(event.data);
+        const msg = JSON.parse(event.data) as WSMessage;
         if (msg.type === 'connected') {
           connectionStatus = 'connected';
           hostname = msg.hostname || '';
-          addLine('info', `Connected to ${hostname || selectedServer?.host || 'server'}`);
-          addLine('info', `Type commands below. Use ↑/↓ for history. Type 'exit' or 'clear' for special actions.`);
-          setTimeout(() => inputElement?.focus(), 100);
+          if (term) {
+            term.focus();
+          }
         } else if (msg.type === 'output') {
-          if (msg.stdout) addLine('output', msg.stdout);
-          if (msg.stderr) addLine('stderr', msg.stderr);
-          if (msg.exitCode !== 0 && msg.exitCode !== undefined) {
-            addLine('info', `[exit code: ${msg.exitCode}]`);
+          if (term) {
+            term.write(msg.data);
           }
         } else if (msg.type === 'error') {
-          addLine('error', msg.message || 'Unknown error');
+          if (term) {
+            term.write(`\r\n\x1b[31m${msg.message}\x1b[0m\r\n`);
+          }
+        } else if (msg.type === 'closed') {
+          if (term) {
+            term.write(`\r\n\x1b[90m${msg.data}\x1b[0m\r\n`);
+          }
+          connectionStatus = 'idle';
         }
       } catch {
         // ignore parse errors
@@ -123,7 +195,9 @@
       if (connectionStatus === 'connecting') {
         connectionStatus = 'failed';
       } else if (connectionStatus === 'connected') {
-        addLine('system', 'Connection closed.');
+        if (term) {
+          term.write('\r\n\x1b[90m— Connection closed —\x1b[0m\r\n');
+        }
         connectionStatus = 'idle';
       }
       wsConnection = null;
@@ -131,7 +205,9 @@
 
     wsConnection.onerror = () => {
       connectionStatus = 'failed';
-      addLine('error', 'WebSocket connection error');
+      if (term) {
+        term.write('\r\n\x1b[31m✗ WebSocket connection error\x1b[0m\r\n');
+      }
     };
   }
 
@@ -140,118 +216,59 @@
       wsConnection.close();
       wsConnection = null;
     }
+    if (resizeObserver) {
+      resizeObserver.disconnect();
+      resizeObserver = null;
+    }
+    if (term) {
+      term.dispose();
+      term = null;
+    }
+    if (fitAddon) {
+      fitAddon = null;
+    }
     connectionStatus = 'idle';
     hostname = '';
   }
 
-  // --- Command execution ---
-  function executeCommand() {
-    const cmd = input.trim();
-    if (!cmd) return;
-    if (!wsConnection || wsConnection.readyState !== WebSocket.OPEN) {
-      toast.error('Not connected to server');
-      return;
+  function clearTerminal() {
+    if (term) {
+      term.clear();
     }
-
-    // Special commands
-    if (cmd.toLowerCase() === 'clear' || cmd.toLowerCase() === 'cls') {
-      lines = [];
-      input = '';
-      historyIndex = -1;
-      return;
-    }
-    if (cmd.toLowerCase() === 'exit' || cmd.toLowerCase() === 'quit') {
-      closeConnection();
-      input = '';
-      return;
-    }
-
-    // Add to history
-    commandHistory = [...commandHistory, cmd];
-    historyIndex = -1;
-
-    // Display the command
-    addLine('input', cmd);
-    input = '';
-
-    // Send to server
-    wsConnection.send(JSON.stringify({ type: 'command', command: cmd }));
   }
 
-  function runQuickCommand(cmd: string) {
-    if (!wsConnection || wsConnection.readyState !== WebSocket.OPEN) {
-      toast.error('Connect to a server first');
-      return;
-    }
-    addLine('input', cmd);
-    commandHistory = [...commandHistory, cmd];
-    historyIndex = -1;
-    wsConnection.send(JSON.stringify({ type: 'command', command: cmd }));
-  }
-
-  // --- History navigation ---
-  function handleKeyDown(event: KeyboardEvent) {
-    if (event.key === 'Enter') {
-      event.preventDefault();
-      executeCommand();
-    } else if (event.key === 'ArrowUp') {
-      event.preventDefault();
-      if (commandHistory.length === 0) return;
-      if (historyIndex === -1) {
-        historyIndex = commandHistory.length - 1;
-      } else if (historyIndex > 0) {
-        historyIndex--;
-      }
-      input = commandHistory[historyIndex];
-    } else if (event.key === 'ArrowDown') {
-      event.preventDefault();
-      if (historyIndex === -1) return;
-      if (historyIndex < commandHistory.length - 1) {
-        historyIndex++;
-        input = commandHistory[historyIndex];
-      } else {
-        historyIndex = -1;
-        input = '';
-      }
-    } else if (event.key === 'Tab') {
-      event.preventDefault();
-      // Simple tab completion for common commands
-      const partial = input.trim();
-      if (partial) {
-        const matches = quickCommands.filter(q => q.cmd.startsWith(partial));
-        if (matches.length === 1) {
-          input = matches[0].cmd;
+  function copyAll() {
+    if (term) {
+      // Get the terminal content via the buffer
+      const buffer = term.buffer.active;
+      const lines: string[] = [];
+      for (let i = 0; i < buffer.length; i++) {
+        const line = buffer.getLine(i);
+        if (line) {
+          lines.push(line.translateToString(true));
         }
       }
-    } else if (event.ctrlKey && event.key === 'l') {
-      event.preventDefault();
-      lines = [];
+      const text = lines.join('\n').trimEnd();
+      if (text) {
+        navigator.clipboard.writeText(text).then(() => {
+          toast.success('Terminal content copied');
+        });
+      }
     }
   }
 
-  // --- Terminal helpers ---
-  function addLine(type: TerminalLine['type'], content: string) {
-    lines = [...lines, { id: ++lineIdCounter, type, content, timestamp: new Date() }];
-    setTimeout(() => scrollToBottom(), 0);
-  }
-
-  function scrollToBottom() {
-    if (terminalContainer) {
-      terminalContainer.scrollTop = terminalContainer.scrollHeight;
+  function focusTerminal() {
+    if (term) {
+      term.focus();
     }
   }
 
-  function clearTerminal() {
-    lines = [];
-  }
-
-  function copyLastOutput() {
-    const outputLines = lines.filter(l => l.type === 'output' || l.type === 'stderr');
-    if (outputLines.length === 0) return;
-    const lastOutput = outputLines[outputLines.length - 1];
-    navigator.clipboard.writeText(lastOutput.content).then(() => {
-      toast.success('Copied to clipboard');
-    });
+  function fitTerminal() {
+    if (fitAddon && term) {
+      try {
+        fitAddon.fit();
+      } catch { /* ignore */ }
+    }
   }
 
   function connectionStatusBadge() {
@@ -263,39 +280,14 @@
     }
   }
 
-  function formatTime(date: Date): string {
-    return date.toLocaleTimeString('en-US', { hour12: false });
-  }
-
-  function lineColor(type: TerminalLine['type']): string {
-    switch (type) {
-      case 'input': return 'text-green-400';
-      case 'output': return 'text-slate-200';
-      case 'stderr': return 'text-yellow-400';
-      case 'error': return 'text-red-400';
-      case 'info': return 'text-blue-400';
-      case 'system': return 'text-slate-500';
-      default: return 'text-slate-200';
-    }
-  }
-
-  function linePrefix(type: TerminalLine['type']): string {
-    switch (type) {
-      case 'input': return '$ ';
-      case 'output': return '';
-      case 'stderr': return '';
-      case 'error': return '✗ ';
-      case 'info': return 'ℹ ';
-      case 'system': return '→ ';
-      default: return '';
-    }
-  }
+  // Import tick from svelte
+  import { tick } from 'svelte';
 </script>
 
 <svelte:head><title>Terminal - Meshium</title></svelte:head>
 
 <div class="p-4 sm:p-6 max-w-7xl mx-auto">
-  <PageHeader title="Terminal" subtitle="Interactive SSH terminal — run commands on your servers in real-time.">
+  <PageHeader title="Terminal" subtitle="Real-time interactive SSH terminal — full PTY support with colors, interactive commands, and live streaming.">
     {#snippet actions()}
       <button type="button" onclick={loadServers} disabled={loading} class="inline-flex items-center gap-2 rounded-lg border border-slate-300 bg-white px-4 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50 disabled:opacity-60">
         {#if loading}<Spinner size="sm" label="Refreshing" />{:else}<RefreshCw size={16} />{/if}
@@ -324,7 +316,6 @@
               onclick={() => {
                 selectedServerId = server.id;
                 closeConnection();
-                lines = [];
               }}
               class={`w-full rounded-xl border p-3 text-left transition ${selectedServerId === server.id ? 'border-blue-500 bg-blue-50 shadow-sm' : 'border-slate-200 bg-white hover:border-slate-300 hover:bg-slate-50'}`}
             >
@@ -337,7 +328,7 @@
                   <p class="truncate text-xs text-slate-500">{server.username}@{server.host}:{server.port}</p>
                 </div>
                 {#if selectedServerId === server.id && connectionStatus === 'connected'}
-                  <span class="inline-block h-2 w-2 rounded-full bg-green-500"></span>
+                  <span class="inline-block h-2 w-2 rounded-full bg-green-500 animate-pulse"></span>
                 {/if}
                 {#if selectedServerId === server.id}
                   <ChevronRight size={16} class="text-blue-500" />
@@ -348,22 +339,55 @@
         </div>
       {/if}
 
-      <!-- Quick commands -->
+      <!-- Info panel when connected -->
       {#if connectionStatus === 'connected'}
-        <div class="mt-6">
-          <h3 class="mb-2 text-xs font-semibold uppercase tracking-wider text-slate-500">Quick Commands</h3>
-          <div class="flex flex-wrap gap-1.5">
-            {#each quickCommands as qc}
-              <button
-                type="button"
-                onclick={() => runQuickCommand(qc.cmd)}
-                class="rounded-md border border-slate-200 bg-white px-2.5 py-1 text-xs font-medium text-slate-600 transition hover:border-blue-300 hover:bg-blue-50 hover:text-blue-700"
-                title={qc.cmd}
-              >
-                {qc.label}
-              </button>
-            {/each}
+        <div class="mt-6 rounded-xl border border-slate-200 bg-slate-50 p-4">
+          <h3 class="mb-3 text-xs font-semibold uppercase tracking-wider text-slate-500">Session Info</h3>
+          <dl class="space-y-2 text-sm">
+            <div class="flex justify-between">
+              <dt class="text-slate-500">Host</dt>
+              <dd class="font-mono text-slate-700">{selectedServer?.host}</dd>
+            </div>
+            <div class="flex justify-between">
+              <dt class="text-slate-500">User</dt>
+              <dd class="font-mono text-slate-700">{selectedServer?.username}</dd>
+            </div>
+            {#if hostname}
+              <div class="flex justify-between">
+                <dt class="text-slate-500">Hostname</dt>
+                <dd class="font-mono text-slate-700">{hostname}</dd>
+              </div>
+            {/if}
+          </dl>
+          <div class="mt-4 space-y-2">
+            <button
+              type="button"
+              onclick={clearTerminal}
+              class="flex w-full items-center gap-2 rounded-lg border border-slate-200 bg-white px-3 py-2 text-xs font-medium text-slate-600 transition hover:bg-slate-50"
+            >
+              <Trash2 size={14} /> Clear Terminal
+            </button>
+            <button
+              type="button"
+              onclick={copyAll}
+              class="flex w-full items-center gap-2 rounded-lg border border-slate-200 bg-white px-3 py-2 text-xs font-medium text-slate-600 transition hover:bg-slate-50"
+            >
+              <Copy size={14} /> Copy All Output
+            </button>
+            <button
+              type="button"
+              onclick={fitTerminal}
+              class="flex w-full items-center gap-2 rounded-lg border border-slate-200 bg-white px-3 py-2 text-xs font-medium text-slate-600 transition hover:bg-slate-50"
+            >
+              <Maximize2 size={14} /> Fit to Container
+            </button>
           </div>
+        </div>
+
+        <div class="mt-4 rounded-xl border border-blue-100 bg-blue-50 p-3">
+          <p class="text-xs text-blue-700">
+            <strong>Real PTY Terminal</strong> — supports interactive commands (top, vim, htop), ANSI colors, Ctrl+C, and live streaming.
+          </p>
         </div>
       {/if}
     </div>
@@ -378,7 +402,7 @@
           </div>
         </Card>
       {:else}
-        <Card padding="none">
+        <div class="overflow-hidden rounded-xl border border-slate-700 shadow-lg">
           <!-- Terminal header -->
           <div class="flex items-center justify-between border-b border-slate-700 bg-slate-800 px-4 py-2.5">
             <div class="flex items-center gap-2">
@@ -398,19 +422,11 @@
               {#if connectionStatus === 'connected'}
                 <button
                   type="button"
-                  onclick={clearTerminal}
-                  title="Clear terminal"
+                  onclick={focusTerminal}
+                  title="Focus terminal"
                   class="rounded p-1 text-slate-400 hover:bg-slate-700 hover:text-slate-200"
                 >
-                  <Trash2 size={14} />
-                </button>
-                <button
-                  type="button"
-                  onclick={copyLastOutput}
-                  title="Copy last output"
-                  class="rounded p-1 text-slate-400 hover:bg-slate-700 hover:text-slate-200"
-                >
-                  <Copy size={14} />
+                  <ExternalLink size={14} />
                 </button>
               {/if}
             </div>
@@ -418,7 +434,7 @@
 
           <!-- Terminal body -->
           {#if connectionStatus !== 'connected'}
-            <div class="flex min-h-[450px] flex-col items-center justify-center bg-slate-900 p-4">
+            <div class="flex min-h-[500px] flex-col items-center justify-center bg-slate-900 p-4">
               {#if connectionStatus === 'connecting'}
                 <div class="flex items-center gap-3 text-slate-400">
                   <Loader2 size={20} class="animate-spin" />
@@ -434,56 +450,17 @@
                 <div class="text-center">
                   <TerminalIcon size={28} class="mx-auto text-slate-600" />
                   <p class="mt-3 text-sm text-slate-500">Ready to connect</p>
-                  <p class="mt-1 text-xs text-slate-600">Click "Connect" to start an interactive SSH session.</p>
+                  <p class="mt-1 text-xs text-slate-600">Click "Connect" to start a real interactive SSH terminal session.</p>
+                  <p class="mt-2 text-xs text-slate-600">Full PTY support — interactive commands, colors, streaming output.</p>
                 </div>
               {/if}
             </div>
           {:else}
-            <!-- Terminal output -->
+            <!-- xterm.js terminal -->
             <div
               bind:this={terminalContainer}
-              class="h-[450px] overflow-y-auto bg-slate-900 p-4 font-mono text-sm leading-relaxed"
-            >
-              {#each lines as line (line.id)}
-                <div class="whitespace-pre-wrap break-all {lineColor(line.type)}">
-                  {#if line.type === 'input'}
-                    <span class="text-green-400">{formatTime(line.timestamp)} </span>
-                    <span class="text-cyan-400">{selectedServer.username}@{hostname || selectedServer.host}</span>
-                    <span class="text-slate-500">:</span>
-                    <span class="text-blue-400">~</span>
-                    <span class="text-slate-500">$ </span>
-                    <span class="text-slate-100">{line.content}</span>
-                  {:else}
-                    <span class="text-slate-600">{linePrefix(line.type)}</span>{line.content}
-                  {/if}
-                </div>
-              {/each}
-            </div>
-
-            <!-- Input bar -->
-            <div class="flex items-center gap-2 border-t border-slate-700 bg-slate-800 px-4 py-2.5">
-              <span class="font-mono text-sm text-cyan-400">$</span>
-              <input
-                bind:this={inputElement}
-                bind:value={input}
-                onkeydown={handleKeyDown}
-                type="text"
-                autocomplete="off"
-                autocorrect="off"
-                autocapitalize="off"
-                spellcheck="false"
-                placeholder="Type a command and press Enter..."
-                class="flex-1 bg-transparent font-mono text-sm text-slate-100 placeholder-slate-600 outline-none"
-              />
-              <button
-                type="button"
-                onclick={executeCommand}
-                disabled={!input.trim()}
-                class="rounded bg-blue-600 px-3 py-1 text-xs font-medium text-white transition hover:bg-blue-700 disabled:opacity-40"
-              >
-                Run
-              </button>
-            </div>
+              class="h-[500px] bg-slate-900 p-2"
+            ></div>
           {/if}
 
           <!-- Action bar -->
@@ -517,16 +494,32 @@
             </div>
             <div class="text-xs text-slate-500">
               {#if connectionStatus === 'connected'}
-                {commandHistory.length} commands · ↑/↓ history · Ctrl+L clear
+                Real PTY terminal · Interactive commands supported · Ctrl+C works
               {:else}
                 SSH terminal for {selectedServer.name}
               {/if}
             </div>
           </div>
-        </Card>
+        </div>
       {/if}
     </div>
   </div>
 </div>
 
 {#snippet emptyIcon()}<TerminalIcon size={22} />{/snippet}
+
+<style>
+  :global(.xterm) {
+    height: 100%;
+    padding: 4px;
+  }
+  :global(.xterm-viewport) {
+    background-color: #0f172a !important;
+  }
+  :global(.xterm-screen) {
+    background-color: #0f172a;
+  }
+  :global(.xterm .xterm-rows) {
+    font-feature-settings: "liga" 0;
+  }
+</style>

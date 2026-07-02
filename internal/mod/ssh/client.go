@@ -492,3 +492,105 @@ func (c *Client) Close() error {
 
 	return targetErr
 }
+
+// ShellSession wraps an SSH session with a PTY for interactive shell access.
+// The caller is responsible for calling Close when done.
+type ShellSession struct {
+	session *ssh.Session
+	stdin   io.WriteCloser
+	stdout  io.Reader
+	stderr  io.Reader
+}
+
+// NewShellSession opens a new SSH session with a PTY and starts an interactive
+// shell. The caller owns the returned ShellSession and must Close it.
+// cols and rows specify the initial terminal dimensions.
+func (c *Client) NewShellSession(cols, rows int) (*ShellSession, error) {
+	c.touch()
+
+	c.mu.Lock()
+	if c.closed || c.conn == nil {
+		c.mu.Unlock()
+		return nil, fmt.Errorf("connection is closed")
+	}
+	c.mu.Unlock()
+
+	session, err := c.conn.NewSession()
+	if err != nil {
+		return nil, fmt.Errorf("create session: %w", err)
+	}
+
+	// Request a PTY with xterm-256color terminal type
+	modes := ssh.TerminalModes{
+		ssh.ECHO:          1, // enable echo
+		ssh.TTY_OP_ISPEED: 14400,
+		ssh.TTY_OP_OSPEED: 14400,
+		ssh.ICANON:        1, // canonical mode
+		ssh.ISIG:          1, // enable signals (Ctrl+C etc)
+	}
+
+	if err := session.RequestPty("xterm-256color", rows, cols, modes); err != nil {
+		session.Close()
+		return nil, fmt.Errorf("request pty: %w", err)
+	}
+
+	stdin, err := session.StdinPipe()
+	if err != nil {
+		session.Close()
+		return nil, fmt.Errorf("get stdin pipe: %w", err)
+	}
+
+	stdout, err := session.StdoutPipe()
+	if err != nil {
+		session.Close()
+		return nil, fmt.Errorf("get stdout pipe: %w", err)
+	}
+
+	stderr, err := session.StderrPipe()
+	if err != nil {
+		session.Close()
+		return nil, fmt.Errorf("get stderr pipe: %w", err)
+	}
+
+	if err := session.Shell(); err != nil {
+		session.Close()
+		return nil, fmt.Errorf("start shell: %w", err)
+	}
+
+	return &ShellSession{
+		session: session,
+		stdin:   stdin,
+		stdout:  stdout,
+		stderr:  stderr,
+	}, nil
+}
+
+// Write sends data to the shell's stdin (user keystrokes).
+func (s *ShellSession) Write(data []byte) (int, error) {
+	return s.stdin.Write(data)
+}
+
+// Resize changes the terminal window size.
+func (s *ShellSession) Resize(cols, rows int) error {
+	return s.session.WindowChange(rows, cols)
+}
+
+// Stdout returns the shell's stdout reader.
+func (s *ShellSession) Stdout() io.Reader {
+	return s.stdout
+}
+
+// Stderr returns the shell's stderr reader.
+func (s *ShellSession) Stderr() io.Reader {
+	return s.stderr
+}
+
+// Wait waits for the shell session to exit.
+func (s *ShellSession) Wait() error {
+	return s.session.Wait()
+}
+
+// Close closes the shell session.
+func (s *ShellSession) Close() error {
+	return s.session.Close()
+}

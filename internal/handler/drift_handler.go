@@ -26,7 +26,7 @@ func (h *DriftHandler) RegisterRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("GET /api/servers/{id}/drift/history", h.handleHistory)
 	mux.HandleFunc("POST /api/servers/{id}/drift/check", h.handleCheck)
 	mux.HandleFunc("POST /api/servers/{id}/drift/compare", h.handleCompareSnapshots)
-	mux.HandleFunc("GET /api/servers/compare/{sourceId}/{targetId}", h.handleCompareServers)
+	mux.HandleFunc("GET /api/drift/compare/{sourceId}/{targetId}", h.handleCompareServers)
 }
 
 // handleGetLatest returns the latest drift report for a server.

@@ -52,5 +52,5 @@ export const driftApi = {
   compareSnapshots: (serverID: number, snapshotA: string, snapshotB: string) =>
     api.post(`/servers/${serverID}/drift/compare`, { snapshotA, snapshotB }) as Promise<DriftReport>,
   compareServers: (sourceID: number, targetID: number) =>
-    api.get(`/servers/compare/${sourceID}/${targetID}`) as Promise<DriftReport>
+    api.get(`/drift/compare/${sourceID}/${targetID}`) as Promise<DriftReport>
 };
