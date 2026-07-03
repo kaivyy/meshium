@@ -7,9 +7,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
-## [1.5.0] — 2026-07-03
+## [1.4.1] — 2026-07-03
 
-The zero-downtime migration update. Adds a complete 14-stage pipeline engine with 10 specialized engines, 11-step guided wizard, real-time monitoring dashboard, and automatic rollback — enabling production-grade server migrations with near-zero downtime.
+Patch release building on v1.4.0. Adds a complete 14-stage zero-downtime migration pipeline engine with 10 specialized engines, 11-step guided wizard, real-time monitoring dashboard, automatic rollback, enterprise-grade SSH authentication with key management & fingerprints, enhanced discovery collectors, intelligence modules, workload classifier, planner strategy selector, WebSocket reliability improvements, and comprehensive security audit remediation.
 
 ### Zero-Downtime Migration Pipeline
 
