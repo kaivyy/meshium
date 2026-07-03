@@ -2,7 +2,7 @@
   import { onMount } from 'svelte';
   import { goto } from '$app/navigation';
   import { page } from '$app/state';
-  import { ArrowLeft, ArrowRight, AlertTriangle, Ban, CheckCircle2, Loader2, RotateCcw, Server, ShieldCheck } from 'lucide-svelte';
+  import { ArrowLeft, ArrowRight, AlertTriangle, Ban, Loader2, RotateCcw, Server, ShieldCheck } from 'lucide-svelte';
   import { discoveryApi, type CompatibilityReport } from '$lib/api/discovery';
   import { plannerApi } from '$lib/api/planner';
   import { Card, EmptyState, Spinner } from '$lib/components/ui';
@@ -340,7 +340,7 @@
                 <div class="space-y-2">
                   {#each compatReport.blockers as blocker}
                     <div class="rounded-lg border border-red-200 bg-white/70 px-3 py-2 text-sm text-red-800">
-                      <div class="font-medium">{blocker.code}</div>
+                      <div class="font-medium">{blocker.category}</div>
                       <div class="text-red-700">{blocker.message}</div>
                     </div>
                   {/each}
@@ -357,7 +357,7 @@
                 <div class="space-y-2">
                   {#each compatReport.warnings as warning}
                     <div class="rounded-lg border border-yellow-200 bg-white/70 px-3 py-2 text-sm text-yellow-800">
-                      <div class="font-medium">{warning.code}</div>
+                      <div class="font-medium">{warning.category}</div>
                       <div class="text-yellow-700">{warning.message}</div>
                     </div>
                   {/each}
@@ -365,27 +365,6 @@
               </div>
             {/if}
 
-            <div class="rounded-lg border border-slate-200 bg-white p-4">
-              <div class="mb-3 flex items-center gap-2 text-sm font-semibold text-slate-900">
-                <CheckCircle2 size={16} class="text-green-600" />
-                Compatibility checks
-              </div>
-              <div class="space-y-2">
-                {#each compatReport.checks as check}
-                  <div class={`flex items-start gap-3 rounded-lg border px-3 py-2 text-sm ${check.passed ? 'border-green-200 bg-green-50' : 'border-red-200 bg-red-50'}`}>
-                    {#if check.passed}
-                      <CheckCircle2 size={16} class="mt-0.5 shrink-0 text-green-600" />
-                    {:else}
-                      <Ban size={16} class="mt-0.5 shrink-0 text-red-600" />
-                    {/if}
-                    <div>
-                      <div class="font-medium text-slate-900">{check.name}</div>
-                      <div class={check.passed ? 'text-green-700' : 'text-red-700'}>{check.message}</div>
-                    </div>
-                  </div>
-                {/each}
-              </div>
-            </div>
           </div>
         {/if}
 

@@ -1,22 +1,36 @@
 <script lang="ts">
   import { onMount } from 'svelte';
   import { migrationApi, type MigrationPlan } from '$lib/api/migrations';
+  import { api } from '$lib/api/client';
+  import type { Server } from '$lib/stores/servers';
   import { Plus, ArrowRight, ArrowRightLeft, Trash2 } from 'lucide-svelte';
   import { PageHeader, Skeleton } from '$lib/components/ui';
   import { toast } from '$lib/stores/toast';
+  import { formatLabel } from '$lib/utils/format';
 
   let migrations: MigrationPlan[] = [];
+  let servers: Server[] = [];
   let loading = true;
 
   onMount(async () => {
     try {
-      migrations = await migrationApi.list();
+      const [migs, svrs] = await Promise.all([
+        migrationApi.list(),
+        api.get('/servers') as Promise<Server[]>,
+      ]);
+      migrations = migs;
+      servers = svrs;
     } catch {
       // handle error
     } finally {
       loading = false;
     }
   });
+
+  function serverName(id: number): string {
+    const server = servers.find((s) => s.id === id);
+    return server ? server.name : `Server #${id}`;
+  }
 
   async function deleteMigration(id: number, event: MouseEvent) {
     event.stopPropagation();
@@ -87,14 +101,14 @@
           <div class="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
             <div class="flex items-center gap-3">
               <div class="flex items-center gap-2">
-                <span class="text-sm font-medium text-slate-900">Server #{m.sourceServerId}</span>
+                <span class="text-sm font-medium text-slate-900">{serverName(m.sourceServerId)}</span>
                 <ArrowRight size={14} class="text-slate-400" />
-                <span class="text-sm font-medium text-slate-900">Server #{m.targetServerId}</span>
+                <span class="text-sm font-medium text-slate-900">{serverName(m.targetServerId)}</span>
               </div>
             </div>
             <div class="flex items-center gap-3">
               <span class="px-2 py-1 rounded-full text-xs font-medium {statusBadge(m.status)}">
-                {m.status}
+                {formatLabel(m.status)}
               </span>
               <span class="text-xs text-slate-500">{m.createdAt}</span>
               <button

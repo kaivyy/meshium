@@ -2,7 +2,7 @@
   import { onMount, onDestroy } from 'svelte';
   import { page } from '$app/stores';
   import { lock } from '$lib/stores/auth';
-  import { api } from '$lib/api/client';
+  import { jobsApi } from '$lib/api/jobs';
   import {
     LayoutDashboard, Server, Search, ArrowRightLeft, Briefcase,
     Bot, Cpu, ScrollText, Clock, Shield, Download, GitBranch,
@@ -99,8 +99,8 @@
 
   async function fetchActiveJobCount() {
     try {
-      const res = await api.get<{ total: number }>('/jobs?status=running&limit=1');
-      activeJobs = res?.total ?? 0;
+      const res = await jobsApi.list({ status: 'running', limit: 1 });
+      activeJobs = res.length;
     } catch {
       activeJobs = 0;
     }

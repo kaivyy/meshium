@@ -19,6 +19,8 @@ type CachedSnapshot = ServerSnapshot | null;
 
 const cache = new Map<number, CachedSnapshot>();
 const inFlight = new Map<number, Promise<CachedSnapshot>>();
+const errorTimestamps = new Map<number, number>();
+const ERROR_TTL_MS = 30_000;
 
 export const snapshotsStore = writable<Record<number, CachedSnapshot>>({});
 
@@ -32,8 +34,22 @@ function flush(): void {
  * the cache has no entry for the server.
  */
 export async function loadSnapshot(serverId: number): Promise<void> {
-  // Already cached (including null = not found) — don't retry.
-  if (cache.has(serverId)) return;
+  // Already cached — check if error cache entry has expired.
+  if (cache.has(serverId)) {
+    const cached = cache.get(serverId)!;
+    if (cached === null && errorTimestamps.has(serverId)) {
+      const age = Date.now() - errorTimestamps.get(serverId)!;
+      if (age >= ERROR_TTL_MS) {
+        // Error cache expired — clear and re-fetch.
+        cache.delete(serverId);
+        errorTimestamps.delete(serverId);
+      } else {
+        return;
+      }
+    } else {
+      return;
+    }
+  }
 
   // Already in flight — don't duplicate the request.
   if (inFlight.has(serverId)) {
@@ -47,8 +63,9 @@ export async function loadSnapshot(serverId: number): Promise<void> {
       cache.set(serverId, snap);
       return snap;
     } catch {
-      // 404 or other error — cache as "not found" so we don't retry.
+      // 404 or other error — cache as "not found" with TTL so we retry later.
       cache.set(serverId, null);
+      errorTimestamps.set(serverId, Date.now());
       return null;
     } finally {
       inFlight.delete(serverId);
@@ -89,6 +106,7 @@ export function hasSnapshot(serverId: number): boolean {
  */
 export function invalidateSnapshot(serverId: number): void {
   cache.delete(serverId);
+  errorTimestamps.delete(serverId);
   flush();
   loadSnapshot(serverId);
 }
@@ -98,5 +116,6 @@ export function invalidateSnapshot(serverId: number): void {
  */
 export function invalidateAll(): void {
   cache.clear();
+  errorTimestamps.clear();
   flush();
 }

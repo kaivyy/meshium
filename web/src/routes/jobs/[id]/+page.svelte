@@ -288,7 +288,7 @@
         </div>
         <div class="rounded-xl border border-slate-200 bg-slate-50 p-3">
           <div class="text-xs font-semibold uppercase tracking-wide text-slate-500">Speed</div>
-          <div class="mt-1 text-sm font-medium text-slate-900">{formatSpeed(job.progress.speedBPS)}</div>
+          <div class="mt-1 text-sm font-medium text-slate-900">{formatSpeed(job.progress.speedBps)}</div>
         </div>
         <div class="rounded-xl border border-slate-200 bg-slate-50 p-3">
           <div class="text-xs font-semibold uppercase tracking-wide text-slate-500">ETA</div>

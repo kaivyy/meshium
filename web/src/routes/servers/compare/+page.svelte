@@ -218,7 +218,7 @@
                     </div>
                     <div>
                       <div class="flex flex-wrap items-center gap-2">
-                        <Badge variant="error">{blocker.code}</Badge>
+                        <Badge variant="error">{blocker.category}</Badge>
                       </div>
                       <p class="mt-2 text-sm text-slate-700">{blocker.message}</p>
                     </div>
@@ -242,7 +242,7 @@
                       ⚠
                     </div>
                     <div>
-                      <Badge variant="warning">{warning.code}</Badge>
+                      <Badge variant="warning">{warning.category}</Badge>
                       <p class="mt-2 text-sm text-slate-700">{warning.message}</p>
                     </div>
                   </div>
@@ -254,28 +254,6 @@
           {/if}
         </section>
 
-        <section>
-          <h2 class="mb-3 text-sm font-semibold uppercase tracking-wide text-green-700">Passed checks</h2>
-          {#if report.checks.filter((check) => check.passed).length}
-            <div class="space-y-3">
-              {#each report.checks.filter((check) => check.passed) as check}
-                <Card padding="md">
-                  <div class="flex gap-3">
-                    <div class="mt-0.5 flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-green-100 text-green-700">
-                      ✓
-                    </div>
-                    <div>
-                      <p class="font-medium text-slate-900">{check.name}</p>
-                      <p class="mt-2 text-sm text-slate-700">{check.message}</p>
-                    </div>
-                  </div>
-                </Card>
-              {/each}
-            </div>
-          {:else}
-            <EmptyState title="No passed checks reported" description="The compatibility engine did not return any passing checks." />
-          {/if}
-        </section>
       </div>
 
       {#if report.compatible}

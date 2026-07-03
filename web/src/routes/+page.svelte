@@ -5,16 +5,17 @@
   import { PageHeader, Card, Badge, Skeleton } from '$lib/components/ui';
   import { fetchServers, serverStore } from '$lib/stores/servers';
   import { api } from '$lib/api/client';
+  import { jobsApi, type Job } from '$lib/api/jobs';
   import { type ServerSnapshot } from '$lib/api/discovery';
   import { snapshotsStore, loadSnapshots } from '$lib/stores/snapshots';
-  import { formatRelativeTime } from '$lib/utils/format';
+  import { formatRelativeTime, formatLabel } from '$lib/utils/format';
 
   let totalServers = $state(0);
   let onlineServers = $state(0);
   let activeJobs = $state(0);
   let failedJobs = $state(0);
   let activeMigrations = $state(0);
-  let recentJobs = $state([] as Array<{ id: string; type: string; status: string; createdAt: string; error?: string }>);
+  let recentJobs = $state([] as Job[]);
   let recentMigrations = $state([] as Array<{ id: number; status: string; createdAt: string; sourceId: number; targetId: number }>);
   let loadingActivity = $state(true);
   let refreshTimer: ReturnType<typeof setInterval> | null = null;
@@ -34,12 +35,12 @@
     loadingActivity = true;
     try {
       const [jobData, migData, serverData] = await Promise.all([
-        api.get('/jobs?limit=10') as Promise<{ jobs: Array<{ id: string; type: string; status: string; createdAt: string; error?: string }> }>,
+        jobsApi.list({ limit: 10 }),
         api.get('/migrations') as Promise<Array<{ id: number; status: string; createdAt: string; sourceId: number; targetId: number }>>,
         api.get('/servers') as Promise<Array<{ id: number; name: string; host: string; port: number }>>,
       ]);
 
-      recentJobs = jobData?.jobs?.slice(0, 10) || [];
+      recentJobs = (jobData || []).slice(0, 10);
       recentMigrations = (migData || []).slice(0, 10);
 
       activeJobs = recentJobs.filter(j => j.status === 'running' || j.status === 'queued').length;
@@ -170,8 +171,8 @@
                 </span>
                 <div class="min-w-0 flex-1">
                   <div class="flex items-center gap-2">
-                    <span class="text-sm font-medium text-slate-900">{job.type}</span>
-                    <Badge variant={jobStatusVariant(job.status)} size="sm">{job.status}</Badge>
+                    <span class="text-sm font-medium text-slate-900">{formatLabel(job.type)}</span>
+                    <Badge variant={jobStatusVariant(job.status)} size="sm">{formatLabel(job.status)}</Badge>
                   </div>
                   <p class="text-xs text-slate-400">{formatRelativeTime(job.createdAt)}</p>
                 </div>
@@ -218,7 +219,7 @@
                 <div class="min-w-0 flex-1">
                   <div class="flex items-center gap-2">
                     <span class="text-sm font-medium text-slate-900">Migration #{mig.id}</span>
-                    <Badge variant={migStatusVariant(mig.status)} size="sm">{mig.status}</Badge>
+                    <Badge variant={migStatusVariant(mig.status)} size="sm">{formatLabel(mig.status)}</Badge>
                   </div>
                   <p class="text-xs text-slate-400">{formatRelativeTime(mig.createdAt)}</p>
                 </div>
