@@ -239,21 +239,10 @@ func (h *LogViewHandler) handleLogsWS(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	token := r.URL.Query().Get("token")
-	if token == "" {
-		shared.WriteError(w, http.StatusUnauthorized, "missing session token", "UNAUTHORIZED")
-		return
-	}
-	if h.authSvc.IsLocked() {
-		shared.WriteError(w, http.StatusForbidden, "app is locked", "LOCKED")
-		return
-	}
-	if !h.authSvc.ValidateSessionToken(token) {
-		shared.WriteError(w, http.StatusUnauthorized, "invalid session token", "UNAUTHORIZED")
-		return
-	}
+	// Auth is handled by the middleware (auth.RequireAuth) which validates
+	// the session token from the Sec-WebSocket-Protocol header or query param.
 
-	conn, err := h.upgrader.Upgrade(w, r, nil)
+	conn, err := upgradeWebSocket(h.upgrader, w, r)
 	if err != nil {
 		log.Printf("log websocket upgrade failed: %v", err)
 		return

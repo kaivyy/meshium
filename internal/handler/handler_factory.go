@@ -184,6 +184,14 @@ func (f *HandlerFactoryImpl) getSSHExecuter(serverID int) (transport.SSHExecuter
 	return poolAdapter.Get(serverID, cfg, hostKeyCallback)
 }
 
+// trustHostKey explicitly trusts the SSH host key for a server.
+func (f *HandlerFactoryImpl) trustHostKey(serverID int) (string, error) {
+	if _, err := f.serverRepo.GetByID(serverID); err != nil {
+		return "", fmt.Errorf("server %d not found: %w", serverID, err)
+	}
+	return f.knownHosts.TrustHostKey(serverID)
+}
+
 // decryptCredential decrypts a credential using the AES key.
 func decryptCredential(key []byte, ciphertext string) (string, error) {
 	if ciphertext == "" {

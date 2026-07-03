@@ -133,6 +133,11 @@ export interface ProvisionState {
 // --- Server Resource Metrics ---
 
 export interface ServerResourceMetrics {
+  timestamp: number;
+  serverId?: number;
+  status: string;                // "ok", "degraded", "unknown"
+  source?: string;
+  target?: string;
   cpuUsagePercent: number;
   ramUsedBytes: number;
   ramTotalBytes: number;
@@ -144,6 +149,76 @@ export interface ServerResourceMetrics {
   loadAvg5m: number;
   loadAvg15m: number;
   uptimeSeconds: number;
+  // Extended metrics (Phase 2)
+  containers?: ContainerMetrics[];
+  services?: ServiceMetric[];
+  transfer?: TransferMetric;
+  database?: DatabaseMetric[];
+  redis?: RedisMetric;
+  queue?: QueueMetricInfo[];
+}
+
+// --- Extended Monitoring Types ---
+
+export interface ContainerMetrics {
+  name: string;
+  image: string;
+  status: string;
+  healthy: boolean;
+  restartCount: number;
+  cpuPercent: number;
+  memoryUsage: number;
+  memoryLimit: number;
+  healthScore: number;
+}
+
+export interface ServiceMetric {
+  name: string;
+  status: string;
+  subState: string;
+  uptime: number;
+  pid?: number;
+  port?: number;
+}
+
+export interface TransferMetric {
+  bytesTransferred: number;
+  bytesTotal: number;
+  speedBytesSec: number;
+  eta: string;
+  progress: number;
+}
+
+export interface DatabaseMetric {
+  type: string;
+  name: string;
+  status: string;
+  connections: number;
+  replicationLag: number;
+  sizeBytes: number;
+  healthScore: number;
+}
+
+export interface RedisMetric {
+  status: string;
+  version: string;
+  memoryUsed: number;
+  memoryMax: number;
+  connected: number;
+  keys: number;
+  uptime: number;
+  replication: string;
+  healthScore: number;
+}
+
+export interface QueueMetricInfo {
+  type: string;
+  name: string;
+  status: string;
+  activeJobs: number;
+  queueLength: number;
+  workers: number;
+  drained: boolean;
 }
 
 // --- Container Health ---
@@ -248,6 +323,8 @@ export interface WSMessageExtended {
   // Container & queue info
   containerHealth?: ContainerHealthInfo[];
   queueInfo?: QueueState[];
+  // Event sequence for reconnect replay
+  sequence?: number;
   timestamp?: string;
 }
 
@@ -272,6 +349,22 @@ export interface AuditEntry {
   newState?: string;
   actor?: string;
   createdAt: string;
+}
+
+// --- Migration Event (for event replay) ---
+
+export interface MigrationEvent {
+  id: number;
+  migrationId: number;
+  sequence: number;
+  timestamp: string;
+  level: string;
+  stage: string;
+  type: string;
+  message: string;
+  details?: string;
+  source: string;
+  correlationId?: string;
 }
 
 // --- Pipeline API ---
@@ -310,6 +403,10 @@ export const pipelineApi = {
   getMetrics: (id: number) => api.get(`/pipeline/migrations/${id}/metrics`) as Promise<MigrationMetric[]>,
   getAuditTrail: (id: number) => api.get(`/pipeline/migrations/${id}/audit`) as Promise<AuditEntry[]>,
 
+  // Event replay (for WS reconnect)
+  getEvents: (id: number, afterSeq: number = 0, limit: number = 200) =>
+    api.get(`/pipeline/migrations/${id}/events?after_seq=${afterSeq}&limit=${limit}`) as Promise<MigrationEvent[]>,
+
   // Config
   configure: (id: number, config: MigrationConfig) => api.put(`/pipeline/migrations/${id}/config`, config),
 
@@ -328,24 +425,193 @@ export const pipelineApi = {
 
 // --- Pipeline WebSocket ---
 
+export type WSConnectionState = 'connecting' | 'connected' | 'disconnected' | 'reconnecting' | 'failed';
+
 function getWsToken(): string {
   return typeof localStorage !== 'undefined' ? localStorage.getItem('meshium_session_token') ?? '' : '';
 }
 
 function wsUrl(path: string): string {
   const proto = location.protocol === 'https:' ? 'wss' : 'ws';
-  const token = getWsToken();
-  const tokenParam = token ? `?token=${encodeURIComponent(token)}` : '';
-  return `${proto}://${location.host}${path}${tokenParam}`;
+  return `${proto}://${location.host}${path}`;
 }
 
+function wsSubprotocols(): string[] {
+  const token = getWsToken();
+  return token ? [`meshium-auth.${token}`] : [];
+}
+
+export interface WSPipelineOptions {
+  maxRetries?: number;
+  initialDelay?: number;
+  maxDelay?: number;
+  heartbeatInterval?: number;
+}
+
+/**
+ * wsPipelineConnect creates a resilient WebSocket connection with:
+ * - Automatic reconnect with exponential backoff
+ * - Heartbeat (client ping / server pong)
+ * - Event sequence tracking for replay on reconnect
+ * - Connection state callbacks
+ *
+ * Returns a control handle with close() method.
+ */
+export function wsPipelineConnect(
+  migrationId: number,
+  onMessage: (msg: WSMessageExtended) => void,
+  onStatusChange: (status: WSConnectionState) => void,
+  opts?: WSPipelineOptions
+): { close: () => void } {
+  const maxRetries = opts?.maxRetries ?? 10;
+  const initialDelay = opts?.initialDelay ?? 1000;
+  const maxDelay = opts?.maxDelay ?? 30000;
+  const heartbeatInterval = opts?.heartbeatInterval ?? 30000;
+
+  let retries = 0;
+  let lastSequence = 0;
+  let ws: WebSocket | null = null;
+  let heartbeatTimer: ReturnType<typeof setInterval> | null = null;
+  let reconnectTimer: ReturnType<typeof setTimeout> | null = null;
+  let closed = false;
+
+  function clearTimers() {
+    if (heartbeatTimer) { clearInterval(heartbeatTimer); heartbeatTimer = null; }
+    if (reconnectTimer) { clearTimeout(reconnectTimer); reconnectTimer = null; }
+  }
+
+  function connect() {
+    if (closed) return;
+
+    onStatusChange(retries > 0 ? 'reconnecting' : 'connecting');
+    const subprotocols = wsSubprotocols();
+    ws = subprotocols.length > 0
+      ? new WebSocket(wsUrl(`/ws/pipeline/${migrationId}`), subprotocols)
+      : new WebSocket(wsUrl(`/ws/pipeline/${migrationId}`));
+
+    ws.onopen = () => {
+      retries = 0;
+      onStatusChange('connected');
+
+      // Replay missed events after reconnect
+      if (lastSequence > 0) {
+        replayEvents(migrationId, lastSequence).then((events) => {
+          for (const event of events) {
+            onMessage(event);
+            if (event.sequence && event.sequence > lastSequence) {
+              lastSequence = event.sequence;
+            }
+          }
+        });
+      }
+
+      // Start heartbeat
+      heartbeatTimer = setInterval(() => {
+        if (ws && ws.readyState === WebSocket.OPEN) {
+          ws.send(JSON.stringify({ action: 'ping' }));
+        }
+      }, heartbeatInterval);
+    };
+
+    ws.onmessage = (event) => {
+      try {
+        const msg = JSON.parse(event.data) as WSMessageExtended;
+        // Track sequence for replay
+        if (msg.sequence && msg.sequence > lastSequence) {
+          lastSequence = msg.sequence;
+        }
+        onMessage(msg);
+      } catch {
+        // Ignore non-JSON messages
+      }
+    };
+
+    ws.onclose = () => {
+      clearTimers();
+      if (closed) {
+        onStatusChange('disconnected');
+        return;
+      }
+      if (retries < maxRetries) {
+        retries++;
+        const delay = Math.min(initialDelay * Math.pow(2, retries - 1), maxDelay);
+        onStatusChange('reconnecting');
+        reconnectTimer = setTimeout(connect, delay);
+      } else {
+        onStatusChange('failed');
+      }
+    };
+
+    ws.onerror = () => {
+      // onclose will fire after onerror, so reconnect logic is handled there
+    };
+  }
+
+  connect();
+
+  return {
+    close: () => {
+      closed = true;
+      clearTimers();
+      if (ws) {
+        ws.onclose = null; // Prevent reconnect
+        ws.close();
+        ws = null;
+      }
+      onStatusChange('disconnected');
+    }
+  };
+}
+
+/**
+ * Replay missed events from the server after a reconnect.
+ * Calls the event replay REST endpoint.
+ */
+async function replayEvents(migrationId: number, afterSequence: number): Promise<WSMessageExtended[]> {
+  try {
+    const events = await api.get(`/pipeline/migrations/${migrationId}/events?after_seq=${afterSequence}&limit=200`) as MigrationEvent[];
+    return events.map((e) => ({
+      step: e.stage || e.type,
+      status: e.level === 'critical' || e.level === 'error' ? 'error' : e.level === 'warning' ? 'warning' : 'info',
+      value: e.message,
+      stage: e.stage,
+      sequence: e.sequence,
+      timestamp: e.timestamp,
+    }));
+  } catch {
+    return [];
+  }
+}
+
+// MigrationEvent type for replay
+interface MigrationEvent {
+  id: number;
+  migrationId: number;
+  sequence: number;
+  timestamp: string;
+  level: string;
+  stage: string;
+  type: string;
+  message: string;
+  details?: string;
+  source: string;
+  correlationId?: string;
+}
+
+/**
+ * Legacy wsPipeline function for backward compatibility.
+ * Prefer wsPipelineConnect for new code.
+ */
 export function wsPipeline(
   migrationId: number,
   onMessage: (msg: WSMessageExtended) => void,
   onClose?: () => void,
   onError?: () => void
 ): WebSocket {
-  const ws = new WebSocket(wsUrl(`/ws/pipeline/${migrationId}`));
+  const subprotocols = wsSubprotocols();
+  const ws = subprotocols.length > 0
+    ? new WebSocket(wsUrl(`/ws/pipeline/${migrationId}`), subprotocols)
+    : new WebSocket(wsUrl(`/ws/pipeline/${migrationId}`));
   ws.onmessage = (event) => {
     const msg = JSON.parse(event.data) as WSMessageExtended;
     onMessage(msg);

@@ -14,7 +14,7 @@
 </script>
 
 <svg
-  class={`shrink-0 ${sizeClass} border-2 border-current border-t-transparent rounded-full animate-spin text-slate-400`}
+  class={`shrink-0 ${sizeClass} border-2 border-current border-t-transparent rounded-full animate-spin text-blue-500`}
   viewBox="0 0 24 24"
   fill="none"
   xmlns="http://www.w3.org/2000/svg"

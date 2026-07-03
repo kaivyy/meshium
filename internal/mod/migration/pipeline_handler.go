@@ -10,6 +10,7 @@ import (
 	"strings"
 	"time"
 
+	"meshium/internal/mod/auth"
 	"meshium/internal/shared"
 
 	"github.com/gorilla/websocket"
@@ -186,6 +187,12 @@ func (h *PipelineHandler) handlePipelineMigrationByID(w http.ResponseWriter, r *
 			return
 		}
 		h.handlePipelineAction(w, r, id, parts[2])
+	case "events":
+		if r.Method != http.MethodGet {
+			shared.WriteError(w, http.StatusMethodNotAllowed, "method not allowed", "METHOD_NOT_ALLOWED")
+			return
+		}
+		h.handleGetEvents(w, r, id)
 	default:
 		shared.WriteError(w, http.StatusNotFound, "not found", "NOT_FOUND")
 	}
@@ -529,6 +536,32 @@ func (h *PipelineHandler) handleAudit(w http.ResponseWriter, r *http.Request) {
 	shared.WriteJSON(w, http.StatusOK, trail)
 }
 
+// --- REST: Event Replay ---
+
+// handleGetEvents returns migration events after a given sequence number.
+// This is used by the frontend to replay missed events after a WebSocket reconnect.
+// Query params: after_seq (int64, default 0), limit (int, default 100)
+func (h *PipelineHandler) handleGetEvents(w http.ResponseWriter, r *http.Request, id int) {
+	afterSeq := int64(0)
+	if s := r.URL.Query().Get("after_seq"); s != "" {
+		if v, err := strconv.ParseInt(s, 10, 64); err == nil {
+			afterSeq = v
+		}
+	}
+	limit := 100
+	if l := r.URL.Query().Get("limit"); l != "" {
+		if v, err := strconv.Atoi(l); err == nil && v > 0 && v <= 1000 {
+			limit = v
+		}
+	}
+	events, err := h.repo.GetEvents(r.Context(), id, afterSeq, limit)
+	if err != nil {
+		shared.WriteError(w, http.StatusInternalServerError, "failed to get events", "INTERNAL")
+		return
+	}
+	shared.WriteJSON(w, http.StatusOK, events)
+}
+
 // --- REST: Export ---
 
 func (h *PipelineHandler) handlePipelineExport(w http.ResponseWriter, r *http.Request, id int) {
@@ -570,7 +603,12 @@ func (h *PipelineHandler) handlePipelineWS(w http.ResponseWriter, r *http.Reques
 		action = parts[1]
 	}
 
-	conn, err := h.upgrader.Upgrade(w, r, nil)
+	// Upgrade with subprotocol support for secure WS auth
+	responseHeader := http.Header{}
+	if proto := auth.WebSocketSubprotocolToken(r); proto != "" {
+		responseHeader.Set("Sec-WebSocket-Protocol", proto)
+	}
+	conn, err := h.upgrader.Upgrade(w, r, responseHeader)
 	if err != nil {
 		log.Printf("websocket upgrade failed: %v", err)
 		return
@@ -580,7 +618,39 @@ func (h *PipelineHandler) handlePipelineWS(w http.ResponseWriter, r *http.Reques
 	ctx, cancel := context.WithCancel(r.Context())
 	defer cancel()
 
-	// Start a goroutine to read client messages (for pause/cancel)
+	// Heartbeat: send ping every 30s, close if no pong within 10s
+	heartbeatDone := make(chan struct{})
+	go func() {
+		defer close(heartbeatDone)
+		ticker := time.NewTicker(30 * time.Second)
+		defer ticker.Stop()
+		lastPong := time.Now()
+		conn.SetPongHandler(func(appData string) error {
+			lastPong = time.Now()
+			return nil
+		})
+		for {
+			select {
+			case <-ticker.C:
+				if time.Since(lastPong) > 40*time.Second {
+					// No pong received for too long — close connection
+					log.Printf("websocket heartbeat timeout for migration %d", migrationID)
+					cancel()
+					return
+				}
+				if err := conn.WriteControl(websocket.PingMessage, nil, time.Now().Add(5*time.Second)); err != nil {
+					return
+				}
+			case <-ctx.Done():
+				return
+			}
+		}
+	}()
+
+	// Sequence counter for WS messages
+	var wsSeq int64
+
+	// Start a goroutine to read client messages (for pause/cancel/heartbeat)
 	go func() {
 		defer cancel()
 		for {
@@ -596,11 +666,14 @@ func (h *PipelineHandler) handlePipelineWS(w http.ResponseWriter, r *http.Reques
 			}
 			switch cmd.Action {
 			case "pause":
-				h.pipeline.Cancel(ctx, migrationID, nil)
+				h.pipeline.Pause(ctx, migrationID, nil)
 			case "cancel":
 				h.pipeline.Cancel(ctx, migrationID, nil)
 			case "resume":
 				h.pipeline.Resume(ctx, migrationID, nil)
+			case "ping":
+				// Client-initiated ping — respond with pong
+				conn.WriteJSON(WSMessageExtended{Step: "heartbeat", Status: "pong", Timestamp: time.Now().Format(time.RFC3339)})
 			}
 		}
 	}()
@@ -609,12 +682,14 @@ func (h *PipelineHandler) handlePipelineWS(w http.ResponseWriter, r *http.Reques
 	switch action {
 	case "execute":
 		runErr = h.pipeline.Execute(ctx, migrationID, func(msg WSMessage) {
+			wsSeq++
 			ext := WSMessageExtended{
 				Step:      msg.Step,
 				Status:    msg.Status,
 				Value:     msg.Value,
 				Error:     msg.Error,
 				Timestamp: time.Now().Format(time.RFC3339),
+				Sequence:  wsSeq,
 			}
 			if writeErr := conn.WriteJSON(ext); writeErr != nil {
 				log.Printf("websocket write failed: %v", writeErr)
@@ -623,12 +698,14 @@ func (h *PipelineHandler) handlePipelineWS(w http.ResponseWriter, r *http.Reques
 		})
 	case "rollback":
 		runErr = h.pipeline.Rollback(ctx, migrationID, func(msg WSMessage) {
+			wsSeq++
 			ext := WSMessageExtended{
 				Step:      msg.Step,
 				Status:    msg.Status,
 				Value:     msg.Value,
 				Error:     msg.Error,
 				Timestamp: time.Now().Format(time.RFC3339),
+				Sequence:  wsSeq,
 			}
 			if writeErr := conn.WriteJSON(ext); writeErr != nil {
 				log.Printf("websocket write failed: %v", writeErr)

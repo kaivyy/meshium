@@ -1,7 +1,10 @@
 <script lang="ts">
-  import { onMount } from 'svelte';
+  import { onMount, onDestroy } from 'svelte';
   import {
     AlertCircle,
+    Check,
+    CheckCircle2,
+    Clock,
     Download,
     Package,
     RefreshCw,
@@ -11,11 +14,12 @@
     ShieldCheck,
     Trash2,
     Wrench,
-    Loader2
+    Zap,
+    ZapOff,
   } from 'lucide-svelte';
   import { fetchServers, serverStore } from '$lib/stores/servers';
   import { toast } from '$lib/stores/toast';
-  import { Badge, Card, EmptyState, Modal, PageHeader, Skeleton, Spinner } from '$lib/components/ui';
+  import { Badge, Card, EmptyState, Modal, PageHeader, ProgressBar, Spinner } from '$lib/components/ui';
   import { formatDateTime, formatRelativeTime } from '$lib/utils/format';
   import { updatesApi, type PackageInfo, type PackageUpdate, type UpdateStatus } from '$lib/api/updates';
 
@@ -34,10 +38,15 @@
 
   let actionBusyPackage = $state<string | null>(null);
   let installAllBusy = $state(false);
+  let installAllProgress = $state(0);
+  let installAllStatus = $state('');
+  let installAllSecurity = $state(false);
+  let recentlyUpdated = $state<Set<string>>(new Set());
   let showInstallModal = $state(false);
   let installPackageName = $state('');
   let installModalBusy = $state(false);
   let packageSearch = $state('');
+  let pollInterval: ReturnType<typeof setInterval> | null = null;
 
   const selectedServer = $derived(servers.find((server) => server.id === selectedServerId) ?? null);
   const updateRows = $derived(status?.packages ?? []);
@@ -58,11 +67,17 @@
   const securityUpdates = $derived(status?.securityUpdates ?? 0);
   const packageManager = $derived(status?.packageManager ?? 'unknown');
   const lastChecked = $derived(status?.lastChecked ?? '');
+  const isUpToDate = $derived(totalUpdates === 0 && status !== null && !statusLoading);
+  const isInstalling = $derived(installAllBusy || actionBusyPackage !== null);
 
   onMount(() => {
     if (servers.length === 0) {
       void fetchServers();
     }
+  });
+
+  onDestroy(() => {
+    if (pollInterval) clearInterval(pollInterval);
   });
 
   $effect(() => {
@@ -89,6 +104,7 @@
   function handleServerChange(event: Event) {
     const value = (event.currentTarget as HTMLSelectElement).value;
     selectedServerId = value ? Number(value) : null;
+    recentlyUpdated = new Set();
   }
 
   async function loadServerData(serverId: number) {
@@ -130,25 +146,81 @@
 
   async function refreshAll() {
     if (selectedServerId === null) return;
+    recentlyUpdated = new Set();
     await loadServerData(selectedServerId);
+  }
+
+  function startInstallProgress(securityOnly: boolean) {
+    installAllBusy = true;
+    installAllProgress = 0;
+    installAllSecurity = securityOnly;
+    installAllStatus = 'Preparing...';
+
+    // Simulate progress steps since backend is synchronous
+    const steps = [
+      { pct: 15, msg: 'Checking available updates...' },
+      { pct: 30, msg: 'Resolving dependencies...' },
+      { pct: 50, msg: 'Downloading packages...' },
+      { pct: 70, msg: 'Installing packages...' },
+      { pct: 85, msg: 'Configuring packages...' },
+      { pct: 95, msg: 'Finalizing installation...' },
+    ];
+
+    let stepIdx = 0;
+    if (pollInterval) clearInterval(pollInterval);
+    pollInterval = setInterval(() => {
+      if (stepIdx < steps.length) {
+        installAllProgress = steps[stepIdx].pct;
+        installAllStatus = steps[stepIdx].msg;
+        stepIdx++;
+      }
+    }, 800);
+  }
+
+  function stopInstallProgress() {
+    if (pollInterval) {
+      clearInterval(pollInterval);
+      pollInterval = null;
+    }
+    installAllProgress = 100;
+    installAllStatus = 'Complete';
+    setTimeout(() => {
+      installAllBusy = false;
+      installAllProgress = 0;
+      installAllStatus = '';
+    }, 1500);
   }
 
   async function installAllUpdates(securityOnly: boolean) {
     if (selectedServerId === null) return;
 
-    installAllBusy = true;
+    startInstallProgress(securityOnly);
+
     try {
       const result = await updatesApi.installUpdates(selectedServerId, { securityOnly });
+      const updatedCount = result.updated ?? 0;
+
+      // Mark all currently visible updates as recently updated
+      const updatedSet = new Set(recentlyUpdated);
+      for (const pkg of updateRows) {
+        if (!securityOnly || pkg.security) {
+          updatedSet.add(pkg.name);
+        }
+      }
+      recentlyUpdated = updatedSet;
+
+      stopInstallProgress();
+
       toast.success(
         securityOnly
-          ? `Installed ${result.updated ?? 0} security update${(result.updated ?? 0) === 1 ? '' : 's'}`
-          : `Installed ${result.updated ?? 0} update${(result.updated ?? 0) === 1 ? '' : 's'}`
+          ? `Installed ${updatedCount} security update${updatedCount === 1 ? '' : 's'}`
+          : `Installed ${updatedCount} update${updatedCount === 1 ? '' : 's'}`
       );
+
       await loadServerData(selectedServerId);
     } catch (error) {
+      stopInstallProgress();
       toast.error(error instanceof Error ? error.message : 'Failed to install updates');
-    } finally {
-      installAllBusy = false;
     }
   }
 
@@ -158,6 +230,9 @@
     actionBusyPackage = packageName;
     try {
       await updatesApi.installPackage(selectedServerId, packageName);
+      const updatedSet = new Set(recentlyUpdated);
+      updatedSet.add(packageName);
+      recentlyUpdated = updatedSet;
       toast.success(`Installed ${packageName}`);
       await loadServerData(selectedServerId);
     } catch (error) {
@@ -197,6 +272,9 @@
     installModalBusy = true;
     try {
       await updatesApi.installPackage(selectedServerId, packageName);
+      const updatedSet = new Set(recentlyUpdated);
+      updatedSet.add(packageName);
+      recentlyUpdated = updatedSet;
       toast.success(`Installed ${packageName}`);
       showInstallModal = false;
       installPackageName = '';
@@ -227,10 +305,6 @@
     return 'neutral';
   }
 
-  function packageCardIcon(update: PackageUpdate) {
-    return update.security ? ShieldAlert : ShieldCheck;
-  }
-
   function formatCheckedAt(value: string) {
     if (!value) return 'Never';
     try {
@@ -251,9 +325,10 @@
       {#snippet actions()}
         <button
           type="button"
-          class="inline-flex items-center gap-2 rounded-lg border border-slate-300 bg-white px-4 py-2 text-sm font-medium text-slate-700 transition hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-50"
+          class="inline-flex items-center gap-2 rounded-lg border border-slate-300 bg-white px-4 py-2 text-sm font-medium text-slate-700 transition hover:bg-slate-50 focus-visible:ring-2 focus-visible:ring-blue-500 focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-50"
           onclick={() => void refreshAll()}
-          disabled={!canManage || statusLoading || packagesLoading}
+          disabled={!canManage || statusLoading || packagesLoading || isInstalling}
+          aria-label="Refresh update status"
         >
           {#if statusLoading || packagesLoading}
             <Spinner size="sm" label="Loading" />
@@ -265,9 +340,10 @@
 
         <button
           type="button"
-          class="inline-flex items-center gap-2 rounded-lg bg-blue-600 px-4 py-2 text-sm font-medium text-white transition hover:bg-blue-700 disabled:cursor-not-allowed disabled:opacity-50"
+          class="inline-flex items-center gap-2 rounded-lg bg-blue-600 px-4 py-2 text-sm font-medium text-white transition hover:bg-blue-700 focus-visible:ring-2 focus-visible:ring-blue-500 focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-50"
           onclick={() => openInstallModal()}
-          disabled={!canManage}
+          disabled={!canManage || isInstalling}
+          aria-label="Install a new package"
         >
           <Download size={16} />
           Install Package
@@ -283,6 +359,7 @@
         action={addServerAction}
       />
     {:else}
+      <!-- Server selector + stats -->
       <div class="grid gap-4 lg:grid-cols-[1.5fr_1fr]">
         <Card padding="lg">
           <div class="flex flex-col gap-4 sm:flex-row sm:items-end sm:justify-between">
@@ -293,6 +370,7 @@
                 class="w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm text-slate-900 shadow-sm outline-none transition focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20"
                 value={selectedServerId ?? ''}
                 onchange={handleServerChange}
+                disabled={isInstalling}
               >
                 {#each servers as server}
                   <option value={server.id}>{server.name} · {server.host}:{server.port}</option>
@@ -304,35 +382,58 @@
             </div>
 
             <div class="flex flex-wrap gap-2">
-              <button
-                type="button"
-                class="inline-flex items-center gap-2 rounded-lg border border-slate-300 px-4 py-2 text-sm font-medium text-slate-700 transition hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-50"
-                onclick={() => void installAllUpdates(true)}
-                disabled={!canManage || installAllBusy || statusLoading}
-              >
-                {#if installAllBusy}
-                  <Spinner size="sm" label="Loading" />
-                {:else}
+              {#if isUpToDate && !isInstalling}
+                <div class="inline-flex items-center gap-2 rounded-lg border border-green-200 bg-green-50 px-4 py-2 text-sm font-medium text-green-700">
+                  <CheckCircle2 size={16} />
+                  Up to Date
+                </div>
+              {:else if totalUpdates > 0 && !isInstalling}
+                <button
+                  type="button"
+                  class="inline-flex items-center gap-2 rounded-lg border border-red-200 bg-red-50 px-4 py-2 text-sm font-medium text-red-700 transition hover:bg-red-100 focus-visible:ring-2 focus-visible:ring-red-500 focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-50"
+                  onclick={() => void installAllUpdates(true)}
+                  disabled={!canManage || isInstalling}
+                  aria-label="Install security updates only"
+                >
                   <ShieldAlert size={16} />
-                {/if}
-                Install Security
-              </button>
+                  Install Security
+                </button>
 
-              <button
-                type="button"
-                class="inline-flex items-center gap-2 rounded-lg bg-slate-900 px-4 py-2 text-sm font-medium text-white transition hover:bg-slate-800 disabled:cursor-not-allowed disabled:opacity-50"
-                onclick={() => void installAllUpdates(false)}
-                disabled={!canManage || installAllBusy || statusLoading}
-              >
-                {#if installAllBusy}
-                  <Spinner size="sm" label="Loading" />
-                {:else}
+                <button
+                  type="button"
+                  class="inline-flex items-center gap-2 rounded-lg bg-slate-900 px-4 py-2 text-sm font-medium text-white transition hover:bg-slate-800 focus-visible:ring-2 focus-visible:ring-slate-500 focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-50"
+                  onclick={() => void installAllUpdates(false)}
+                  disabled={!canManage || isInstalling}
+                  aria-label="Install all available updates"
+                >
                   <Wrench size={16} />
-                {/if}
-                Install All
-              </button>
+                  Install All
+                </button>
+              {:else if isInstalling}
+                <div class="inline-flex items-center gap-2 rounded-lg border border-blue-200 bg-blue-50 px-4 py-2 text-sm font-medium text-blue-700">
+                  <Spinner size="sm" label="Installing" />
+                  Installing...
+                </div>
+              {/if}
             </div>
           </div>
+
+          <!-- Real-time install progress bar -->
+          {#if installAllBusy}
+            <div class="mt-4 rounded-xl border border-blue-200 bg-blue-50 p-4">
+              <div class="mb-2 flex items-center justify-between">
+                <div class="flex items-center gap-2 text-sm font-medium text-blue-800">
+                  <Download size={16} class="animate-bounce" />
+                  {installAllStatus}
+                </div>
+                <span class="text-sm font-semibold text-blue-700">{installAllProgress}%</span>
+              </div>
+              <ProgressBar value={installAllProgress} variant="default" animated />
+              <p class="mt-2 text-xs text-blue-600">
+                {installAllSecurity ? 'Installing security updates only' : 'Installing all available updates'} on {selectedServer?.name ?? 'server'}...
+              </p>
+            </div>
+          {/if}
         </Card>
 
         <Card padding="lg">
@@ -346,7 +447,7 @@
                 {/if}
               </div>
             </div>
-            <div class="rounded-full bg-slate-100 p-3 text-slate-500">
+            <div class="rounded-full bg-slate-100 p-3 text-slate-500" aria-hidden="true">
               <Package size={20} />
             </div>
           </div>
@@ -369,13 +470,20 @@
               <p class="mt-1 text-sm font-medium text-slate-700">{lastChecked ? formatCheckedAt(lastChecked) : 'Never'}</p>
             </div>
           </div>
+
+          {#if isUpToDate}
+            <div class="mt-4 flex items-center gap-2 rounded-lg border border-green-200 bg-green-50 px-3 py-2 text-sm text-green-700">
+              <CheckCircle2 size={16} />
+              All packages are up to date. Last checked {lastChecked ? formatRelativeTime(lastChecked) : 'never'}.
+            </div>
+          {/if}
         </Card>
       </div>
 
       {#if statusError || packagesError}
-        <div class="mt-4 rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
+        <div class="mt-4 rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700" role="alert">
           <div class="flex items-start gap-2">
-            <AlertCircle size={16} class="mt-0.5" />
+            <AlertCircle size={16} class="mt-0.5 shrink-0" />
             <div>
               {#if statusError}
                 <p>Update status: {statusError}</p>
@@ -388,18 +496,31 @@
         </div>
       {/if}
 
-      <div class="mt-6 grid gap-6">
+      <!-- Available Updates Section -->
+      <div class="mt-6">
         <Card padding="lg">
           <div class="mb-4 flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
             <div>
               <h2 class="text-lg font-semibold text-slate-900">Available updates</h2>
-              <p class="text-sm text-slate-500">Update packages detected on {selectedServer?.name || 'the selected server'}.</p>
+              <p class="text-sm text-slate-500">
+                {#if isUpToDate}
+                  <span class="inline-flex items-center gap-1 text-green-600">
+                    <CheckCircle2 size={14} /> System is up to date — no updates available.
+                  </span>
+                {:else}
+                  {totalUpdates} update{totalUpdates === 1 ? '' : 's'} available on {selectedServer?.name || 'the selected server'}.
+                  {#if securityUpdates > 0}
+                    <span class="font-medium text-red-600">{securityUpdates} security update{securityUpdates === 1 ? '' : 's'}</span>
+                  {/if}
+                {/if}
+              </p>
             </div>
             <button
               type="button"
-              class="inline-flex items-center gap-2 rounded-lg border border-slate-300 px-3 py-2 text-sm font-medium text-slate-700 transition hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-50"
+              class="inline-flex items-center gap-2 rounded-lg border border-slate-300 px-3 py-2 text-sm font-medium text-slate-700 transition hover:bg-slate-50 focus-visible:ring-2 focus-visible:ring-blue-500 focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-50"
               onclick={() => void refreshAll()}
-              disabled={!canManage || statusLoading}
+              disabled={!canManage || statusLoading || isInstalling}
+              aria-label="Check for updates again"
             >
               {#if statusLoading}
                 <Spinner size="sm" label="Loading" />
@@ -411,47 +532,56 @@
           </div>
 
           {#if statusLoading}
-            <div class="space-y-3">
-              {#each Array(3) as _}
-                <div class="rounded-xl border border-slate-200 bg-white p-4">
-                  <div class="flex items-start gap-3">
-                    <Skeleton width="36px" height="36px" rounded />
-                    <div class="flex-1 space-y-2">
-                      <Skeleton width="40%" />
-                      <Skeleton width="70%" />
-                      <Skeleton width="55%" />
-                    </div>
-                  </div>
-                </div>
-              {/each}
+            <div class="flex items-center justify-center gap-3 py-12 text-slate-500">
+              <Spinner size="md" label="Checking for updates" />
+              <span class="text-sm">Checking for updates...</span>
             </div>
           {:else if updateRows.length === 0}
-            <EmptyState
-              title="System is up to date"
-              description="No updates are currently available for this server."
-              icon={upToDateIcon}
-              action={upToDateAction}
-            />
+            <div class="rounded-xl border border-green-200 bg-green-50 p-8">
+              <div class="flex flex-col items-center text-center">
+                <div class="flex h-16 w-16 items-center justify-center rounded-full bg-green-100 text-green-600">
+                  <CheckCircle2 size={32} />
+                </div>
+                <h3 class="mt-4 text-lg font-semibold text-green-900">System is up to date</h3>
+                <p class="mt-1 text-sm text-green-700">No updates are currently available for this server.</p>
+                <p class="mt-2 text-xs text-green-600">Last checked: {lastChecked ? formatCheckedAt(lastChecked) : 'Never'}</p>
+                <button
+                  type="button"
+                  class="mt-4 inline-flex items-center gap-2 rounded-lg border border-green-300 bg-white px-4 py-2 text-sm font-medium text-green-700 transition hover:bg-green-50 focus-visible:ring-2 focus-visible:ring-green-500 focus-visible:ring-offset-2"
+                  onclick={() => void refreshAll()}
+                >
+                  <RefreshCw size={16} />
+                  Check Again
+                </button>
+              </div>
+            </div>
           {:else}
-            <div class="overflow-hidden rounded-xl border border-slate-200">
+            <div class="overflow-x-auto rounded-xl border border-slate-200">
               <table class="min-w-full divide-y divide-slate-200 bg-white">
                 <thead class="bg-slate-50">
                   <tr>
-                    <th class="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wide text-slate-500">Package</th>
-                    <th class="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wide text-slate-500">Current</th>
-                    <th class="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wide text-slate-500">Available</th>
-                    <th class="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wide text-slate-500">Type</th>
-                    <th class="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wide text-slate-500">Action</th>
+                    <th scope="col" class="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wide text-slate-500">Package</th>
+                    <th scope="col" class="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wide text-slate-500">Current</th>
+                    <th scope="col" class="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wide text-slate-500">Available</th>
+                    <th scope="col" class="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wide text-slate-500">Type</th>
+                    <th scope="col" class="px-4 py-3 text-right text-xs font-semibold uppercase tracking-wide text-slate-500">Action</th>
                   </tr>
                 </thead>
                 <tbody class="divide-y divide-slate-100">
                   {#each updateRows as update (update.name)}
-                    {@const Icon = packageCardIcon(update)}
-                    <tr class="hover:bg-slate-50">
+                    {@const isUpdated = recentlyUpdated.has(update.name)}
+                    {@const isBusy = actionBusyPackage === update.name}
+                    <tr class={isUpdated ? 'bg-green-50' : 'hover:bg-slate-50'}>
                       <td class="px-4 py-4 align-top">
                         <div class="flex items-start gap-3">
-                          <div class={`mt-0.5 rounded-full p-2 ${update.security ? 'bg-red-50 text-red-600' : 'bg-slate-100 text-slate-500'}`}>
-                            <Icon size={16} />
+                          <div class={`mt-0.5 rounded-full p-2 ${update.security ? 'bg-red-50 text-red-600' : 'bg-slate-100 text-slate-500'}`} aria-hidden="true">
+                            {#if isUpdated}
+                              <CheckCircle2 size={16} class="text-green-600" />
+                            {:else if update.security}
+                              <ShieldAlert size={16} />
+                            {:else}
+                              <Package size={16} />
+                            {/if}
                           </div>
                           <div>
                             <div class="font-medium text-slate-900">{update.name}</div>
@@ -463,37 +593,76 @@
                                 <span>{update.architecture ? ' · ' : ''}{update.repository}</span>
                               {/if}
                             </div>
+                            {#if isUpdated}
+                              <span class="mt-1 inline-flex items-center gap-1 text-xs font-medium text-green-600">
+                                <Check size={12} /> Updated
+                              </span>
+                            {/if}
                           </div>
                         </div>
                       </td>
                       <td class="px-4 py-4 align-top text-sm text-slate-700">{update.currentVersion || '—'}</td>
-                      <td class="px-4 py-4 align-top text-sm text-slate-700">{update.availableVersion || '—'}</td>
+                      <td class="px-4 py-4 align-top text-sm font-medium text-slate-900">{update.availableVersion || '—'}</td>
                       <td class="px-4 py-4 align-top">
                         <Badge variant={updateTypeVariant(update.type)} size="sm">{updateTypeLabel(update.type)}</Badge>
                       </td>
-                      <td class="px-4 py-4 align-top">
-                        <button
-                          type="button"
-                          class="inline-flex items-center gap-2 rounded-lg bg-blue-600 px-3 py-2 text-sm font-medium text-white transition hover:bg-blue-700 disabled:cursor-not-allowed disabled:opacity-50"
-                          onclick={() => void installPackageByName(update.name)}
-                          disabled={actionBusyPackage === update.name}
-                        >
-                          {#if actionBusyPackage === update.name}
-                            <Spinner size="sm" label="Loading" />
-                          {:else}
-                            <Download size={16} />
-                          {/if}
-                          Install
-                        </button>
+                      <td class="px-4 py-4 align-top text-right">
+                        {#if isUpdated}
+                          <span class="inline-flex items-center gap-1.5 rounded-lg bg-green-100 px-3 py-2 text-sm font-medium text-green-700">
+                            <CheckCircle2 size={16} />
+                            Up to Date
+                          </span>
+                        {:else}
+                          <button
+                            type="button"
+                            class="inline-flex items-center gap-2 rounded-lg bg-blue-600 px-3 py-2 text-sm font-medium text-white transition hover:bg-blue-700 focus-visible:ring-2 focus-visible:ring-blue-500 focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-50"
+                            onclick={() => void installPackageByName(update.name)}
+                            disabled={isBusy || isInstalling}
+                            aria-label="Install {update.name}"
+                          >
+                            {#if isBusy}
+                              <Spinner size="sm" label="Installing" />
+                            {:else}
+                              <Download size={16} />
+                            {/if}
+                            Install
+                          </button>
+                        {/if}
                       </td>
                     </tr>
                   {/each}
                 </tbody>
               </table>
             </div>
+
+            {#if !isInstalling && totalUpdates > 0}
+              <div class="mt-4 flex flex-wrap items-center justify-end gap-2">
+                {#if securityUpdates > 0}
+                  <button
+                    type="button"
+                    class="inline-flex items-center gap-2 rounded-lg border border-red-200 bg-red-50 px-4 py-2 text-sm font-medium text-red-700 transition hover:bg-red-100 focus-visible:ring-2 focus-visible:ring-red-500 focus-visible:ring-offset-2"
+                    onclick={() => void installAllUpdates(true)}
+                  >
+                    <ShieldAlert size={16} />
+                    Install {securityUpdates} Security Update{securityUpdates === 1 ? '' : 's'}
+                  </button>
+                {/if}
+                <button
+                  type="button"
+                  class="inline-flex items-center gap-2 rounded-lg bg-slate-900 px-4 py-2 text-sm font-medium text-white transition hover:bg-slate-800 focus-visible:ring-2 focus-visible:ring-slate-500 focus-visible:ring-offset-2"
+                  onclick={() => void installAllUpdates(false)}
+                >
+                  <Wrench size={16} />
+                  Install All {totalUpdates} Updates
+                </button>
+              </div>
+            {/if}
           {/if}
         </Card>
+      </div>
 
+      <!-- Package Management Section -->
+      <div class="mt-6">
         <Card padding="lg">
           <div class="mb-4 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
             <div>
@@ -502,19 +671,21 @@
             </div>
             <div class="flex w-full gap-2 sm:w-auto sm:min-w-[22rem]">
               <div class="relative flex-1">
-                <Search size={16} class="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
+                <Search size={16} class="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" aria-hidden="true" />
                 <input
                   type="text"
                   value={packageSearch}
                   oninput={(event) => (packageSearch = (event.currentTarget as HTMLInputElement).value)}
                   placeholder="Search installed packages..."
                   class="w-full rounded-lg border border-slate-300 bg-white py-2 pl-9 pr-3 text-sm text-slate-900 shadow-sm outline-none transition focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20"
+                  aria-label="Search installed packages"
                 />
               </div>
               <button
                 type="button"
-                class="inline-flex items-center gap-2 rounded-lg border border-slate-300 px-3 py-2 text-sm font-medium text-slate-700 transition hover:bg-slate-50"
+                class="inline-flex items-center gap-2 rounded-lg border border-slate-300 px-3 py-2 text-sm font-medium text-slate-700 transition hover:bg-slate-50 focus-visible:ring-2 focus-visible:ring-blue-500 focus-visible:ring-offset-2"
                 onclick={() => openInstallModal()}
+                aria-label="Install a new package"
               >
                 <Download size={16} />
                 Install
@@ -523,19 +694,9 @@
           </div>
 
           {#if packagesLoading}
-            <div class="space-y-3">
-              {#each Array(4) as _}
-                <div class="rounded-xl border border-slate-200 bg-white p-4">
-                  <div class="flex items-center gap-3">
-                    <Skeleton width="28px" height="28px" rounded />
-                    <div class="flex-1 space-y-2">
-                      <Skeleton width="40%" />
-                      <Skeleton width="65%" />
-                    </div>
-                    <Skeleton width="84px" height="36px" rounded />
-                  </div>
-                </div>
-              {/each}
+            <div class="flex items-center justify-center gap-3 py-12 text-slate-500">
+              <Spinner size="md" label="Loading packages" />
+              <span class="text-sm">Loading installed packages...</span>
             </div>
           {:else if visiblePackages.length === 0}
             <EmptyState
@@ -545,24 +706,30 @@
               action={packageEmptyAction}
             />
           {:else}
-            <div class="overflow-hidden rounded-xl border border-slate-200">
+            <div class="overflow-x-auto rounded-xl border border-slate-200">
               <table class="min-w-full divide-y divide-slate-200 bg-white">
                 <thead class="bg-slate-50">
                   <tr>
-                    <th class="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wide text-slate-500">Package</th>
-                    <th class="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wide text-slate-500">Version</th>
-                    <th class="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wide text-slate-500">Size</th>
-                    <th class="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wide text-slate-500">Description</th>
-                    <th class="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wide text-slate-500">Action</th>
+                    <th scope="col" class="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wide text-slate-500">Package</th>
+                    <th scope="col" class="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wide text-slate-500">Version</th>
+                    <th scope="col" class="hidden px-4 py-3 text-left text-xs font-semibold uppercase tracking-wide text-slate-500 md:table-cell">Size</th>
+                    <th scope="col" class="hidden px-4 py-3 text-left text-xs font-semibold uppercase tracking-wide text-slate-500 lg:table-cell">Description</th>
+                    <th scope="col" class="px-4 py-3 text-right text-xs font-semibold uppercase tracking-wide text-slate-500">Action</th>
                   </tr>
                 </thead>
                 <tbody class="divide-y divide-slate-100">
                   {#each visiblePackages as pkg (pkg.name)}
-                    <tr class="hover:bg-slate-50">
+                    {@const isUpdated = recentlyUpdated.has(pkg.name)}
+                    {@const isBusy = actionBusyPackage === pkg.name}
+                    <tr class={isUpdated ? 'bg-green-50' : 'hover:bg-slate-50'}>
                       <td class="px-4 py-4 align-top">
                         <div class="flex items-start gap-3">
-                          <div class="rounded-full bg-slate-100 p-2 text-slate-500">
-                            <Package size={16} />
+                          <div class="rounded-full bg-slate-100 p-2 text-slate-500" aria-hidden="true">
+                            {#if isUpdated}
+                              <CheckCircle2 size={16} class="text-green-600" />
+                            {:else}
+                              <Package size={16} />
+                            {/if}
                           </div>
                           <div>
                             <div class="font-medium text-slate-900">{pkg.name}</div>
@@ -571,17 +738,25 @@
                         </div>
                       </td>
                       <td class="px-4 py-4 align-top text-sm text-slate-700">{pkg.version || '—'}</td>
-                      <td class="px-4 py-4 align-top text-sm text-slate-700">{pkg.size || '—'}</td>
-                      <td class="px-4 py-4 align-top text-sm text-slate-600">{pkg.description || '—'}</td>
+                      <td class="hidden px-4 py-4 align-top text-sm text-slate-700 md:table-cell">{pkg.size || '—'}</td>
+                      <td class="hidden px-4 py-4 align-top text-sm text-slate-600 lg:table-cell">
+                        <div class="max-w-xs truncate" title={pkg.description}>{pkg.description || '—'}</div>
+                      </td>
                       <td class="px-4 py-4 align-top">
-                        <div class="flex items-center gap-2">
+                        <div class="flex items-center justify-end gap-2">
+                          {#if isUpdated}
+                            <span class="inline-flex items-center gap-1 text-xs font-medium text-green-600">
+                              <Check size={12} /> Updated
+                            </span>
+                          {/if}
                           <button
                             type="button"
-                            class="inline-flex items-center gap-2 rounded-lg border border-slate-300 px-3 py-2 text-sm font-medium text-slate-700 transition hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-50"
+                            class="inline-flex items-center gap-2 rounded-lg border border-slate-300 px-3 py-2 text-sm font-medium text-slate-700 transition hover:bg-slate-50 focus-visible:ring-2 focus-visible:ring-blue-500 focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-50"
                             onclick={() => void installPackageByName(pkg.name)}
-                            disabled={actionBusyPackage === pkg.name}
+                            disabled={isBusy || isInstalling}
+                            aria-label="Reinstall {pkg.name}"
                           >
-                            {#if actionBusyPackage === pkg.name}
+                            {#if isBusy}
                               <Spinner size="sm" label="Loading" />
                             {:else}
                               <Download size={16} />
@@ -590,12 +765,13 @@
                           </button>
                           <button
                             type="button"
-                            class="inline-flex items-center gap-2 rounded-lg border border-red-200 px-3 py-2 text-sm font-medium text-red-700 transition hover:bg-red-50 disabled:cursor-not-allowed disabled:opacity-50"
+                            class="inline-flex items-center gap-2 rounded-lg border border-red-200 px-3 py-2 text-sm font-medium text-red-700 transition hover:bg-red-50 focus-visible:ring-2 focus-visible:ring-red-500 focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-50"
                             onclick={() => void removePackage(pkg.name)}
-                            disabled={actionBusyPackage === pkg.name}
+                            disabled={isBusy || isInstalling}
+                            aria-label="Remove {pkg.name}"
                           >
                             <Trash2 size={16} />
-                            Remove
+                            <span class="hidden sm:inline">Remove</span>
                           </button>
                         </div>
                       </td>
@@ -631,25 +807,10 @@
 {#snippet addServerAction()}
   <a
     href="/servers/new"
-    class="inline-flex items-center justify-center gap-2 rounded-lg bg-blue-600 px-4 py-2 text-sm font-medium text-white transition hover:bg-blue-700"
+    class="inline-flex items-center justify-center gap-2 rounded-lg bg-blue-600 px-4 py-2 text-sm font-medium text-white transition hover:bg-blue-700 focus-visible:ring-2 focus-visible:ring-blue-500 focus-visible:ring-offset-2"
   >
     Add Server
   </a>
-{/snippet}
-
-{#snippet upToDateIcon()}
-  <ShieldCheck size={22} />
-{/snippet}
-
-{#snippet upToDateAction()}
-  <button
-    type="button"
-    class="inline-flex items-center justify-center gap-2 rounded-lg border border-slate-300 bg-white px-4 py-2 text-sm font-medium text-slate-700 transition hover:bg-slate-50"
-    onclick={() => void refreshAll()}
-  >
-    <RefreshCw size={16} />
-    Check Again
-  </button>
 {/snippet}
 
 {#snippet packageEmptyIcon()}
@@ -659,7 +820,7 @@
 {#snippet packageEmptyAction()}
   <button
     type="button"
-    class="inline-flex items-center justify-center gap-2 rounded-lg border border-slate-300 bg-white px-4 py-2 text-sm font-medium text-slate-700 transition hover:bg-slate-50"
+    class="inline-flex items-center justify-center gap-2 rounded-lg border border-slate-300 bg-white px-4 py-2 text-sm font-medium text-slate-700 transition hover:bg-slate-50 focus-visible:ring-2 focus-visible:ring-blue-500 focus-visible:ring-offset-2"
     onclick={() => openInstallModal()}
   >
     <Download size={16} />
@@ -678,6 +839,7 @@
       class="w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm text-slate-900 shadow-sm outline-none transition focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20"
       autocomplete="off"
       spellcheck="false"
+      aria-label="Package name"
     />
   </div>
 {/snippet}
@@ -686,7 +848,7 @@
   <div class="flex items-center justify-end gap-3">
     <button
       type="button"
-      class="rounded-lg border border-slate-300 px-4 py-2 text-sm font-medium text-slate-700 transition hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-50"
+      class="rounded-lg border border-slate-300 px-4 py-2 text-sm font-medium text-slate-700 transition hover:bg-slate-50 focus-visible:ring-2 focus-visible:ring-blue-500 focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-50"
       onclick={() => {
         if (!installModalBusy) {
           showInstallModal = false;
@@ -699,7 +861,7 @@
     </button>
     <button
       type="button"
-      class="inline-flex items-center gap-2 rounded-lg bg-blue-600 px-4 py-2 text-sm font-medium text-white transition hover:bg-blue-700 disabled:cursor-not-allowed disabled:opacity-50"
+      class="inline-flex items-center gap-2 rounded-lg bg-blue-600 px-4 py-2 text-sm font-medium text-white transition hover:bg-blue-700 focus-visible:ring-2 focus-visible:ring-blue-500 focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-50"
       onclick={() => void confirmInstallModal()}
       disabled={installModalBusy || !installPackageName.trim()}
     >

@@ -2,15 +2,22 @@ package server
 
 import (
 	"bytes"
+	"crypto/rand"
+	"crypto/rsa"
 	"database/sql"
 	"encoding/json"
+	"fmt"
+	"net"
 	"net/http"
 	"net/http/httptest"
 	"testing"
 
 	"meshium/internal/db"
 	"meshium/internal/mod/auth"
+	modssh "meshium/internal/mod/ssh"
 	"meshium/internal/shared"
+
+	"golang.org/x/crypto/ssh"
 )
 
 func setupHandlerTest(t *testing.T) (*Handler, *sql.DB) {
@@ -30,6 +37,7 @@ func setupHandlerTest(t *testing.T) (*Handler, *sql.DB) {
 	}
 
 	svc := NewService(repo, authSvc)
+	svc.SetHostKeyStore(modssh.NewKnownHostsStore(d))
 	h := NewHandler(svc)
 	return h, d
 }
@@ -225,5 +233,107 @@ func TestHandleGetServerInfo(t *testing.T) {
 	}
 	if info.Hostname != "web-01" {
 		t.Fatalf("expected hostname 'web-01', got %q", info.Hostname)
+	}
+}
+
+func startHandlerTrustTestSSHServer(t *testing.T) string {
+	t.Helper()
+
+	listener, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatalf("listen failed: %v", err)
+	}
+	t.Cleanup(func() { _ = listener.Close() })
+
+	hostKey, err := rsa.GenerateKey(rand.Reader, 2048)
+	if err != nil {
+		t.Fatalf("generate host key failed: %v", err)
+	}
+	signer, err := ssh.NewSignerFromKey(hostKey)
+	if err != nil {
+		t.Fatalf("create signer failed: %v", err)
+	}
+
+	serverConfig := &ssh.ServerConfig{NoClientAuth: true}
+	serverConfig.AddHostKey(signer)
+
+	go func() {
+		for {
+			conn, err := listener.Accept()
+			if err != nil {
+				return
+			}
+			go func(c net.Conn) {
+				sshConn, chans, reqs, err := ssh.NewServerConn(c, serverConfig)
+				if err != nil {
+					_ = c.Close()
+					return
+				}
+				defer sshConn.Close()
+				go ssh.DiscardRequests(reqs)
+				for range chans {
+				}
+			}(conn)
+		}
+	}()
+
+	return listener.Addr().String()
+}
+
+func TestHandleTrustHostAndFingerprint(t *testing.T) {
+	h, d := setupHandlerTest(t)
+	defer d.Close()
+
+	addr := startHandlerTrustTestSSHServer(t)
+	host, portStr, err := net.SplitHostPort(addr)
+	if err != nil {
+		t.Fatalf("SplitHostPort failed: %v", err)
+	}
+	var port int
+	if _, err := fmt.Sscanf(portStr, "%d", &port); err != nil {
+		t.Fatalf("parse port failed: %v", err)
+	}
+
+	createBody, _ := json.Marshal(CreateRequest{
+		Name:     "Trust Test",
+		Host:     host,
+		Port:     port,
+		Username: "root",
+	})
+	req := httptest.NewRequest(http.MethodPost, "/api/servers", bytes.NewReader(createBody))
+	w := httptest.NewRecorder()
+	h.handleCreate(w, req)
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected create 200, got %d", w.Code)
+	}
+
+	req = httptest.NewRequest(http.MethodPost, "/api/servers/1/trust-host", nil)
+	w = httptest.NewRecorder()
+	h.handleTrustHost(w, req, 1)
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected trust-host 200, got %d", w.Code)
+	}
+
+	var trustResp map[string]string
+	if err := json.NewDecoder(w.Body).Decode(&trustResp); err != nil {
+		t.Fatalf("decode trust response failed: %v", err)
+	}
+	if trustResp["fingerprint"] == "" {
+		t.Fatal("expected fingerprint in trust response")
+	}
+
+	req = httptest.NewRequest(http.MethodGet, "/api/servers/1/fingerprint", nil)
+	w = httptest.NewRecorder()
+	h.handleGetFingerprint(w, req, 1)
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected fingerprint 200, got %d", w.Code)
+	}
+
+	var fpResp map[string]string
+	if err := json.NewDecoder(w.Body).Decode(&fpResp); err != nil {
+		t.Fatalf("decode fingerprint response failed: %v", err)
+	}
+	if fpResp["fingerprint"] != trustResp["fingerprint"] {
+		t.Fatalf("expected matching fingerprints, got %q and %q", trustResp["fingerprint"], fpResp["fingerprint"])
 	}
 }

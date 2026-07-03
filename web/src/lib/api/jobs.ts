@@ -90,10 +90,12 @@ export function wsJobProgress(
   onError?: () => void
 ): WebSocket {
   const proto = location.protocol === 'https:' ? 'wss' : 'ws';
+  const url = `${proto}://${location.host}/ws/jobs/${jobID}/progress`;
   const token = typeof localStorage !== 'undefined' ? localStorage.getItem('meshium_session_token') : null;
-  const tokenParam = token ? `?token=${encodeURIComponent(token)}` : '';
-  const url = `${proto}://${location.host}/ws/jobs/${jobID}/progress${tokenParam}`;
-  const ws = new WebSocket(url);
+  const subprotocols = token ? [`meshium-auth.${token}`] : [];
+  const ws = subprotocols.length > 0
+    ? new WebSocket(url, subprotocols)
+    : new WebSocket(url);
 
   ws.onmessage = (event) => {
     const msg = JSON.parse(event.data) as JobWSMessage;

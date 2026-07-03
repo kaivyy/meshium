@@ -10,27 +10,27 @@ import (
 	"testing"
 	"time"
 
+	xssh "golang.org/x/crypto/ssh"
 	"meshium/internal/db"
 	"meshium/internal/mod/server"
 	modssh "meshium/internal/mod/ssh"
-	xssh "golang.org/x/crypto/ssh"
 )
 
 // --- Mock Step ---
 
 // mockStep is a configurable MigrationStep for testing the Engine.
 type mockStep struct {
-	name       string
-	mu         sync.Mutex
-	calls      []string // records the sequence of phase calls
-	prepareErr error
-	applyErr   error
-	verifyErr  error
-	rollbackErr error
-	prepareData string
-	applyData   string
-	verifyData  string
-	applyDelay  time.Duration
+	name          string
+	mu            sync.Mutex
+	calls         []string // records the sequence of phase calls
+	prepareErr    error
+	applyErr      error
+	verifyErr     error
+	rollbackErr   error
+	prepareData   string
+	applyData     string
+	verifyData    string
+	applyDelay    time.Duration
 	rollbackDelay time.Duration
 }
 
@@ -118,10 +118,10 @@ func (m *mockServerRepo) GetByID(id int) (*server.Server, error) {
 }
 
 // Implement the rest of the server.Repo interface with no-ops
-func (m *mockServerRepo) Create(s server.Server) (int, error) { return s.ID, nil }
+func (m *mockServerRepo) Create(s server.Server) (int, error)  { return s.ID, nil }
 func (m *mockServerRepo) Update(id int, s server.Server) error { return nil }
-func (m *mockServerRepo) Delete(id int) error                   { return nil }
-func (m *mockServerRepo) ToggleFavorite(id int) error           { return nil }
+func (m *mockServerRepo) Delete(id int) error                  { return nil }
+func (m *mockServerRepo) ToggleFavorite(id int) error          { return nil }
 func (m *mockServerRepo) List(filter server.ListFilter) ([]server.Server, error) {
 	return nil, nil
 }
@@ -166,6 +166,9 @@ func (m *mockAuthSvc) GetAESKey() []byte { return []byte("test-key-32-bytes-long
 type mockHostKeyStore struct{}
 
 func (m *mockHostKeyStore) MakeHostKeyCallback(serverID int) xssh.HostKeyCallback { return nil }
+func (m *mockHostKeyStore) TrustHostKey(serverID int) (string, error)             { return "", nil }
+func (m *mockHostKeyStore) GetFingerprint(serverID int) (string, error)           { return "", nil }
+func (m *mockHostKeyStore) IsTrusted(host string, port int) (bool, error)         { return false, nil }
 
 // --- Test Helpers ---
 

@@ -54,13 +54,14 @@ func main() {
 
 	serverRepo := server.NewRepo(database)
 	serverSvc := server.NewService(serverRepo, authSvc)
-	serverHandler := server.NewHandler(serverSvc)
 
 	sshPool := ssh.NewPool(ssh.PoolConfig{
 		MaxIdle:     10 * time.Minute,
 		MaxLifetime: 30 * time.Minute,
 	})
 	knownHosts := ssh.NewKnownHostsStore(database)
+	serverSvc.SetHostKeyStore(knownHosts)
+	serverHandler := server.NewHandler(serverSvc)
 
 	// Invalidate cached SSH connections when server config changes
 	serverSvc.SetPoolInvalidator(sshPool)

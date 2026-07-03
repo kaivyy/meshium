@@ -4,6 +4,7 @@ import (
 	"errors"
 
 	"meshium/internal/mod/auth"
+	"meshium/internal/mod/transport"
 	"meshium/internal/shared"
 )
 
@@ -14,9 +15,10 @@ type PoolInvalidator interface {
 }
 
 type Service struct {
-	repo    Repo
-	authSvc *auth.Service
-	pool    PoolInvalidator
+	repo     Repo
+	authSvc  *auth.Service
+	pool     PoolInvalidator
+	hostKeys transport.HostKeyStore
 }
 
 func NewService(repo Repo, authSvc *auth.Service) *Service {
@@ -28,6 +30,11 @@ func NewService(repo Repo, authSvc *auth.Service) *Service {
 // is updated or the server is deleted.
 func (s *Service) SetPoolInvalidator(p PoolInvalidator) {
 	s.pool = p
+}
+
+// SetHostKeyStore configures the trusted host key store used by host key endpoints.
+func (s *Service) SetHostKeyStore(store transport.HostKeyStore) {
+	s.hostKeys = store
 }
 
 func (s *Service) encryptCredential(plaintext string) (string, error) {
@@ -222,6 +229,33 @@ func (s *Service) ToggleFavorite(id int) error {
 
 func (s *Service) GetServerInfo(serverID int) (*ServerInfo, error) {
 	return s.repo.GetServerInfo(serverID)
+}
+
+// TrustHostKey explicitly trusts the server's SSH host key.
+func (s *Service) TrustHostKey(serverID int) (string, error) {
+	if _, err := s.repo.GetByID(serverID); err != nil {
+		return "", err
+	}
+	if s.hostKeys == nil {
+		return "", errors.New("known hosts store unavailable")
+	}
+	return s.hostKeys.TrustHostKey(serverID)
+}
+
+// GetFingerprint returns the stored fingerprint for a server's SSH host key.
+func (s *Service) GetFingerprint(serverID int) (string, error) {
+	if s.hostKeys == nil {
+		return "", errors.New("known hosts store unavailable")
+	}
+	return s.hostKeys.GetFingerprint(serverID)
+}
+
+// IsTrusted reports whether a host:port entry is verified in known_hosts.
+func (s *Service) IsTrusted(host string, port int) (bool, error) {
+	if s.hostKeys == nil {
+		return false, errors.New("known hosts store unavailable")
+	}
+	return s.hostKeys.IsTrusted(host, port)
 }
 
 // GetDecryptedCredentials returns decrypted credentials for SSH connection consumers.

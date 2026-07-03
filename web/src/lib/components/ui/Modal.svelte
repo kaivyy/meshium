@@ -43,31 +43,31 @@
   <div class="fixed inset-0 z-50 flex items-center justify-center p-4">
     <button
       type="button"
-      class="absolute inset-0 bg-black/50"
+      class="absolute inset-0 bg-black/50 backdrop-blur-sm transition-opacity"
       aria-label="Close modal"
       onclick={closeModal}
     ></button>
 
     <div
-      class={`relative z-10 w-full ${sizeClasses[size]} overflow-hidden rounded-2xl bg-white shadow-xl`}
+      class={`relative z-10 w-full ${sizeClasses[size]} overflow-hidden rounded-2xl bg-white shadow-xl max-h-[90vh] flex flex-col`}
       role="dialog"
       aria-modal="true"
       aria-labelledby="modal-title"
       tabindex="-1"
     >
-      <div class="flex items-start justify-between border-b border-slate-200 px-6 py-4">
+      <div class="flex items-start justify-between border-b border-slate-200 px-6 py-4 shrink-0">
         <h2 id="modal-title" class="text-lg font-semibold text-slate-900">{title}</h2>
         <button
           type="button"
-          class="rounded-lg p-1 text-slate-500 transition-colors hover:bg-slate-100 hover:text-slate-700"
+          class="rounded-lg p-1.5 text-slate-500 transition-colors hover:bg-slate-100 hover:text-slate-700 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500"
           aria-label="Close modal"
           onclick={closeModal}
         >
-          <X size={18} />
+          <X size={18} aria-hidden="true" />
         </button>
       </div>
 
-      <div class="px-6 py-4">
+      <div class="px-6 py-4 overflow-y-auto">
         {#if children}
           {@render children()}
         {/if}

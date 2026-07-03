@@ -3,7 +3,10 @@ package ssh
 import (
 	"crypto/rand"
 	"crypto/rsa"
+	"database/sql"
+	"errors"
 	"net"
+	"strconv"
 	"testing"
 
 	"meshium/internal/db"
@@ -27,55 +30,55 @@ func makeTestAuthorizedKey(t *testing.T) (string, cryptossh.PublicKey) {
 	return string(cryptossh.MarshalAuthorizedKey(pubKey)), pubKey
 }
 
-func TestKnownHostsSaveAndGet(t *testing.T) {
+func newKnownHostsTestStore(t *testing.T) (*KnownHostsStore, *sql.DB) {
+	t.Helper()
+
 	d, err := db.Open(":memory:")
 	if err != nil {
 		t.Fatalf("Open failed: %v", err)
 	}
-	defer d.Close()
-
 	if err := db.Migrate(d); err != nil {
 		t.Fatalf("Migrate failed: %v", err)
 	}
 
-	store := NewKnownHostsStore(d)
+	return NewKnownHostsStore(d), d
+}
 
-	_, known, err := store.Get("example.com", 22)
+func insertTestServer(t *testing.T, d *sql.DB, host string, port int, username string) int {
+	t.Helper()
+
+	res, err := d.Exec(
+		`INSERT INTO servers (name, host, port, username) VALUES (?, ?, ?, ?)`,
+		"test-server",
+		host,
+		port,
+		username,
+	)
 	if err != nil {
-		t.Fatalf("Get failed: %v", err)
+		t.Fatalf("insert server failed: %v", err)
 	}
-	if known {
-		t.Error("host should not be known initially")
-	}
-
-	if err := store.Save("example.com", 22, "ssh-rsa AAAA...", 1); err != nil {
-		t.Fatalf("Save failed: %v", err)
-	}
-
-	key, known, err := store.Get("example.com", 22)
+	id, err := res.LastInsertId()
 	if err != nil {
-		t.Fatalf("Get failed: %v", err)
+		t.Fatalf("LastInsertId failed: %v", err)
 	}
-	if !known {
-		t.Error("host should be known after Save")
-	}
-	if key != "ssh-rsa AAAA..." {
-		t.Errorf("expected %q, got %q", "ssh-rsa AAAA...", key)
+	return int(id)
+}
+
+func TestKnownHostsUnknownHostReturnsNotTrusted(t *testing.T) {
+	store, d := newKnownHostsTestStore(t)
+	defer d.Close()
+
+	_, pubKey := makeTestAuthorizedKey(t)
+	callback := store.MakeHostKeyCallback(1)
+	if err := callback("example.com", &net.TCPAddr{Port: 22}, pubKey); !errors.Is(err, ErrHostKeyNotTrusted) {
+		t.Fatalf("expected ErrHostKeyNotTrusted, got %v", err)
 	}
 }
 
-func TestKnownHostsHostKeyCallback(t *testing.T) {
-	d, err := db.Open(":memory:")
-	if err != nil {
-		t.Fatalf("Open failed: %v", err)
-	}
+func TestKnownHostsMatchingHostKeyIsAccepted(t *testing.T) {
+	store, d := newKnownHostsTestStore(t)
 	defer d.Close()
 
-	if err := db.Migrate(d); err != nil {
-		t.Fatalf("Migrate failed: %v", err)
-	}
-
-	store := NewKnownHostsStore(d)
 	keyString, pubKey := makeTestAuthorizedKey(t)
 	if err := store.Save("example.com", 2222, keyString, 9); err != nil {
 		t.Fatalf("Save failed: %v", err)
@@ -85,14 +88,125 @@ func TestKnownHostsHostKeyCallback(t *testing.T) {
 	if err := callback("example.com", &net.TCPAddr{IP: net.ParseIP("127.0.0.1"), Port: 2222}, pubKey); err != nil {
 		t.Fatalf("callback rejected matching host key: %v", err)
 	}
+}
 
-	_, mismatchPub := makeTestAuthorizedKey(t)
-	if err := callback("example.com", &net.TCPAddr{IP: net.ParseIP("127.0.0.1"), Port: 2222}, mismatchPub); err == nil {
-		t.Fatal("expected callback to reject mismatched host key")
+func TestKnownHostsMismatchedHostKeyReturnsMismatch(t *testing.T) {
+	store, d := newKnownHostsTestStore(t)
+	defer d.Close()
+
+	keyString, _ := makeTestAuthorizedKey(t)
+	if err := store.Save("example.com", 2222, keyString, 9); err != nil {
+		t.Fatalf("Save failed: %v", err)
 	}
 
-	// Unknown host should be auto-accepted (not rejected)
-	if err := callback("unknown.example.com", &net.TCPAddr{IP: net.ParseIP("127.0.0.1"), Port: 22}, pubKey); err != nil {
-		t.Fatalf("expected callback to auto-accept unknown host, got error: %v", err)
+	_, mismatchPub := makeTestAuthorizedKey(t)
+	callback := store.MakeHostKeyCallback(9)
+	if err := callback("example.com", &net.TCPAddr{IP: net.ParseIP("127.0.0.1"), Port: 2222}, mismatchPub); !errors.Is(err, ErrHostKeyMismatch) {
+		t.Fatalf("expected ErrHostKeyMismatch, got %v", err)
+	}
+}
+
+func TestKnownHostsTrustHostKeySavesAndReturnsFingerprint(t *testing.T) {
+	store, d := newKnownHostsTestStore(t)
+	defer d.Close()
+
+	addr := startPoolTestSSHServer(t)
+	host, portStr, err := net.SplitHostPort(addr)
+	if err != nil {
+		t.Fatalf("SplitHostPort failed: %v", err)
+	}
+	port, err := strconv.Atoi(portStr)
+	if err != nil {
+		t.Fatalf("parse port failed: %v", err)
+	}
+
+	serverID := insertTestServer(t, d, host, port, "test")
+
+	trusted, err := store.IsTrusted(host, port)
+	if err != nil {
+		t.Fatalf("IsTrusted before trust failed: %v", err)
+	}
+	if trusted {
+		t.Fatal("expected server to be untrusted before TrustHostKey")
+	}
+
+	fingerprint, err := store.TrustHostKey(serverID)
+	if err != nil {
+		t.Fatalf("TrustHostKey failed: %v", err)
+	}
+	if fingerprint == "" {
+		t.Fatal("expected non-empty fingerprint")
+	}
+
+	storedFingerprint, err := store.GetFingerprint(serverID)
+	if err != nil {
+		t.Fatalf("GetFingerprint failed: %v", err)
+	}
+	if storedFingerprint != fingerprint {
+		t.Fatalf("expected fingerprint %q, got %q", fingerprint, storedFingerprint)
+	}
+
+	trusted, err = store.IsTrusted(host, port)
+	if err != nil {
+		t.Fatalf("IsTrusted after trust failed: %v", err)
+	}
+	if !trusted {
+		t.Fatal("expected server to be trusted after TrustHostKey")
+	}
+
+	keyText, known, err := store.Get(host, port)
+	if err != nil {
+		t.Fatalf("Get failed: %v", err)
+	}
+	if !known {
+		t.Fatal("expected known host entry after TrustHostKey")
+	}
+	if keyText == "" {
+		t.Fatal("expected stored host key")
+	}
+}
+
+func TestKnownHostsGetFingerprintReturnsStoredFingerprint(t *testing.T) {
+	store, d := newKnownHostsTestStore(t)
+	defer d.Close()
+
+	keyString, pubKey := makeTestAuthorizedKey(t)
+	serverID := insertTestServer(t, d, "example.com", 22, "root")
+	if err := store.Save("example.com", 22, keyString, serverID); err != nil {
+		t.Fatalf("Save failed: %v", err)
+	}
+
+	fingerprint, err := store.GetFingerprint(serverID)
+	if err != nil {
+		t.Fatalf("GetFingerprint failed: %v", err)
+	}
+	if fingerprint != cryptossh.FingerprintSHA256(pubKey) {
+		t.Fatalf("expected fingerprint %q, got %q", cryptossh.FingerprintSHA256(pubKey), fingerprint)
+	}
+}
+
+func TestKnownHostsIsTrustedReturnsCorrectBool(t *testing.T) {
+	store, d := newKnownHostsTestStore(t)
+	defer d.Close()
+
+	trusted, err := store.IsTrusted("missing.example.com", 22)
+	if err != nil {
+		t.Fatalf("IsTrusted failed: %v", err)
+	}
+	if trusted {
+		t.Fatal("expected missing host to be untrusted")
+	}
+
+	keyString, _ := makeTestAuthorizedKey(t)
+	if err := store.Save("example.com", 22, keyString, 1); err != nil {
+		t.Fatalf("Save failed: %v", err)
+	}
+
+	trusted, err = store.IsTrusted("example.com", 22)
+	if err != nil {
+		t.Fatalf("IsTrusted failed: %v", err)
+	}
+	if !trusted {
+		t.Fatal("expected saved host to be trusted")
 	}
 }

@@ -16,23 +16,23 @@
   {#if backHref}
     <a
       href={backHref}
-      class="mb-3 inline-flex items-center gap-1.5 text-sm text-slate-500 transition-colors hover:text-slate-900"
+      class="mb-3 inline-flex items-center gap-1.5 text-sm text-slate-500 transition-colors hover:text-slate-900 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 focus-visible:ring-offset-2 rounded-lg"
     >
-      <ArrowLeft size={16} />
+      <ArrowLeft size={16} aria-hidden="true" />
       Back
     </a>
   {/if}
 
   <div class="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
     <div>
-      <h1 class="text-xl font-bold text-slate-900">{title}</h1>
+      <h1 class="text-xl font-bold text-slate-900 tracking-tight">{title}</h1>
       {#if subtitle}
         <p class="mt-1 text-sm text-slate-500">{subtitle}</p>
       {/if}
     </div>
 
     {#if actions}
-      <div class="flex items-center gap-2">
+      <div class="flex flex-wrap items-center gap-2">
         {@render actions()}
       </div>
     {/if}

@@ -147,7 +147,7 @@
     {/if}
     <button
       onclick={toggleSidebar}
-      class="p-1 rounded text-slate-400 hover:text-slate-700 hover:bg-slate-100 transition"
+      class="p-1.5 rounded-lg text-slate-400 hover:text-slate-700 hover:bg-slate-100 transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 focus-visible:ring-offset-2"
       aria-label={collapsed ? 'Expand sidebar' : 'Collapse sidebar'}
     >
       {#if collapsed}
@@ -172,7 +172,8 @@
         <a
           href={item.href}
           title={collapsed ? item.label : ''}
-          class="flex items-center gap-3 px-3 py-2 rounded-lg text-sm transition-colors
+          aria-current={isActive(item.href) ? 'page' : undefined}
+          class="flex items-center gap-3 px-3 py-2 rounded-lg text-sm transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500
             {isActive(item.href)
               ? 'bg-blue-50 text-blue-700 font-medium'
               : 'text-slate-600 hover:bg-slate-50'}
@@ -200,7 +201,7 @@
     <a
       href="/settings"
       title={collapsed ? 'Settings' : ''}
-      class="flex items-center gap-3 px-3 py-2 rounded-lg text-sm text-slate-600 hover:bg-slate-50 {collapsed ? 'justify-center' : ''}"
+      class="flex items-center gap-3 px-3 py-2 rounded-lg text-sm text-slate-600 hover:bg-slate-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 {collapsed ? 'justify-center' : ''}"
     >
       <Settings size={18} class="shrink-0" />
       {#if !collapsed}<span>Settings</span>{/if}
@@ -208,7 +209,7 @@
     <button
       onclick={() => lock()}
       title={collapsed ? 'Lock' : ''}
-      class="w-full flex items-center gap-3 px-3 py-2 rounded-lg text-sm text-slate-600 hover:bg-slate-50 {collapsed ? 'justify-center' : ''}"
+      class="w-full flex items-center gap-3 px-3 py-2 rounded-lg text-sm text-slate-600 hover:bg-slate-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 {collapsed ? 'justify-center' : ''}"
     >
       <LogOut size={18} class="shrink-0" />
       {#if !collapsed}<span>Lock</span>{/if}
@@ -224,7 +225,8 @@
   {#each quickItems.slice(0, 2) as item}
     <a
       href={item.href}
-      class="flex flex-col items-center gap-0.5 px-2 py-1 rounded-lg text-[10px] transition-colors
+      aria-current={isActive(item.href) ? 'page' : undefined}
+      class="flex flex-col items-center gap-0.5 px-2 py-1 rounded-lg text-[10px] transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500
         {isActive(item.href) ? 'text-blue-600 font-medium' : 'text-slate-500'}"
     >
       <div class="relative">
@@ -243,8 +245,9 @@
   <button
     type="button"
     onclick={toggleDrawer}
-    class="flex flex-col items-center justify-center gap-0.5 -mt-4 rounded-full bg-blue-600 px-4 py-2.5 text-white shadow-lg shadow-blue-600/30 transition-transform active:scale-95"
-    aria-label="Open menu"
+    class="flex flex-col items-center justify-center gap-0.5 -mt-4 rounded-full bg-blue-600 px-4 py-2.5 text-white shadow-lg shadow-blue-600/30 transition-transform active:scale-95 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 focus-visible:ring-offset-2"
+    aria-label={drawerOpen ? 'Close menu' : 'Open menu'}
+    aria-expanded={drawerOpen}
   >
     {#if drawerOpen}
       <X size={22} />
@@ -257,7 +260,8 @@
   {#each quickItems.slice(2) as item}
     <a
       href={item.href}
-      class="flex flex-col items-center gap-0.5 px-2 py-1 rounded-lg text-[10px] transition-colors
+      aria-current={isActive(item.href) ? 'page' : undefined}
+      class="flex flex-col items-center gap-0.5 px-2 py-1 rounded-lg text-[10px] transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500
         {isActive(item.href) ? 'text-blue-600 font-medium' : 'text-slate-500'}"
     >
       <div class="relative">
@@ -321,7 +325,8 @@
             <a
               href={item.href}
               onclick={closeDrawer}
-              class="flex flex-col items-center gap-1.5 rounded-xl p-3 transition-colors
+              aria-current={isActive(item.href) ? 'page' : undefined}
+              class="flex flex-col items-center gap-1.5 rounded-xl p-3 transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500
                 {isActive(item.href)
                   ? 'bg-blue-50 text-blue-600'
                   : 'text-slate-600 hover:bg-slate-50'}"

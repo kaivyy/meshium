@@ -112,6 +112,50 @@ func TestStateCanResume(t *testing.T) {
 	}
 }
 
+func TestStatePausedBehavior(t *testing.T) {
+	t.Run("not terminal", func(t *testing.T) {
+		if StatePaused.IsTerminal() {
+			t.Error("StatePaused should not be terminal")
+		}
+	})
+
+	t.Run("can transition to resuming cancelled and failed", func(t *testing.T) {
+		if !IsValidTransition(StatePaused, StateResuming) {
+			t.Error("StatePaused should be able to transition to StateResuming")
+		}
+		if !IsValidTransition(StatePaused, StateCancelled) {
+			t.Error("StatePaused should be able to transition to StateCancelled")
+		}
+		if !IsValidTransition(StatePaused, StateFailed) {
+			t.Error("StatePaused should be able to transition to StateFailed")
+		}
+	})
+
+	t.Run("running states can transition to paused", func(t *testing.T) {
+		pausableStates := []MigrationState{
+			StatePlanning, StateDiscovery, StateCompatibilityCheck, StateRiskAssessment,
+			StateBackup, StateSnapshot, StateTransferring, StateApplying, StateVerifying,
+			StateProvisionTarget, StateInstallDependencies, StateInitialSync,
+			StateLiveReplication, StateVerification, StatePreCutover, StateTrafficSwitch,
+			StatePostVerification, StateObservation,
+		}
+		for _, state := range pausableStates {
+			if !IsValidTransition(state, StatePaused) {
+				t.Errorf("%s should be able to transition to StatePaused", state)
+			}
+		}
+	})
+
+	t.Run("resume and running flags", func(t *testing.T) {
+		if !StatePaused.CanResume() {
+			t.Error("StatePaused should be resumable")
+		}
+		if StatePaused.IsRunning() {
+			t.Error("StatePaused should not be running")
+		}
+	})
+}
+
 func TestIsValidTransition(t *testing.T) {
 	valid := []struct {
 		from, to MigrationState
@@ -149,14 +193,14 @@ func TestIsInvalidTransition(t *testing.T) {
 	invalid := []struct {
 		from, to MigrationState
 	}{
-		{StateCreated, StateApplying},      // skip phases
-		{StateCreated, StateCommitted},     // skip everything
-		{StateCommitted, StatePlanning},     // terminal
-		{StateRolledBack, StateApplying},     // terminal
+		{StateCreated, StateApplying},          // skip phases
+		{StateCreated, StateCommitted},         // skip everything
+		{StateCommitted, StatePlanning},        // terminal
+		{StateRolledBack, StateApplying},       // terminal
 		{StateRollbackDegraded, StatePlanning}, // terminal
-		{StateRollback, StateApplying},     // can't go back to applying during rollback
-		{StateBackup, StateApplying},        // skip snapshot
-		{StatePlanning, StateApplying},       // skip backup
+		{StateRollback, StateApplying},         // can't go back to applying during rollback
+		{StateBackup, StateApplying},           // skip snapshot
+		{StatePlanning, StateApplying},         // skip backup
 	}
 
 	for _, tt := range invalid {

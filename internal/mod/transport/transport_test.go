@@ -74,6 +74,12 @@ func (m *mockHostKeyStore) MakeHostKeyCallback(serverID int) xssh.HostKeyCallbac
 	}
 }
 
+func (m *mockHostKeyStore) TrustHostKey(serverID int) (string, error) { return "", nil }
+
+func (m *mockHostKeyStore) GetFingerprint(serverID int) (string, error) { return "", nil }
+
+func (m *mockHostKeyStore) IsTrusted(host string, port int) (bool, error) { return false, nil }
+
 // TestInterfacesAreConsistent verifies that the transport package
 // interfaces are the canonical definitions used by both discovery
 // and migration packages via type aliases.
@@ -90,7 +96,7 @@ func TestInterfacesAreConsistent(t *testing.T) {
 	var a AESKeyProvider
 	_ = a
 
-	// HostKeyStore should have 1 method (MakeHostKeyCallback)
+	// HostKeyStore should have 4 methods
 	var h HostKeyStore
 	_ = h
 }

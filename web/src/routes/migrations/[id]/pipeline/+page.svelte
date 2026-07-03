@@ -2,12 +2,12 @@
   import { onMount, onDestroy } from 'svelte';
   import { page } from '$app/stores';
   import {
-    pipelineApi, wsPipeline, WIZARD_STEPS, defaultMigrationConfig,
+    pipelineApi, wsPipelineConnect, WIZARD_STEPS, defaultMigrationConfig,
     type MigrationSession, type PipelineStage, type WSMessageExtended,
     type CompatibilityCheckResult, type RiskReport, type HealthCheckResult,
     type SyncSession, type ReplicationStatus, type QueueState,
     type ProvisionState, type ContainerHealthInfo, type AuditEntry,
-    type MigrationConfig
+    type MigrationConfig, type WSConnectionState
   } from '$lib/api/pipeline';
   import { APIError } from '$lib/api/client';
   import { migrationApi, type DryRunResult } from '$lib/api/migrations';
@@ -55,6 +55,8 @@
   let networkTxBytesSec = 0;
   let wsMessages: WSMessageExtended[] = [];
   let ws: WebSocket | null = null;
+  let wsConnectionState: WSConnectionState = 'disconnected';
+  let wsControl: { close: () => void } | null = null;
 
   // ── Cutover State ──
   let cutoverConfirmed = false;
@@ -75,6 +77,7 @@
 
   onDestroy(() => {
     ws?.close();
+    wsControl?.close();
     if (observationTimer) clearInterval(observationTimer);
   });
 
@@ -280,7 +283,10 @@
     wsMessages = [];
     toast.info('Pipeline started');
 
-    ws = wsPipeline(migrationId, (msg: WSMessageExtended) => {
+    // Close existing WS connection
+    if (wsControl) { wsControl.close(); wsControl = null; }
+
+    wsControl = wsPipelineConnect(migrationId, (msg: WSMessageExtended) => {
       wsMessages = [...wsMessages, msg];
       updateLiveMetrics(msg);
 
@@ -315,11 +321,12 @@
         pipelineRunning = false;
         toast.error(`Pipeline error: ${msg.error || 'Unknown error'}`);
       }
-    }, () => {
-      pipelineRunning = false;
-    }, () => {
-      pipelineRunning = false;
-      toast.error('WebSocket connection lost');
+    }, (status: WSConnectionState) => {
+      wsConnectionState = status;
+      if (status === 'failed') {
+        pipelineRunning = false;
+        toast.error('WebSocket connection lost. Actions still available via REST.');
+      }
     });
   }
 
@@ -611,12 +618,35 @@
         <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
         Export
       </button>
+      <!-- WS Connection Indicator -->
+      {#if pipelineRunning || pipelinePaused}
+        <span class="flex items-center gap-1.5 text-xs">
+          {#if wsConnectionState === 'connected'}
+            <span class="h-2 w-2 rounded-full bg-green-500"></span>
+            <span class="text-green-400">Live</span>
+          {:else if wsConnectionState === 'reconnecting' || wsConnectionState === 'connecting'}
+            <span class="h-2 w-2 rounded-full bg-yellow-500 animate-pulse"></span>
+            <span class="text-yellow-400">Reconnecting</span>
+          {:else if wsConnectionState === 'failed' || wsConnectionState === 'disconnected'}
+            <span class="h-2 w-2 rounded-full bg-red-500"></span>
+            <span class="text-red-400">Offline</span>
+          {/if}
+        </span>
+      {/if}
       <a href="/migrations/{migrationId}/diff" class="flex items-center gap-1.5 px-3 py-1.5 bg-gray-700 hover:bg-gray-600 rounded-lg text-xs font-medium transition-colors">
         <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 3v18"/><rect width="18" height="18" x="3" y="3" rx="2"/></svg>
         Diff
       </a>
     </div>
   </div>
+
+  <!-- Offline Banner -->
+  {#if (wsConnectionState === 'failed' || wsConnectionState === 'disconnected') && (pipelineRunning || pipelinePaused)}
+    <div class="bg-amber-900/50 border-b border-amber-700 px-6 py-2 flex items-center gap-3">
+      <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" class="text-amber-400 shrink-0"><line x1="1" y1="1" x2="23" y2="23"/><path d="M16.72 11.06A10.94 10.94 0 0 1 19 12.55"/><path d="M5 12.55a10.94 10.94 0 0 1 5.17-2.39"/><path d="M10.71 5.05A16 16 0 0 1 22.56 9"/><path d="M1.42 9a15.91 15.91 0 0 1 4.7-2.88"/><path d="M8.53 16.11a6 6 0 0 1 6.95 0"/><line x1="12" y1="20" x2="12.01" y2="20"/></svg>
+      <span class="text-amber-200 text-xs font-medium">WebSocket disconnected — live updates paused. Actions (pause, resume, rollback) still available via REST API.</span>
+    </div>
+  {/if}
 
   <!-- ═══ STEP INDICATOR ═══ -->
   <div class="border-b border-gray-800 px-6 py-4 shrink-0">

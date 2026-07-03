@@ -34,7 +34,10 @@ type AESKeyProvider interface {
 	GetAESKey() []byte
 }
 
-// HostKeyStore provides host key verification callbacks.
+// HostKeyStore provides host key verification callbacks and explicit trust helpers.
 type HostKeyStore interface {
 	MakeHostKeyCallback(serverID int) xssh.HostKeyCallback
+	TrustHostKey(serverID int) (string, error)
+	GetFingerprint(serverID int) (string, error)
+	IsTrusted(host string, port int) (bool, error)
 }

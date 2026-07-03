@@ -29,14 +29,10 @@
     </div>
   {/if}
 
-  <div class="w-full overflow-hidden rounded-full bg-slate-200 h-2">
+  <div class="w-full overflow-hidden rounded-full bg-slate-200 h-2" role="progressbar" aria-valuemin="0" aria-valuemax="100" aria-valuenow={percentage} aria-label={label || 'Progress'}>
     <div
       class={`h-2 rounded-full transition-all duration-300 ${variantClasses[variant]} ${animated ? 'animate-pulse' : ''}`}
       style={`width: ${percentage}%`}
-      aria-valuemin="0"
-      aria-valuemax="100"
-      aria-valuenow={percentage}
-      role="progressbar"
     ></div>
   </div>
 

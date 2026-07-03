@@ -399,16 +399,16 @@ func (p *Pipeline) Pause(ctx context.Context, migrationID int, onProgress StepCa
 		currentState, _ = StateFromString(migration.Status)
 	}
 
-	if currentState == StateInterrupted {
-		return nil
+	if currentState == StatePaused {
+		return nil // Already paused
 	}
 
 	sm := NewStateMachine(currentState)
-	if err := sm.Transition(StateInterrupted); err != nil {
+	if err := sm.Transition(StatePaused); err != nil {
 		return fmt.Errorf("migration cannot be paused from state %s: %w", currentState, err)
 	}
 
-	if err := p.jobRepo.SetMigrationStateContext(ctx, migrationID, StateInterrupted); err != nil {
+	if err := p.jobRepo.SetMigrationStateContext(ctx, migrationID, StatePaused); err != nil {
 		return err
 	}
 
@@ -416,11 +416,11 @@ func (p *Pipeline) Pause(ctx context.Context, migrationID int, onProgress StepCa
 		MigrationID:   migrationID,
 		EventType:     "migration_paused",
 		PreviousState: currentState.String(),
-		NewState:      StateInterrupted.String(),
+		NewState:      StatePaused.String(),
 		Actor:         "user",
 	})
 
-	onProgress(WSMessage{Step: "pipeline", Status: "warning", Value: "Migration paused"})
+	onProgress(WSMessage{Step: "pipeline", Status: "warning", Value: "Migration paused — checkpoint saved"})
 	return nil
 }
 

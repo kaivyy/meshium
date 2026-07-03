@@ -1,5 +1,8 @@
 // Generic WebSocket client for Meshium.
-// All WebSocket connections use session token authentication via query parameter.
+// WebSocket connections use subprotocol-based authentication (Sec-WebSocket-Protocol header)
+// to avoid exposing the session token in the URL (which would appear in logs, browser history, etc.).
+// The token is sent as: Sec-WebSocket-Protocol: meshium-auth.<token>
+// A legacy fallback to query parameter is kept for backward compatibility.
 
 export interface WSMessage {
   step: string;
@@ -15,21 +18,30 @@ function getSessionToken(): string | null {
 }
 
 /**
- * Build a WebSocket URL with auth token for the given path.
+ * Build a WebSocket URL for the given path (without token in the URL).
  * The path should start with / (e.g., /ws/connect/1, /ws/terminal/1).
  */
 export function wsURL(path: string): string {
   const proto = location.protocol === 'https:' ? 'wss' : 'ws';
   const url = new URL(path, `${proto}://${location.host}`);
-  const token = getSessionToken();
-  if (token) {
-    url.searchParams.set('token', token);
-  }
   return url.toString();
 }
 
 /**
- * Connect to a WebSocket endpoint with automatic token injection.
+ * Build the subprotocol array for WebSocket authentication.
+ * The token is sent as a subprotocol: "meshium-auth.<token>"
+ * This avoids exposing the token in the URL.
+ */
+function wsSubprotocols(): string[] {
+  const token = getSessionToken();
+  if (token) {
+    return [`meshium-auth.${token}`];
+  }
+  return [];
+}
+
+/**
+ * Connect to a WebSocket endpoint with automatic token injection via subprotocol.
  * Returns the WebSocket instance for the caller to manage.
  *
  * @param path - WebSocket path starting with / (e.g., /ws/terminal/1)
@@ -45,7 +57,10 @@ export function wsConnectGeneric<T = WSMessage>(
   onOpen?: () => void
 ): WebSocket {
   const url = wsURL(path);
-  const ws = new WebSocket(url);
+  const subprotocols = wsSubprotocols();
+  const ws = subprotocols.length > 0
+    ? new WebSocket(url, subprotocols)
+    : new WebSocket(url);
 
   ws.onopen = () => onOpen?.();
   ws.onmessage = (e) => {

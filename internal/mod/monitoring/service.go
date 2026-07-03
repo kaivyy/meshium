@@ -35,6 +35,10 @@ func NewService(serverRepo server.Repo, pool *modssh.Pool, authSvc transport.AES
 // ServerMetrics is the high-level monitoring payload streamed to the UI.
 type ServerMetrics struct {
 	Timestamp    int64            `json:"timestamp"`
+	ServerID     int              `json:"serverId,omitempty"`
+	Status       string           `json:"status"`              // "ok", "degraded", "unknown"
+	Source       string           `json:"source,omitempty"`    // source server identifier
+	Target       string           `json:"target,omitempty"`    // target server identifier
 	CPU          CPUMetrics       `json:"cpu"`
 	Memory       MemoryMetrics    `json:"memory"`
 	Disk         []DiskMetrics    `json:"disk"`
@@ -43,6 +47,13 @@ type ServerMetrics struct {
 	Uptime       int64            `json:"uptime"`
 	ProcessCount int              `json:"processCount"`
 	Temperature  float64          `json:"temperature,omitempty"`
+	// Extended metrics (Phase 2)
+	Containers   []ContainerMetrics `json:"containers,omitempty"`
+	Services     []ServiceMetrics   `json:"services,omitempty"`
+	Transfer     TransferMetrics    `json:"transfer,omitempty"`
+	Database     []DatabaseMetrics  `json:"database,omitempty"`
+	Redis        *RedisMetrics      `json:"redis,omitempty"`
+	Queue        []QueueMetrics     `json:"queue,omitempty"`
 }
 
 type CPUMetrics struct {
@@ -83,6 +94,73 @@ type LoadMetrics struct {
 	Load1  float64 `json:"load1"`
 	Load5  float64 `json:"load5"`
 	Load15 float64 `json:"load15"`
+}
+
+// ContainerMetrics represents health and resource usage of a Docker container.
+type ContainerMetrics struct {
+	Name         string  `json:"name"`
+	Image        string  `json:"image"`
+	Status       string  `json:"status"`        // "running", "exited", "unknown"
+	Healthy      bool    `json:"healthy"`
+	RestartCount int     `json:"restartCount"`
+	CPUPercent   float64 `json:"cpuPercent"`
+	MemoryUsage  int64   `json:"memoryUsage"`
+	MemoryLimit  int64   `json:"memoryLimit"`
+	HealthScore  float64 `json:"healthScore"`   // 0-100, 100 = fully healthy
+}
+
+// ServiceMetrics represents the status of a system service.
+type ServiceMetrics struct {
+	Name      string `json:"name"`
+	Status    string `json:"status"`    // "active", "inactive", "failed", "unknown"
+	SubState  string `json:"subState"`  // "running", "dead", "exited"
+	Uptime    int64  `json:"uptime"`    // seconds
+	PID       int    `json:"pid,omitempty"`
+	Port      int    `json:"port,omitempty"`
+}
+
+// TransferMetrics represents current data transfer progress.
+type TransferMetrics struct {
+	BytesTransferred int64   `json:"bytesTransferred"`
+	BytesTotal       int64   `json:"bytesTotal"`
+	SpeedBytesSec    int64   `json:"speedBytesSec"`
+	ETA              string  `json:"eta"`         // estimated time of arrival
+	Progress         float64 `json:"progress"`    // 0-100
+}
+
+// DatabaseMetrics represents the status of a database instance.
+type DatabaseMetrics struct {
+	Type          string  `json:"type"`          // "mysql", "postgresql", "mongodb"
+	Name          string  `json:"name"`
+	Status        string  `json:"status"`        // "ok", "degraded", "down", "unknown"
+	Connections   int     `json:"connections"`
+	ReplicationLag int64  `json:"replicationLag"` // milliseconds
+	SizeBytes     int64   `json:"sizeBytes"`
+	HealthScore   float64 `json:"healthScore"`   // 0-100
+}
+
+// RedisMetrics represents the status of a Redis instance.
+type RedisMetrics struct {
+	Status       string `json:"status"`         // "ok", "degraded", "down", "unknown"`
+	Version      string `json:"version"`
+	MemoryUsed   int64  `json:"memoryUsed"`
+	MemoryMax    int64  `json:"memoryMax"`
+	Connected    int    `json:"connected"`      // connected clients
+	Keys         int64  `json:"keys"`
+	Uptime       int64  `json:"uptime"`         // seconds
+	Replication  string `json:"replication"`    // "master", "slave", "none"
+	HealthScore  float64 `json:"healthScore"`
+}
+
+// QueueMetrics represents the status of a message queue.
+type QueueMetrics struct {
+	Type       string `json:"type"`        // "bullmq", "rabbitmq", "kafka"
+	Name       string `json:"name"`
+	Status     string `json:"status"`      // "ok", "paused", "down", "unknown"
+	ActiveJobs int    `json:"activeJobs"`
+	QueueLen   int64  `json:"queueLength"`
+	Workers    int    `json:"workers"`
+	Drained    bool   `json:"drained"`
 }
 
 // NetworkInterface and DiskUsage are convenience aliases for the dedicated

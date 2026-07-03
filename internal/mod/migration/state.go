@@ -71,6 +71,8 @@ const (
 	StateRollbackDegraded
 	// StateInterrupted: migration was interrupted (crash, disconnect) and can be resumed.
 	StateInterrupted
+	// StatePaused: migration was paused by the user (not cancelled). Can be resumed.
+	StatePaused
 	// StateResuming: an interrupted migration is being resumed.
 	StateResuming
 	// StateCancelled: migration was cancelled by the user.
@@ -130,6 +132,8 @@ func (s MigrationState) String() string {
 		return "rollback_degraded"
 	case StateInterrupted:
 		return "interrupted"
+	case StatePaused:
+		return "paused"
 	case StateResuming:
 		return "resuming"
 	case StateCancelled:
@@ -161,7 +165,7 @@ func (s MigrationState) IsRunning() bool {
 
 // CanResume returns true if the migration can be resumed from this state.
 func (s MigrationState) CanResume() bool {
-	return s == StateInterrupted
+	return s == StateInterrupted || s == StatePaused
 }
 
 // stateString maps MigrationState to the string status stored in the database.
@@ -193,6 +197,7 @@ var stateString = map[MigrationState]string{
 	StateRollbackDegraded:   "rollback_degraded",    // partial rollback failure
 	// StateRestored is an alias — same iota value, already covered by StateRolledBack
 	StateInterrupted:        "interrupted",          // maps to existing StatusInterrupted
+	StatePaused:             "paused",               // real pause (not cancel)
 	StateResuming:           "resuming",             // maps to existing StatusResuming
 	StateCancelled:          "cancelled",            // new
 }
@@ -235,30 +240,31 @@ func (s MigrationState) StateString() string {
 // Resuming can transition to any stage that was in progress when interrupted.
 var transitionTable = map[MigrationState][]MigrationState{
 	StateCreated:             {StatePlanning},
-	StatePlanning:            {StateDiscovery, StateBackup, StateFailed, StateInterrupted},
-	StateDiscovery:           {StateCompatibilityCheck, StateFailed, StateInterrupted},
-	StateCompatibilityCheck:  {StateRiskAssessment, StateFailed, StateInterrupted},
-	StateRiskAssessment:      {StateBackup, StateFailed, StateInterrupted},
-	StateBackup:              {StateProvisionTarget, StateSnapshot, StateFailed, StateInterrupted},
-	StateSnapshot:            {StateTransferring, StateFailed, StateInterrupted},
-	StateTransferring:        {StateApplying, StateCommitted, StateFailed, StateInterrupted},
-	StateApplying:            {StateVerifying, StateCommitted, StateFailed, StateInterrupted, StateRollback},
-	StateVerifying:           {StatePreCutover, StateCommitted, StateApplying, StateFailed, StateInterrupted, StateRollback},
-	StateProvisionTarget:     {StateInstallDependencies, StateFailed, StateInterrupted},
-	StateInstallDependencies: {StateInitialSync, StateFailed, StateInterrupted},
-	StateInitialSync:         {StateLiveReplication, StateFailed, StateInterrupted},
-	StateLiveReplication:     {StateVerification, StateFailed, StateInterrupted},
-	StateVerification:        {StatePreCutover, StateFailed, StateInterrupted},
-	StatePreCutover:          {StateTrafficSwitch, StateFailed, StateInterrupted},
-	StateTrafficSwitch:       {StatePostVerification, StateFailed, StateInterrupted, StateRollback},
-	StatePostVerification:    {StateObservation, StateFailed, StateInterrupted, StateRollback},
-	StateObservation:         {StateCommitted, StateFailed, StateInterrupted, StateRollback},
+	StatePlanning:            {StateDiscovery, StateBackup, StateFailed, StateInterrupted, StatePaused},
+	StateDiscovery:           {StateCompatibilityCheck, StateFailed, StateInterrupted, StatePaused},
+	StateCompatibilityCheck:  {StateRiskAssessment, StateFailed, StateInterrupted, StatePaused},
+	StateRiskAssessment:      {StateBackup, StateFailed, StateInterrupted, StatePaused},
+	StateBackup:              {StateProvisionTarget, StateSnapshot, StateFailed, StateInterrupted, StatePaused},
+	StateSnapshot:            {StateTransferring, StateFailed, StateInterrupted, StatePaused},
+	StateTransferring:        {StateApplying, StateCommitted, StateFailed, StateInterrupted, StatePaused},
+	StateApplying:            {StateVerifying, StateCommitted, StateFailed, StateInterrupted, StatePaused, StateRollback},
+	StateVerifying:           {StatePreCutover, StateCommitted, StateApplying, StateFailed, StateInterrupted, StatePaused, StateRollback},
+	StateProvisionTarget:     {StateInstallDependencies, StateFailed, StateInterrupted, StatePaused},
+	StateInstallDependencies: {StateInitialSync, StateFailed, StateInterrupted, StatePaused},
+	StateInitialSync:         {StateLiveReplication, StateFailed, StateInterrupted, StatePaused},
+	StateLiveReplication:     {StateVerification, StateFailed, StateInterrupted, StatePaused},
+	StateVerification:        {StatePreCutover, StateFailed, StateInterrupted, StatePaused},
+	StatePreCutover:          {StateTrafficSwitch, StateFailed, StateInterrupted, StatePaused},
+	StateTrafficSwitch:       {StatePostVerification, StateFailed, StateInterrupted, StatePaused, StateRollback},
+	StatePostVerification:    {StateObservation, StateFailed, StateInterrupted, StatePaused, StateRollback},
+	StateObservation:         {StateCommitted, StateFailed, StateInterrupted, StatePaused, StateRollback},
 	StateCommitted:           {}, // terminal
 	StateFailed:              {StateRollback, StateInterrupted},
 	StateRollback:            {StateRolledBack, StateRollbackDegraded, StateFailed},
 	StateRolledBack:          {}, // terminal
 	StateRollbackDegraded:    {}, // terminal
 	StateInterrupted:         {StateResuming, StateFailed, StateCancelled},
+	StatePaused:              {StateResuming, StateFailed, StateCancelled},
 	StateResuming: {
 		StatePlanning, StateDiscovery, StateCompatibilityCheck, StateRiskAssessment,
 		StateBackup, StateSnapshot, StateTransferring, StateApplying, StateVerifying,

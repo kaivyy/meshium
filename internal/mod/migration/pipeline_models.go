@@ -449,6 +449,9 @@ type WSMessageExtended struct {
 	// State machine.
 	CurrentState string `json:"currentState,omitempty"`
 
+	// Event sequence for reconnect replay.
+	Sequence int64 `json:"sequence,omitempty"`
+
 	// Timestamp.
 	Timestamp string `json:"timestamp,omitempty"`
 }

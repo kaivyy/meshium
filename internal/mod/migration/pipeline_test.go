@@ -4,6 +4,8 @@ import (
 	"context"
 	"testing"
 	"time"
+
+	"meshium/internal/mod/server"
 )
 
 // --- State Machine Tests ---
@@ -534,6 +536,157 @@ func TestRollbackComplexity(t *testing.T) {
 				t.Errorf("rollback complexity = %q, want %q", got, tt.complexity)
 			}
 		})
+	}
+}
+
+func newPauseResumeTestPipeline(t *testing.T) (*Pipeline, JobRepository, PipelineRepo) {
+	t.Helper()
+
+	jobRepo := newTestRepo(t)
+	pipelineRepo := jobRepo.(PipelineRepo)
+	srvRepo := newMockServerRepo()
+	srvRepo.AddServer(&server.Server{ID: 1, Host: "source", Port: 22, Username: "user"})
+	srvRepo.AddServer(&server.Server{ID: 2, Host: "target", Port: 22, Username: "user"})
+
+	pipeline := &Pipeline{
+		repo:     pipelineRepo,
+		jobRepo:  jobRepo,
+		srvRepo:  srvRepo,
+		pool:     newMockPool(),
+		authSvc:  &mockAuthSvc{},
+		hosts:    &mockHostKeyStore{},
+		registry: NewCategoryRegistry(),
+		stages:   nil,
+	}
+	return pipeline, jobRepo, pipelineRepo
+}
+
+func TestPipelinePauseSetsPausedStateAndAuditEntry(t *testing.T) {
+	pipeline, jobRepo, pipelineRepo := newPauseResumeTestPipeline(t)
+	migrationID := createTestMigration(t, jobRepo)
+
+	if err := jobRepo.SetMigrationState(migrationID, StatePlanning); err != nil {
+		t.Fatalf("SetMigrationState(StatePlanning): %v", err)
+	}
+
+	if err := pipeline.Pause(context.Background(), migrationID, nil); err != nil {
+		t.Fatalf("Pause() failed: %v", err)
+	}
+
+	state, err := jobRepo.GetMigrationState(migrationID)
+	if err != nil {
+		t.Fatalf("GetMigrationState(): %v", err)
+	}
+	if state != StatePaused {
+		t.Fatalf("Pause() state = %s, want %s", state, StatePaused)
+	}
+
+	trail, err := pipelineRepo.GetAuditTrail(migrationID, 10)
+	if err != nil {
+		t.Fatalf("GetAuditTrail(): %v", err)
+	}
+	if len(trail) != 1 {
+		t.Fatalf("expected 1 audit entry, got %d", len(trail))
+	}
+	if trail[0].EventType != "migration_paused" {
+		t.Fatalf("audit event type = %q, want %q", trail[0].EventType, "migration_paused")
+	}
+	if trail[0].PreviousState != StatePlanning.String() {
+		t.Fatalf("audit previous state = %q, want %q", trail[0].PreviousState, StatePlanning.String())
+	}
+	if trail[0].NewState != StatePaused.String() {
+		t.Fatalf("audit new state = %q, want %q", trail[0].NewState, StatePaused.String())
+	}
+}
+
+func TestPipelinePauseIsIdempotentWhenAlreadyPaused(t *testing.T) {
+	pipeline, jobRepo, pipelineRepo := newPauseResumeTestPipeline(t)
+	migrationID := createTestMigration(t, jobRepo)
+
+	if err := jobRepo.SetMigrationState(migrationID, StatePlanning); err != nil {
+		t.Fatalf("SetMigrationState(StatePlanning): %v", err)
+	}
+	if err := pipeline.Pause(context.Background(), migrationID, nil); err != nil {
+		t.Fatalf("first Pause() failed: %v", err)
+	}
+
+	if err := pipeline.Pause(context.Background(), migrationID, nil); err != nil {
+		t.Fatalf("second Pause() should be idempotent, got error: %v", err)
+	}
+
+	state, err := jobRepo.GetMigrationState(migrationID)
+	if err != nil {
+		t.Fatalf("GetMigrationState(): %v", err)
+	}
+	if state != StatePaused {
+		t.Fatalf("Pause() state = %s, want %s", state, StatePaused)
+	}
+
+	trail, err := pipelineRepo.GetAuditTrail(migrationID, 10)
+	if err != nil {
+		t.Fatalf("GetAuditTrail(): %v", err)
+	}
+	if len(trail) != 1 {
+		t.Fatalf("expected 1 audit entry after idempotent pause, got %d", len(trail))
+	}
+}
+
+func TestPipelineResumeFromPausedState(t *testing.T) {
+	pipeline, jobRepo, _ := newPauseResumeTestPipeline(t)
+	migrationID := createTestMigration(t, jobRepo)
+
+	if err := jobRepo.SetMigrationState(migrationID, StatePaused); err != nil {
+		t.Fatalf("SetMigrationState(StatePaused): %v", err)
+	}
+
+	if err := pipeline.Resume(context.Background(), migrationID, nil); err != nil {
+		t.Fatalf("Resume() failed: %v", err)
+	}
+
+	state, err := jobRepo.GetMigrationState(migrationID)
+	if err != nil {
+		t.Fatalf("GetMigrationState(): %v", err)
+	}
+	if state != StateCommitted {
+		t.Fatalf("Resume() final state = %s, want %s", state, StateCommitted)
+	}
+}
+
+func TestPipelineCancelFromPausedState(t *testing.T) {
+	pipeline, jobRepo, pipelineRepo := newPauseResumeTestPipeline(t)
+	migrationID := createTestMigration(t, jobRepo)
+
+	if err := jobRepo.SetMigrationState(migrationID, StatePaused); err != nil {
+		t.Fatalf("SetMigrationState(StatePaused): %v", err)
+	}
+
+	if err := pipeline.Cancel(context.Background(), migrationID, nil); err != nil {
+		t.Fatalf("Cancel() failed: %v", err)
+	}
+
+	state, err := jobRepo.GetMigrationState(migrationID)
+	if err != nil {
+		t.Fatalf("GetMigrationState(): %v", err)
+	}
+	if state != StateCancelled {
+		t.Fatalf("Cancel() final state = %s, want %s", state, StateCancelled)
+	}
+
+	trail, err := pipelineRepo.GetAuditTrail(migrationID, 10)
+	if err != nil {
+		t.Fatalf("GetAuditTrail(): %v", err)
+	}
+	found := false
+	for _, entry := range trail {
+		if entry.EventType == "migration_cancelled" {
+			found = true
+			if entry.NewState != StateCancelled.String() {
+				t.Fatalf("cancel audit new state = %q, want %q", entry.NewState, StateCancelled.String())
+			}
+		}
+	}
+	if !found {
+		t.Fatal("expected migration_cancelled audit entry")
 	}
 }
 

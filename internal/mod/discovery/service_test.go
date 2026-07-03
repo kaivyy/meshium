@@ -47,6 +47,12 @@ func (f fakeHostKeyStore) MakeHostKeyCallback(serverID int) xssh.HostKeyCallback
 	return func(string, net.Addr, xssh.PublicKey) error { return nil }
 }
 
+func (f fakeHostKeyStore) TrustHostKey(serverID int) (string, error) { return "", nil }
+
+func (f fakeHostKeyStore) GetFingerprint(serverID int) (string, error) { return "", nil }
+
+func (f fakeHostKeyStore) IsTrusted(host string, port int) (bool, error) { return false, nil }
+
 type fakeServerRepo struct {
 	server      *server.Server
 	savedInfo   server.ServerInfo

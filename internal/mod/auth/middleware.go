@@ -99,26 +99,78 @@ func (m *Middleware) RequireAuth(next http.Handler) http.Handler {
 	})
 }
 
-// extractToken extracts the session token from the Authorization header
-// or the "token" query parameter (for WebSocket connections that can't set headers).
-// Supports both "Bearer <token>" and raw token formats.
+// extractToken extracts the session token from one of the following sources,
+// in order of preference:
+//  1. Authorization header (for REST API requests)
+//  2. Sec-WebSocket-Protocol header (for WebSocket connections using subprotocol auth)
+//  3. "token" query parameter (legacy fallback for WebSocket connections)
+//
+// The subprotocol mechanism is preferred for WebSocket connections because it
+// does not expose the token in the URL (which would appear in server logs,
+// browser history, and analytics tools). The subprotocol format is:
+//   Sec-WebSocket-Protocol: meshium-auth.<token>
+//
+// The query parameter fallback is kept for backward compatibility but should
+// be removed once all clients use subprotocol auth.
 func extractToken(r *http.Request) string {
-	// Check Authorization header first
+	// 1. Check Authorization header (REST API)
 	auth := r.Header.Get("Authorization")
 	if auth != "" {
-		// Check for Bearer token format
 		if strings.HasPrefix(auth, "Bearer ") {
 			return strings.TrimPrefix(auth, "Bearer ")
 		}
-		// Otherwise treat the entire header as the token
 		return auth
 	}
 
-	// Fall back to query parameter (for WebSocket connections)
+	// 2. Check Sec-WebSocket-Protocol header (modern WebSocket auth)
+	// Client sends: Sec-WebSocket-Protocol: meshium-auth.<token>
+	// We extract the token and must echo back the subprotocol in the response.
+	protocols := websocketSubprotocols(r)
+	for _, p := range protocols {
+		if strings.HasPrefix(p, "meshium-auth.") {
+			token := strings.TrimPrefix(p, "meshium-auth.")
+			if token != "" {
+				return token
+			}
+		}
+	}
+
+	// 3. Fall back to query parameter (legacy WebSocket auth)
 	token := r.URL.Query().Get("token")
 	if token != "" {
 		return token
 	}
 
+	return ""
+}
+
+// websocketSubprotocols extracts the subprotocols from the Sec-WebSocket-Protocol
+// header. The header value is a comma-separated list of protocol names.
+func websocketSubprotocols(r *http.Request) []string {
+	header := r.Header.Get("Sec-WebSocket-Protocol")
+	if header == "" {
+		return nil
+	}
+	var protocols []string
+	for _, p := range strings.Split(header, ",") {
+		p = strings.TrimSpace(p)
+		if p != "" {
+			protocols = append(protocols, p)
+		}
+	}
+	return protocols
+}
+
+// WebSocketSubprotocolToken returns the subprotocol token string to echo back
+// to the client during WebSocket upgrade. If the client requested a
+// "meshium-auth.*" subprotocol, this returns that protocol string so the
+// upgrader can include it in the response. Otherwise it returns empty string.
+func WebSocketSubprotocolToken(r *http.Request) string {
+	protocols := websocketSubprotocols(r)
+	for _, p := range protocols {
+		if strings.HasPrefix(p, "meshium-auth.") {
+			return p
+		}
+	}
 	return ""
 }

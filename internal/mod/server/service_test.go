@@ -6,6 +6,7 @@ import (
 
 	"meshium/internal/db"
 	"meshium/internal/mod/auth"
+	modssh "meshium/internal/mod/ssh"
 )
 
 func setupServiceTest(t *testing.T) (*Service, Repo, *auth.Service, *sql.DB) {
@@ -25,6 +26,7 @@ func setupServiceTest(t *testing.T) (*Service, Repo, *auth.Service, *sql.DB) {
 	}
 
 	svc := NewService(repo, authSvc)
+	svc.SetHostKeyStore(modssh.NewKnownHostsStore(d))
 	return svc, repo, authSvc, d
 }
 

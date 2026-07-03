@@ -308,3 +308,48 @@ func TestMiddlewareBlocksAPIWhenNotSetup(t *testing.T) {
 		t.Errorf("expected 403 Forbidden when not setup, got %d", w.Code)
 	}
 }
+
+func TestExtractTokenPrefersAuthorizationHeaderOverWebSocketSubprotocol(t *testing.T) {
+	req := httptest.NewRequest(http.MethodGet, "/ws/pipeline/123?token=query-token", nil)
+	req.Header.Set("Authorization", "Bearer auth-token")
+	req.Header.Set("Sec-WebSocket-Protocol", "meshium-auth.websocket-token")
+
+	if got := extractToken(req); got != "auth-token" {
+		t.Fatalf("extractToken() = %q, want %q", got, "auth-token")
+	}
+}
+
+func TestExtractTokenUsesWebSocketSubprotocol(t *testing.T) {
+	req := httptest.NewRequest(http.MethodGet, "/ws/pipeline/123", nil)
+	req.Header.Set("Sec-WebSocket-Protocol", "chat, meshium-auth.websocket-token, graphql-transport-ws")
+
+	if got := extractToken(req); got != "websocket-token" {
+		t.Fatalf("extractToken() = %q, want %q", got, "websocket-token")
+	}
+}
+
+func TestExtractTokenFallsBackToQueryParamWithoutSubprotocol(t *testing.T) {
+	req := httptest.NewRequest(http.MethodGet, "/ws/pipeline/123?token=query-token", nil)
+
+	if got := extractToken(req); got != "query-token" {
+		t.Fatalf("extractToken() = %q, want %q", got, "query-token")
+	}
+}
+
+func TestWebSocketSubprotocolTokenReturnsMatchingSubprotocol(t *testing.T) {
+	req := httptest.NewRequest(http.MethodGet, "/ws/pipeline/123", nil)
+	req.Header.Set("Sec-WebSocket-Protocol", "chat, meshium-auth.websocket-token, graphql-transport-ws")
+
+	if got := WebSocketSubprotocolToken(req); got != "meshium-auth.websocket-token" {
+		t.Fatalf("WebSocketSubprotocolToken() = %q, want %q", got, "meshium-auth.websocket-token")
+	}
+}
+
+func TestWebSocketSubprotocolTokenReturnsEmptyStringWithoutMeshiumAuthSubprotocol(t *testing.T) {
+	req := httptest.NewRequest(http.MethodGet, "/ws/pipeline/123", nil)
+	req.Header.Set("Sec-WebSocket-Protocol", "chat, graphql-transport-ws")
+
+	if got := WebSocketSubprotocolToken(req); got != "" {
+		t.Fatalf("WebSocketSubprotocolToken() = %q, want empty string", got)
+	}
+}

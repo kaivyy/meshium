@@ -74,6 +74,18 @@ func (h *Handler) handleServerByID(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		h.handleGetInfo(w, r, id)
+	case "trust-host":
+		if r.Method != http.MethodPost {
+			shared.WriteError(w, http.StatusMethodNotAllowed, "method not allowed", "METHOD_NOT_ALLOWED")
+			return
+		}
+		h.handleTrustHost(w, r, id)
+	case "fingerprint":
+		if r.Method != http.MethodGet {
+			shared.WriteError(w, http.StatusMethodNotAllowed, "method not allowed", "METHOD_NOT_ALLOWED")
+			return
+		}
+		h.handleGetFingerprint(w, r, id)
 	default:
 		shared.WriteError(w, http.StatusNotFound, "not found", "NOT_FOUND")
 	}
@@ -246,6 +258,34 @@ func (h *Handler) handleGetInfo(w http.ResponseWriter, r *http.Request, id int) 
 	}
 
 	shared.WriteJSON(w, http.StatusOK, info)
+}
+
+func (h *Handler) handleTrustHost(w http.ResponseWriter, r *http.Request, id int) {
+	fingerprint, err := h.svc.TrustHostKey(id)
+	if err != nil {
+		if isNotFoundError(err) {
+			shared.WriteError(w, http.StatusNotFound, "server not found", "SERVER_NOT_FOUND")
+			return
+		}
+		shared.WriteError(w, http.StatusInternalServerError, "failed to trust host key", "INTERNAL")
+		return
+	}
+
+	shared.WriteJSON(w, http.StatusOK, map[string]string{"fingerprint": fingerprint})
+}
+
+func (h *Handler) handleGetFingerprint(w http.ResponseWriter, r *http.Request, id int) {
+	fingerprint, err := h.svc.GetFingerprint(id)
+	if err != nil {
+		if isNotFoundError(err) {
+			shared.WriteError(w, http.StatusNotFound, "host key not found", "NOT_FOUND")
+			return
+		}
+		shared.WriteError(w, http.StatusInternalServerError, "failed to get host fingerprint", "INTERNAL")
+		return
+	}
+
+	shared.WriteJSON(w, http.StatusOK, map[string]string{"fingerprint": fingerprint})
 }
 
 func isNotFoundError(err error) bool {
