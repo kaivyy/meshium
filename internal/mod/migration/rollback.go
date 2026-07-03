@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"log"
 	"strings"
 	"time"
 
@@ -150,8 +151,12 @@ func (rm *RollbackManager) Rollback(ctx context.Context, migrationID int, onProg
 		onProgress(WSMessage{Step: "rollback", Status: "error", Error: errMsg})
 		return fmt.Errorf("%s", errMsg)
 	}
-	rm.repo.UpdateMigrationStatus(migrationID, StatusRolledBack, "")
-	rm.repo.SetMigrationRolledBackAt(migrationID, now)
+	if err := rm.repo.UpdateMigrationStatus(migrationID, StatusRolledBack, ""); err != nil {
+		log.Printf("warning: failed to update migration %d status to rolled back: %v", migrationID, err)
+	}
+	if err := rm.repo.SetMigrationRolledBackAt(migrationID, now); err != nil {
+		log.Printf("warning: failed to persist rolled back timestamp for migration %d: %v", migrationID, err)
+	}
 
 	onProgress(WSMessage{Step: "rollback", Status: "complete", Value: "Rollback completed"})
 

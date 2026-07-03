@@ -184,6 +184,11 @@ export interface MigrationConfig {
   retryDelay?: number;
 }
 
+export interface PipelineActionResponse {
+  status: string;
+  message?: string;
+}
+
 // --- Migration Session ---
 
 export interface MigrationSession {
@@ -308,10 +313,14 @@ export const pipelineApi = {
   // Config
   configure: (id: number, config: MigrationConfig) => api.put(`/pipeline/migrations/${id}/config`, config),
 
-  // Control
-  pause: (id: number) => api.post(`/pipeline/migrations/${id}/pause`, {}),
-  resume: (id: number) => api.post(`/pipeline/migrations/${id}/resume`, {}),
-  cancel: (id: number) => api.post(`/pipeline/migrations/${id}/cancel`, {}),
+  // Actions
+  cutover: (id: number) => api.post(`/pipeline/migrations/${id}/actions/cutover`, {}) as Promise<PipelineActionResponse>,
+  commit: (id: number) => api.post(`/pipeline/migrations/${id}/actions/commit`, {}) as Promise<PipelineActionResponse>,
+  rollbackMigration: (id: number) => api.post(`/pipeline/migrations/${id}/actions/rollback`, {}) as Promise<PipelineActionResponse>,
+  pause: (id: number) => api.post(`/pipeline/migrations/${id}/actions/pause`, {}) as Promise<PipelineActionResponse>,
+  resume: (id: number) => api.post(`/pipeline/migrations/${id}/actions/resume`, {}) as Promise<PipelineActionResponse>,
+  cancel: (id: number) => api.post(`/pipeline/migrations/${id}/actions/cancel`, {}) as Promise<PipelineActionResponse>,
+  retry: (id: number) => api.post(`/pipeline/migrations/${id}/actions/retry`, {}) as Promise<PipelineActionResponse>,
 
   // Export
   exportReport: (id: number) => api.get(`/pipeline/migrations/${id}/export`) as Promise<Blob>,

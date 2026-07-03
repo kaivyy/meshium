@@ -3,6 +3,7 @@ package migration
 import (
 	"context"
 	"fmt"
+	"path"
 	"regexp"
 	"strconv"
 	"strings"
@@ -29,18 +30,70 @@ func NewSyncEngine(sourceSSH, targetSSH SSHExecuter, repo PipelineRepo) *SyncEng
 
 // SyncConfig configures a data sync operation.
 type SyncConfig struct {
-	SourcePath      string   `json:"sourcePath"`
-	TargetPath      string   `json:"targetPath"`
-	BandwidthLimit  int64    `json:"bandwidthLimit,omitempty"`
-	ParallelTransfers int     `json:"parallelTransfers,omitempty"`
-	ExcludePatterns []string `json:"excludePatterns,omitempty"`
-	Compress        bool     `json:"compress,omitempty"`
-	ChecksumVerify  bool     `json:"checksumVerify,omitempty"`
-	MigrationID     int      `json:"migrationId"`
+	SourcePath        string   `json:"sourcePath"`
+	TargetPath        string   `json:"targetPath"`
+	TargetHost        string   `json:"targetHost"`
+	TargetPort        int      `json:"targetPort"`
+	TargetUser        string   `json:"targetUser"`
+	BandwidthLimit    int64    `json:"bandwidthLimit,omitempty"`
+	ParallelTransfers int      `json:"parallelTransfers,omitempty"`
+	ExcludePatterns   []string `json:"excludePatterns,omitempty"`
+	Compress          bool     `json:"compress,omitempty"`
+	ChecksumVerify    bool     `json:"checksumVerify,omitempty"`
+	PreservePerms     bool     `json:"preservePerms"`
+	PreserveOwner     bool     `json:"preserveOwner"`
+	PreserveGroup     bool     `json:"preserveGroup"`
+	PreserveSymlinks  bool     `json:"preserveSymlinks"`
+	PreserveTimes     bool     `json:"preserveTimes"`
+	Sparse            bool     `json:"sparse"`
+	DeleteExtraneous  bool     `json:"deleteExtraneous"`
+	DryRun            bool     `json:"dryRun"`
+	MigrationID       int      `json:"migrationId"`
 }
 
 // rsyncProgressRegex matches rsync --progress output lines.
 var rsyncProgressRegex = regexp.MustCompile(`(\d+)\s+(\d+)%\s+([\d.]+)([KMG]?)B/s`)
+
+func normalizeSyncPath(p string) string {
+	if p == "" {
+		return "/"
+	}
+	if p == "/" {
+		return "/"
+	}
+	return strings.TrimRight(p, "/")
+}
+
+func syncPathWithTrailingSlash(p string) string {
+	normalized := normalizeSyncPath(p)
+	if normalized == "/" {
+		return "/"
+	}
+	return normalized + "/"
+}
+
+func buildRsyncSSHTransport(port int) string {
+	if port <= 0 {
+		port = 22
+	}
+	return fmt.Sprintf("ssh -p %d -o StrictHostKeyChecking=accept-new", port)
+}
+
+func buildRsyncRemoteSpec(user, host, targetPath string) string {
+	remotePath := syncPathWithTrailingSlash(targetPath)
+	if user == "" {
+		return fmt.Sprintf("%s:%s", host, remotePath)
+	}
+	return fmt.Sprintf("%s@%s:%s", user, host, remotePath)
+}
+
+func syncFileCountCommand(rootPath string) string {
+	return fmt.Sprintf("find %s -type f 2>/dev/null | wc -l", shared.ShellQuote(normalizeSyncPath(rootPath)))
+}
+
+func syncChecksumCommand(filePath string) string {
+	return fmt.Sprintf("md5sum %s 2>/dev/null", shared.ShellQuote(filePath))
+}
 
 // InitialSync performs a full rsync from source to target.
 func (e *SyncEngine) InitialSync(ctx context.Context, migrationID int, config SyncConfig) (*SyncSession, error) {
@@ -213,9 +266,8 @@ func (e *SyncEngine) ResumeSync(ctx context.Context, migrationID int, sessionID 
 		MigrationID: migrationID,
 	}
 
-	// Re-run with --partial --append-verify to resume
+	// Re-run with the same resumable rsync command.
 	cmd := e.buildRsyncCommand(config, true)
-	cmd = strings.Replace(cmd, "rsync", "rsync --partial --append-verify", 1)
 
 	output, _, _, err := e.sourceSSH.ExecContext(ctx, cmd)
 	if err != nil {
@@ -231,7 +283,7 @@ func (e *SyncEngine) ResumeSync(ctx context.Context, migrationID int, sessionID 
 
 // buildRsyncCommand constructs an rsync command string.
 func (e *SyncEngine) buildRsyncCommand(config SyncConfig, incremental bool) string {
-	args := []string{"rsync", "-avz", "--progress", "--stats"}
+	args := []string{"rsync", "-avz", "--progress", "--stats", "--partial", "--append-verify"}
 
 	if incremental {
 		args = append(args, "--update")
@@ -239,6 +291,42 @@ func (e *SyncEngine) buildRsyncCommand(config SyncConfig, incremental bool) stri
 
 	if config.BandwidthLimit > 0 {
 		args = append(args, fmt.Sprintf("--bwlimit=%d", config.BandwidthLimit))
+	}
+
+	if config.DeleteExtraneous {
+		args = append(args, "--delete")
+	}
+
+	if config.DryRun {
+		args = append(args, "--dry-run")
+	}
+
+	if config.Sparse {
+		args = append(args, "--sparse")
+	}
+
+	if config.ChecksumVerify {
+		args = append(args, "--checksum")
+	}
+
+	for _, pattern := range config.ExcludePatterns {
+		args = append(args, fmt.Sprintf("--exclude=%s", shared.ShellQuote(pattern)))
+	}
+
+	if config.PreservePerms {
+		args = append(args, "-p")
+	}
+	if config.PreserveOwner {
+		args = append(args, "-o")
+	}
+	if config.PreserveGroup {
+		args = append(args, "-g")
+	}
+	if config.PreserveSymlinks {
+		args = append(args, "-l")
+	}
+	if config.PreserveTimes {
+		args = append(args, "-t")
 	}
 
 	if !config.Compress {
@@ -251,25 +339,131 @@ func (e *SyncEngine) buildRsyncCommand(config SyncConfig, incremental bool) stri
 		}
 	}
 
-	if config.ChecksumVerify {
-		args = append(args, "--checksum")
+	sourcePath := syncPathWithTrailingSlash(config.SourcePath)
+	targetPath := syncPathWithTrailingSlash(config.TargetPath)
+	if config.TargetHost != "" {
+		if config.TargetPath == "" {
+			targetPath = sourcePath
+		}
+		args = append(args, "-e", fmt.Sprintf("\"%s\"", buildRsyncSSHTransport(config.TargetPort)))
+		args = append(args, shared.ShellQuote(sourcePath), shared.ShellQuote(buildRsyncRemoteSpec(config.TargetUser, config.TargetHost, targetPath)))
+		return strings.Join(args, " ")
 	}
 
-	for _, pattern := range config.ExcludePatterns {
-		args = append(args, fmt.Sprintf("--exclude=%s", shared.ShellQuote(pattern)))
-	}
-
-	sourcePath := config.SourcePath
-	if sourcePath == "" {
-		sourcePath = "/"
-	}
-	targetPath := config.TargetPath
-	if targetPath == "" {
+	if config.TargetPath == "" {
 		targetPath = sourcePath
 	}
-
-	args = append(args, shared.ShellQuote(sourcePath+"/"), shared.ShellQuote(targetPath+"/"))
+	args = append(args, shared.ShellQuote(sourcePath), shared.ShellQuote(targetPath))
 	return strings.Join(args, " ")
+}
+
+// VerifySync compares file counts and critical checksums between source and target.
+func (e *SyncEngine) VerifySync(ctx context.Context, config SyncConfig) error {
+	if e == nil || e.sourceSSH == nil || e.targetSSH == nil {
+		return fmt.Errorf("sync verification requires source and target SSH connections")
+	}
+
+	sourceRoot := normalizeSyncPath(config.SourcePath)
+	targetRoot := normalizeSyncPath(config.TargetPath)
+	if config.TargetPath == "" {
+		targetRoot = sourceRoot
+	}
+
+	sourceCount, err := e.runSyncFileCount(ctx, e.sourceSSH, sourceRoot)
+	if err != nil {
+		return fmt.Errorf("count source files: %w", err)
+	}
+	targetCount, err := e.runSyncFileCount(ctx, e.targetSSH, targetRoot)
+	if err != nil {
+		return fmt.Errorf("count target files: %w", err)
+	}
+
+	if sourceCount != targetCount {
+		e.recordSyncVerificationResult(ctx, config.MigrationID, sourceRoot, targetRoot, false, fmt.Sprintf("%d files", sourceCount), fmt.Sprintf("%d files", targetCount), fmt.Sprintf("file count mismatch: source=%d target=%d", sourceCount, targetCount))
+		return fmt.Errorf("file count mismatch: source=%d target=%d", sourceCount, targetCount)
+	}
+
+	if config.ChecksumVerify {
+		if err := e.verifyCriticalSyncFiles(ctx, sourceRoot, targetRoot); err != nil {
+			e.recordSyncVerificationResult(ctx, config.MigrationID, sourceRoot, targetRoot, false, fmt.Sprintf("%d files", sourceCount), fmt.Sprintf("%d files", targetCount), err.Error())
+			return err
+		}
+	}
+
+	e.recordSyncVerificationResult(ctx, config.MigrationID, sourceRoot, targetRoot, true, fmt.Sprintf("%d files", sourceCount), fmt.Sprintf("%d files", targetCount), "")
+	return nil
+}
+
+func (e *SyncEngine) runSyncFileCount(ctx context.Context, ssh SSHExecuter, rootPath string) (int, error) {
+	cmd := syncFileCountCommand(rootPath)
+	stdout, _, _, err := ssh.ExecContext(ctx, cmd)
+	if err != nil {
+		return 0, err
+	}
+
+	count, err := strconv.Atoi(strings.TrimSpace(stdout))
+	if err != nil {
+		return 0, fmt.Errorf("parse file count %q: %w", strings.TrimSpace(stdout), err)
+	}
+	return count, nil
+}
+
+func (e *SyncEngine) verifyCriticalSyncFiles(ctx context.Context, sourceRoot, targetRoot string) error {
+	criticalFiles := []string{
+		"etc/passwd",
+		"etc/group",
+		"etc/hosts",
+		"etc/ssh/sshd_config",
+	}
+
+	for _, rel := range criticalFiles {
+		sourceChecksum, err := e.runSyncChecksum(ctx, e.sourceSSH, path.Join(sourceRoot, rel))
+		if err != nil {
+			return fmt.Errorf("source checksum %s: %w", rel, err)
+		}
+		targetChecksum, err := e.runSyncChecksum(ctx, e.targetSSH, path.Join(targetRoot, rel))
+		if err != nil {
+			return fmt.Errorf("target checksum %s: %w", rel, err)
+		}
+
+		if sourceChecksum == "" || targetChecksum == "" {
+			continue
+		}
+		if sourceChecksum != targetChecksum {
+			return fmt.Errorf("checksum mismatch for %s", rel)
+		}
+	}
+	return nil
+}
+
+func (e *SyncEngine) runSyncChecksum(ctx context.Context, ssh SSHExecuter, filePath string) (string, error) {
+	cmd := syncChecksumCommand(filePath)
+	stdout, _, _, err := ssh.ExecContext(ctx, cmd)
+	if err != nil {
+		return "", err
+	}
+
+	fields := strings.Fields(strings.TrimSpace(stdout))
+	if len(fields) == 0 {
+		return "", nil
+	}
+	return fields[0], nil
+}
+
+func (e *SyncEngine) recordSyncVerificationResult(ctx context.Context, migrationID int, sourceRoot, targetRoot string, passed bool, expected, actual, errMsg string) {
+	if e == nil || e.repo == nil {
+		return
+	}
+
+	_, _ = e.repo.CreateVerificationResult(ctx, VerificationResult{
+		MigrationID:      migrationID,
+		VerificationType: "sync",
+		Target:           targetRoot,
+		Expected:         expected,
+		Actual:           actual,
+		Passed:           passed,
+		ErrorMessage:     errMsg,
+	})
 }
 
 // parseRsyncOutput extracts transfer statistics from rsync output.

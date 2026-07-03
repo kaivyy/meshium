@@ -244,11 +244,11 @@ func TestRiskAssessment(t *testing.T) {
 	engine := NewRiskEngine(repo)
 
 	tests := []struct {
-		name      string
-		input     RiskInput
-		maxScore  float64
-		minScore  float64
-		class     RiskClass
+		name     string
+		input    RiskInput
+		maxScore float64
+		minScore float64
+		class    RiskClass
 	}{
 		{
 			name: "low_risk_small_migration",
@@ -454,9 +454,9 @@ func TestHealthScoreFromLatency(t *testing.T) {
 	engine := NewHealthEngine(nil, nil, nil)
 
 	tests := []struct {
-		latency    time.Duration
-		minScore   float64
-		maxScore   float64
+		latency  time.Duration
+		minScore float64
+		maxScore float64
 	}{
 		{10 * time.Millisecond, 95, 100},
 		{100 * time.Millisecond, 85, 95},
@@ -671,6 +671,12 @@ func (m *mockPipelineRepo) SetMigrationConfig(migrationID int, config *Migration
 }
 func (m *mockPipelineRepo) GetMigrationConfig(migrationID int) (*MigrationConfig, error) {
 	return DefaultMigrationConfig(), nil
+}
+func (m *mockPipelineRepo) CreateEvent(ctx context.Context, event MigrationEvent) error {
+	return nil
+}
+func (m *mockPipelineRepo) GetEvents(ctx context.Context, migrationID int, afterSequence int64, limit int) ([]MigrationEvent, error) {
+	return nil, nil
 }
 func (m *mockPipelineRepo) SetMigrationRisk(migrationID int, score float64, class string) error {
 	return nil

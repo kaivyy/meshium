@@ -67,6 +67,8 @@ const (
 	StateRollback
 	// StateRolledBack: rollback completed, target/source restored to pre-migration state.
 	StateRolledBack
+	// StateRollbackDegraded: rollback completed with some stage failures.
+	StateRollbackDegraded
 	// StateInterrupted: migration was interrupted (crash, disconnect) and can be resumed.
 	StateInterrupted
 	// StateResuming: an interrupted migration is being resumed.
@@ -124,6 +126,8 @@ func (s MigrationState) String() string {
 		return "rollback"
 	case StateRolledBack:
 		return "rolled_back"
+	case StateRollbackDegraded:
+		return "rollback_degraded"
 	case StateInterrupted:
 		return "interrupted"
 	case StateResuming:
@@ -137,7 +141,7 @@ func (s MigrationState) String() string {
 
 // IsTerminal returns true if the state is a terminal state (no further transitions).
 func (s MigrationState) IsTerminal() bool {
-	return s == StateCommitted || s == StateRolledBack || s == StateCancelled
+	return s == StateCommitted || s == StateRolledBack || s == StateRollbackDegraded || s == StateCancelled
 }
 
 // IsRunning returns true if the migration is actively processing (not terminal, not failed).
@@ -186,6 +190,7 @@ var stateString = map[MigrationState]string{
 	StateFailed:             "failed",               // maps to existing StatusFailed
 	StateRollback:           "rolling_back",         // maps to existing StatusRollingBack
 	StateRolledBack:         "rolled_back",          // maps to existing StatusRolledBack
+	StateRollbackDegraded:   "rollback_degraded",    // partial rollback failure
 	// StateRestored is an alias — same iota value, already covered by StateRolledBack
 	StateInterrupted:        "interrupted",          // maps to existing StatusInterrupted
 	StateResuming:           "resuming",             // maps to existing StatusResuming
@@ -250,8 +255,9 @@ var transitionTable = map[MigrationState][]MigrationState{
 	StateObservation:         {StateCommitted, StateFailed, StateInterrupted, StateRollback},
 	StateCommitted:           {}, // terminal
 	StateFailed:              {StateRollback, StateInterrupted},
-	StateRollback:            {StateRolledBack, StateFailed},
+	StateRollback:            {StateRolledBack, StateRollbackDegraded, StateFailed},
 	StateRolledBack:          {}, // terminal
+	StateRollbackDegraded:    {}, // terminal
 	StateInterrupted:         {StateResuming, StateFailed, StateCancelled},
 	StateResuming: {
 		StatePlanning, StateDiscovery, StateCompatibilityCheck, StateRiskAssessment,

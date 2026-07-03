@@ -10,12 +10,14 @@ import (
 // It coordinates replication catch-up, queue drain, health verification,
 // traffic switching, and post-cutover observation with automatic rollback.
 type CutoverEngine struct {
-	replication *ReplicationEngine
-	queue       *QueueEngine
-	health      *HealthEngine
-	traffic     *TrafficSwitchEngine
-	sync        *SyncEngine
-	repo        PipelineRepo
+	replication  *ReplicationEngine
+	queue        *QueueEngine
+	health       *HealthEngine
+	traffic      *TrafficSwitchEngine
+	sync         *SyncEngine
+	freezeMgr    *FreezeManager
+	freezeResult *FreezeResult
+	repo         PipelineRepo
 }
 
 // NewCutoverEngine creates a new cutover engine.
@@ -26,30 +28,36 @@ func NewCutoverEngine(
 	traffic *TrafficSwitchEngine,
 	sync *SyncEngine,
 	repo PipelineRepo,
+	freezeMgr ...*FreezeManager,
 ) *CutoverEngine {
+	var mgr *FreezeManager
+	if len(freezeMgr) > 0 {
+		mgr = freezeMgr[0]
+	}
 	return &CutoverEngine{
 		replication: replication,
 		queue:       queue,
 		health:      health,
 		traffic:     traffic,
 		sync:        sync,
+		freezeMgr:   mgr,
 		repo:        repo,
 	}
 }
 
 // CutoverConfig configures the cutover operation.
 type CutoverConfig struct {
-	MigrationID         int               `json:"migrationId"`
-	FreezeWrite         bool              `json:"freezeWrite"`
-	DrainQueues         bool              `json:"drainQueues"`
-	ReplicationConfig   ReplicationConfig `json:"replicationConfig,omitempty"`
-	QueueConfigs        []QueueConfig     `json:"queueConfigs,omitempty"`
+	MigrationID         int                 `json:"migrationId"`
+	FreezeWrite         bool                `json:"freezeWrite"`
+	DrainQueues         bool                `json:"drainQueues"`
+	ReplicationConfig   ReplicationConfig   `json:"replicationConfig,omitempty"`
+	QueueConfigs        []QueueConfig       `json:"queueConfigs,omitempty"`
 	TrafficConfig       TrafficSwitchConfig `json:"trafficConfig,omitempty"`
 	HealthChecks        []HealthCheckConfig `json:"healthChecks,omitempty"`
-	ObservationDuration time.Duration     `json:"observationDuration,omitempty"`
-	AutoRollback        bool              `json:"autoRollback"`
-	MaxErrorRate        float64           `json:"maxErrorRate,omitempty"`
-	MaxLatencyMs        int64             `json:"maxLatencyMs,omitempty"`
+	ObservationDuration time.Duration       `json:"observationDuration,omitempty"`
+	AutoRollback        bool                `json:"autoRollback"`
+	MaxErrorRate        float64             `json:"maxErrorRate,omitempty"`
+	MaxLatencyMs        int64               `json:"maxLatencyMs,omitempty"`
 }
 
 // Execute runs the cutover pipeline.
@@ -67,6 +75,7 @@ func (e *CutoverEngine) Execute(ctx context.Context, config CutoverConfig) error
 		CutoverType: "full",
 	}
 	cutoverID, _ := e.repo.CreateCutoverRecord(ctx, record)
+	e.freezeResult = nil
 
 	// Step 1: Freeze writes (if configured)
 	if config.FreezeWrite {
@@ -78,7 +87,7 @@ func (e *CutoverEngine) Execute(ctx context.Context, config CutoverConfig) error
 	}
 
 	// Step 2: Final delta sync
-	if e.sync != nil {
+	if e.replication != nil {
 		if err := e.replication.FinalSync(ctx, config.ReplicationConfig); err != nil {
 			e.repo.UpdateCutoverRecord(ctx, cutoverID, time.Now().Format(time.RFC3339), fmt.Sprintf("final sync failed: %v", err))
 			e.rollback(ctx, config)
@@ -209,6 +218,10 @@ func (e *CutoverEngine) rollback(ctx context.Context, config CutoverConfig) erro
 		}
 	}
 
+	if err := e.unfreezeWrites(ctx); err != nil && rollbackErr == nil {
+		rollbackErr = fmt.Errorf("unfreeze writes: %w", err)
+	}
+
 	// Update rollback record
 	success := rollbackErr == nil
 	e.repo.UpdateRollbackRecord(ctx, rollbackID, success, time.Now().Format(time.RFC3339), "")
@@ -218,13 +231,38 @@ func (e *CutoverEngine) rollback(ctx context.Context, config CutoverConfig) erro
 	return nil
 }
 
+// unfreezeWrites reverses any freeze operations that were applied during cutover.
+func (e *CutoverEngine) unfreezeWrites(ctx context.Context) error {
+	if e == nil || e.freezeMgr == nil || e.freezeResult == nil {
+		return nil
+	}
+	return e.freezeMgr.UnfreezeWrites(ctx, e.freezeResult)
+}
+
 // freezeWrites freezes write operations on the source server.
 func (e *CutoverEngine) freezeWrites(ctx context.Context, config CutoverConfig) error {
-	// This is a placeholder for application-level write freezing.
-	// In practice, this would:
-	// 1. Set a maintenance flag in the application
-	// 2. Stop accepting new write requests
-	// 3. Wait for in-flight writes to complete
-	// For now, we rely on replication catch-up to ensure data consistency.
+	if e == nil {
+		return fmt.Errorf("cutover engine is nil")
+	}
+
+	databases := make([]DatabaseInfo, 0, 1)
+	if config.ReplicationConfig.DatabaseType != "" {
+		databases = append(databases, DatabaseInfo{
+			Type: config.ReplicationConfig.DatabaseType,
+			Port: config.ReplicationConfig.SourcePort,
+		})
+	}
+	if len(databases) == 0 {
+		return nil
+	}
+	if e.freezeMgr == nil {
+		return fmt.Errorf("freeze manager not configured")
+	}
+
+	result, err := e.freezeMgr.FreezeWrites(ctx, databases)
+	if err != nil {
+		return err
+	}
+	e.freezeResult = result
 	return nil
 }

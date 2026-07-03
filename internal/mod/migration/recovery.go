@@ -190,7 +190,9 @@ func (rm *RecoveryManager) CancelMigration(ctx context.Context, migrationID int,
 
 	if len(checkpoints) == 0 {
 		// No applied steps — just mark as failed
-		rm.repo.SetMigrationStateContext(ctx, migrationID, StateFailed)
+		if err := rm.repo.SetMigrationStateContext(ctx, migrationID, StateFailed); err != nil {
+			log.Printf("warning: failed to persist failed state for migration %d: %v", migrationID, err)
+		}
 		onProgress(WSMessage{Step: "recovery", Status: "complete", Value: "No applied steps to roll back — migration cancelled"})
 		return &RecoveryResult{
 			Action:      "cancelled",
@@ -221,25 +223,34 @@ func (rm *RecoveryManager) CancelMigration(ctx context.Context, migrationID int,
 	stepMap := make(map[string]MigrationStep)
 	steps, err := rm.engine.BuildStepsFromCategories(ctx, migrationID, categories)
 	if err != nil {
-		return nil, fmt.Errorf("failed to build steps for rollback: %w", err)
+		// Log warning but continue — we can still try to rollback based on checkpoints
+		// even if we can't rebuild the full step list from categories
+		onProgress(WSMessage{Step: "recovery", Status: "warning", Value: fmt.Sprintf("Could not rebuild steps from categories: %v — will attempt checkpoint-based rollback", err)})
 	}
 	for _, step := range steps {
 		stepMap[step.Name()] = step
 	}
 
 	// Transition to Rollback
-	rm.repo.SetMigrationStateContext(ctx, migrationID, StateRollback)
+	if err := rm.repo.SetMigrationStateContext(ctx, migrationID, StateRollback); err != nil {
+		log.Printf("warning: failed to persist rollback state for migration %d: %v", migrationID, err)
+	}
 	onProgress(WSMessage{Step: "recovery", Status: "progress", Value: fmt.Sprintf("Rolling back %d applied steps (LIFO)...", len(checkpoints))})
 
 	// Rollback in LIFO order (checkpoints are ordered by step_index ASC, so reverse)
+	rollbackAttempts := 0
+	rollbackFailures := 0
 	for i := len(checkpoints) - 1; i >= 0; i-- {
 		cp := checkpoints[i]
 		step, ok := stepMap[cp.StepName]
 		if !ok {
-			log.Printf("warning: step %s not found for rollback, skipping", cp.StepName)
+			rollbackAttempts++
+			rollbackFailures++
+			log.Printf("warning: step %s not found for rollback", cp.StepName)
 			continue
 		}
 
+		rollbackAttempts++
 		onProgress(WSMessage{
 			Step:   step.Name(),
 			Status: "progress",
@@ -247,7 +258,10 @@ func (rm *RecoveryManager) CancelMigration(ctx context.Context, migrationID int,
 		})
 
 		// Load the apply data (backup) for rollback
-		jobSteps, _ := rm.repo.GetJobSteps(migrationID)
+		jobSteps, err := rm.repo.GetJobSteps(migrationID)
+		if err != nil {
+			return nil, fmt.Errorf("failed to load job steps: %w", err)
+		}
 		applyData := ""
 		for _, js := range jobSteps {
 			if js.StepName == cp.StepName {
@@ -264,26 +278,50 @@ func (rm *RecoveryManager) CancelMigration(ctx context.Context, migrationID int,
 		}
 
 		if err := step.Rollback(sctx); err != nil {
+			rollbackFailures++
 			onProgress(WSMessage{
 				Step:   step.Name(),
 				Status: "warning",
 				Value:  fmt.Sprintf("Rollback warning for %s: %v", step.Name(), err),
 			})
 		}
-
-		// Clear the checkpoint
-		rm.repo.ClearCheckpoint(migrationID, step.Name())
 	}
 
-	// Transition to Restored
-	rm.repo.SetMigrationStateContext(ctx, migrationID, StateRolledBack)
-	onProgress(WSMessage{Step: "recovery", Status: "complete", Value: "Migration cancelled — target restored to pre-migration state"})
+	finalState := StateRolledBack
+	action := "cancelled"
+	message := "All applied steps rolled back"
+	if rollbackFailures > 0 {
+		if rollbackFailures == rollbackAttempts {
+			finalState = StateFailed
+			action = "cancel_failed"
+			message = fmt.Sprintf("Rollback failed for %d step(s)", rollbackFailures)
+		} else {
+			finalState = StateRollbackDegraded
+			action = "cancelled_degraded"
+			message = fmt.Sprintf("Rollback completed with %d failure(s)", rollbackFailures)
+		}
+	}
+
+	// Transition to final state
+	if err := rm.repo.SetMigrationStateContext(ctx, migrationID, finalState); err != nil {
+		log.Printf("warning: failed to persist final recovery state for migration %d: %v", migrationID, err)
+	}
+
+	if finalState == StateRolledBack {
+		for _, cp := range checkpoints {
+			if err := rm.repo.ClearCheckpoint(migrationID, cp.StepName); err != nil {
+				log.Printf("warning: failed to clear checkpoint %s for migration %d: %v", cp.StepName, migrationID, err)
+			}
+		}
+	}
+
+	onProgress(WSMessage{Step: "recovery", Status: "complete", Value: message})
 
 	return &RecoveryResult{
-		Action:      "cancelled",
+		Action:      action,
 		MigrationID: migrationID,
-		FinalState:  StateRolledBack,
-		Message:     "All applied steps rolled back",
+		FinalState:  finalState,
+		Message:     message,
 	}, nil
 }
 

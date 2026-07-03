@@ -80,10 +80,10 @@ func (h *PipelineHandler) handleCreatePipelineMigration(w http.ResponseWriter, r
 
 	shared.LimitRequestBody(r)
 	var req struct {
-		SourceID  int              `json:"sourceId"`
-		TargetID  int              `json:"targetId"`
-		Categories []string        `json:"categories"`
-		Config    *MigrationConfig `json:"config,omitempty"`
+		SourceID   int              `json:"sourceId"`
+		TargetID   int              `json:"targetId"`
+		Categories []string         `json:"categories"`
+		Config     *MigrationConfig `json:"config,omitempty"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		shared.WriteError(w, http.StatusBadRequest, "invalid request body", "VALIDATION_ERROR")
@@ -180,9 +180,72 @@ func (h *PipelineHandler) handlePipelineMigrationByID(w http.ResponseWriter, r *
 			return
 		}
 		h.handlePipelineExport(w, r, id)
+	case "actions":
+		if len(parts) < 3 {
+			shared.WriteError(w, http.StatusBadRequest, "action is required", "VALIDATION_ERROR")
+			return
+		}
+		h.handlePipelineAction(w, r, id, parts[2])
 	default:
 		shared.WriteError(w, http.StatusNotFound, "not found", "NOT_FOUND")
 	}
+}
+
+func (h *PipelineHandler) handlePipelineAction(w http.ResponseWriter, r *http.Request, id int, action string) {
+	switch action {
+	case "cutover":
+		if r.Method != http.MethodPost {
+			shared.WriteError(w, http.StatusMethodNotAllowed, "method not allowed", "METHOD_NOT_ALLOWED")
+			return
+		}
+		handlePipelineActionResult(w, func() error { return h.pipeline.Cutover(r.Context(), id, nil) }, "cutover")
+	case "commit":
+		if r.Method != http.MethodPost {
+			shared.WriteError(w, http.StatusMethodNotAllowed, "method not allowed", "METHOD_NOT_ALLOWED")
+			return
+		}
+		handlePipelineActionResult(w, func() error { return h.pipeline.Commit(r.Context(), id, nil) }, "committed")
+	case "rollback":
+		if r.Method != http.MethodPost {
+			shared.WriteError(w, http.StatusMethodNotAllowed, "method not allowed", "METHOD_NOT_ALLOWED")
+			return
+		}
+		handlePipelineActionResult(w, func() error { return h.pipeline.Rollback(r.Context(), id, nil) }, "rolled_back")
+	case "pause":
+		if r.Method != http.MethodPost {
+			shared.WriteError(w, http.StatusMethodNotAllowed, "method not allowed", "METHOD_NOT_ALLOWED")
+			return
+		}
+		handlePipelineActionResult(w, func() error { return h.pipeline.Pause(r.Context(), id, nil) }, "paused")
+	case "resume":
+		if r.Method != http.MethodPost {
+			shared.WriteError(w, http.StatusMethodNotAllowed, "method not allowed", "METHOD_NOT_ALLOWED")
+			return
+		}
+		handlePipelineActionResult(w, func() error { return h.pipeline.Resume(r.Context(), id, nil) }, "resumed")
+	case "cancel":
+		if r.Method != http.MethodPost {
+			shared.WriteError(w, http.StatusMethodNotAllowed, "method not allowed", "METHOD_NOT_ALLOWED")
+			return
+		}
+		handlePipelineActionResult(w, func() error { return h.pipeline.Cancel(r.Context(), id, nil) }, "cancelled")
+	case "retry":
+		if r.Method != http.MethodPost {
+			shared.WriteError(w, http.StatusMethodNotAllowed, "method not allowed", "METHOD_NOT_ALLOWED")
+			return
+		}
+		handlePipelineActionResult(w, func() error { return h.pipeline.Retry(r.Context(), id, nil) }, "retried")
+	default:
+		shared.WriteError(w, http.StatusNotFound, "not found", "NOT_FOUND")
+	}
+}
+
+func handlePipelineActionResult(w http.ResponseWriter, fn func() error, status string) {
+	if err := fn(); err != nil {
+		shared.WriteError(w, http.StatusConflict, err.Error(), "INVALID_STATE")
+		return
+	}
+	shared.WriteJSON(w, http.StatusOK, map[string]string{"status": status})
 }
 
 // --- REST: Get Pipeline Session ---
@@ -222,10 +285,8 @@ func (h *PipelineHandler) handleCancel(w http.ResponseWriter, r *http.Request, i
 // The migration will be marked as interrupted and can be resumed later.
 
 func (h *PipelineHandler) handlePause(w http.ResponseWriter, r *http.Request, id int) {
-	// Pause is equivalent to interrupting the pipeline
-	// The Pipeline doesn't have a direct Pause method, so we mark it as interrupted
-	if err := h.pipeline.Cancel(r.Context(), id, nil); err != nil {
-		shared.WriteError(w, http.StatusInternalServerError, fmt.Sprintf("pause failed: %v", err), "INTERNAL")
+	if err := h.pipeline.Pause(r.Context(), id, nil); err != nil {
+		shared.WriteError(w, http.StatusConflict, err.Error(), "INVALID_STATE")
 		return
 	}
 	shared.WriteJSON(w, http.StatusOK, map[string]string{"status": "paused"})

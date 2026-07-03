@@ -543,7 +543,9 @@ func (e *Engine) failMigration(ctx context.Context, sm *StateMachine, migrationI
 	if err := sm.Transition(StateFailed); err != nil {
 		sm.ForceTransition(StateFailed)
 	}
-	e.repo.SetMigrationStateContext(ctx, migrationID, StateFailed)
+	if err := e.repo.SetMigrationStateContext(ctx, migrationID, StateFailed); err != nil {
+		log.Printf("warning: failed to persist failed state for migration %d: %v", migrationID, err)
+	}
 }
 
 // failAndRollback transitions to Failed, then rolls back all applied steps in LIFO order.
@@ -559,7 +561,9 @@ func (e *Engine) failAndRollback(ctx context.Context, sm *StateMachine, migratio
 	if err := sm.Transition(StateRollback); err != nil {
 		sm.ForceTransition(StateRollback)
 	}
-	e.repo.SetMigrationStateContext(ctx, migrationID, StateRollback)
+	if err := e.repo.SetMigrationStateContext(ctx, migrationID, StateRollback); err != nil {
+		log.Printf("warning: failed to persist rollback state for migration %d: %v", migrationID, err)
+	}
 	onProgress(WSMessage{Step: "engine", Status: "progress", Value: "Rolling back applied steps (LIFO)..."})
 
 	// Rollback in LIFO order
@@ -596,14 +600,18 @@ func (e *Engine) failAndRollback(ctx context.Context, sm *StateMachine, migratio
 		}
 
 		// Clear the checkpoint for this step
-		e.repo.ClearCheckpoint(migrationID, step.Name())
+		if err := e.repo.ClearCheckpoint(migrationID, step.Name()); err != nil {
+			log.Printf("warning: failed to clear checkpoint for %s in migration %d: %v", step.Name(), migrationID, err)
+		}
 	}
 
 	// Transition to Restored
 	if err := sm.Transition(StateRolledBack); err != nil {
 		sm.ForceTransition(StateRolledBack)
 	}
-	e.repo.SetMigrationStateContext(ctx, migrationID, StateRolledBack)
+	if err := e.repo.SetMigrationStateContext(ctx, migrationID, StateRolledBack); err != nil {
+		log.Printf("warning: failed to persist rolled back state for migration %d: %v", migrationID, err)
+	}
 	onProgress(WSMessage{Step: "engine", Status: "complete", Value: "Rollback complete — target restored"})
 }
 
@@ -615,7 +623,9 @@ func (e *Engine) interruptMigration(ctx context.Context, sm *StateMachine, migra
 	if err := sm.Transition(StateInterrupted); err != nil {
 		sm.ForceTransition(StateInterrupted)
 	}
-	e.repo.SetMigrationStateContext(context.Background(), migrationID, StateInterrupted)
+	if err := e.repo.SetMigrationStateContext(context.Background(), migrationID, StateInterrupted); err != nil {
+		log.Printf("warning: failed to persist interrupted state for migration %d: %v", migrationID, err)
+	}
 }
 
 // getSSHClient obtains an SSH connection for the given server.

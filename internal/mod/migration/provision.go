@@ -3,6 +3,7 @@ package migration
 import (
 	"context"
 	"fmt"
+	"log"
 	"strings"
 
 	"meshium/internal/shared"
@@ -49,53 +50,147 @@ func (e *ProvisionEngine) Provision(ctx context.Context, migrationID int, config
 			MigrationID: migrationID,
 			Component:   component,
 		}
-		stateID, _ := e.repo.CreateProvisionState(ctx, state)
-
-		var installErr error
-		switch component {
-		case "docker":
-			installErr = e.InstallDocker(ctx, distro)
-		case "compose", "docker-compose":
-			installErr = e.InstallCompose(ctx, distro)
-		case "nginx":
-			installErr = e.InstallNginx(ctx, distro)
-		case "caddy":
-			installErr = e.InstallCaddy(ctx, distro)
-		case "traefik":
-			installErr = e.InstallTraefik(ctx, distro)
-		case "haproxy":
-			installErr = e.InstallHAProxy(ctx, distro)
-		case "redis":
-			installErr = e.InstallRedis(ctx, distro)
-		case "mysql", "mariadb":
-			installErr = e.InstallMySQL(ctx, distro)
-		case "postgres", "postgresql":
-			installErr = e.InstallPostgreSQL(ctx, distro)
-		case "mongodb":
-			installErr = e.InstallMongoDB(ctx, distro)
-		case "nodejs":
-			installErr = e.InstallNodeJS(ctx, distro)
-		case "ssh":
-			installErr = e.ConfigureSSH(ctx)
-		case "firewall":
-			installErr = e.ConfigureFirewall(ctx, distro)
-		case "swap":
-			installErr = e.ConfigureSwap(ctx)
-		case "sysctl":
-			installErr = e.ConfigureSysctl(ctx)
-		default:
-			installErr = fmt.Errorf("unknown component: %s", component)
-		}
-
-		if installErr != nil {
-			e.repo.UpdateProvisionState(ctx, stateID, false, false, false, "", installErr.Error())
-			return fmt.Errorf("provision %s: %w", component, installErr)
+		stateID, err := e.repo.CreateProvisionState(ctx, state)
+		if err != nil {
+			return fmt.Errorf("create provision state for %s: %w", component, err)
 		}
 
 		version := config.Versions[component]
-		e.repo.UpdateProvisionState(ctx, stateID, true, true, true, version, "")
+		installErr := e.installComponent(ctx, component, distro)
+		if installErr != nil {
+			if err := e.repo.UpdateProvisionState(ctx, stateID, false, false, false, version, installErr.Error()); err != nil {
+				log.Printf("warning: failed to persist failed provision state for %s: %v", component, err)
+			}
+			return fmt.Errorf("provision %s: %w", component, installErr)
+		}
+
+		if err := e.repo.UpdateProvisionState(ctx, stateID, true, true, false, version, ""); err != nil {
+			log.Printf("warning: failed to persist installed provision state for %s: %v", component, err)
+		}
+
+		verifyErr := e.verifyComponent(ctx, component)
+		if verifyErr != nil {
+			if err := e.repo.UpdateProvisionState(ctx, stateID, true, true, false, version, verifyErr.Error()); err != nil {
+				log.Printf("warning: failed to persist verification failure for %s: %v", component, err)
+			}
+			return fmt.Errorf("verify %s: %w", component, verifyErr)
+		}
+
+		if err := e.repo.UpdateProvisionState(ctx, stateID, true, true, true, version, ""); err != nil {
+			log.Printf("warning: failed to persist verified provision state for %s: %v", component, err)
+		}
 	}
 	return nil
+}
+
+func (e *ProvisionEngine) installComponent(ctx context.Context, component, distro string) error {
+	switch component {
+	case "docker":
+		return e.InstallDocker(ctx, distro)
+	case "compose", "docker-compose":
+		return e.InstallCompose(ctx, distro)
+	case "nginx":
+		return e.InstallNginx(ctx, distro)
+	case "caddy":
+		return e.InstallCaddy(ctx, distro)
+	case "traefik":
+		return e.InstallTraefik(ctx, distro)
+	case "haproxy":
+		return e.InstallHAProxy(ctx, distro)
+	case "redis":
+		return e.InstallRedis(ctx, distro)
+	case "mysql", "mariadb":
+		return e.InstallMySQL(ctx, distro)
+	case "postgres", "postgresql":
+		return e.InstallPostgreSQL(ctx, distro)
+	case "mongodb":
+		return e.InstallMongoDB(ctx, distro)
+	case "nodejs":
+		return e.InstallNodeJS(ctx, distro)
+	case "ssh":
+		return e.ConfigureSSH(ctx)
+	case "firewall":
+		return e.ConfigureFirewall(ctx, distro)
+	case "swap":
+		return e.ConfigureSwap(ctx)
+	case "sysctl":
+		return e.ConfigureSysctl(ctx)
+	default:
+		return fmt.Errorf("unknown component: %s", component)
+	}
+}
+
+func (e *ProvisionEngine) verifyComponent(ctx context.Context, component string) error {
+	var command string
+	var expected []string
+
+	switch component {
+	case "docker":
+		command = "docker version 2>&1"
+		expected = []string{"Docker version"}
+	case "compose", "docker-compose":
+		command = "docker compose version 2>&1"
+		expected = []string{"Docker Compose version"}
+	case "nginx":
+		command = "nginx -v 2>&1"
+		expected = []string{"nginx version"}
+	case "caddy":
+		command = "caddy version 2>&1"
+		expected = []string{"v"}
+	case "traefik":
+		command = "traefik version 2>&1"
+		expected = []string{"Version:"}
+	case "haproxy":
+		command = "haproxy -v 2>&1"
+		expected = []string{"HAProxy"}
+	case "redis":
+		command = "redis-cli ping 2>&1"
+		expected = []string{"PONG"}
+	case "mysql", "mariadb":
+		command = "mysql --version 2>&1"
+		expected = []string{"mysql", "MariaDB"}
+	case "postgres", "postgresql":
+		command = "psql --version 2>&1"
+		expected = []string{"psql"}
+	case "mongodb":
+		command = "mongod --version 2>&1"
+		expected = []string{"db version", "MongoDB"}
+	case "nodejs":
+		command = "node --version 2>&1"
+		expected = []string{"v"}
+	case "ssh":
+		command = "sshd -T 2>&1"
+		expected = []string{"port", "permitrootlogin"}
+	case "firewall":
+		command = "ufw status 2>&1 || iptables -L 2>&1"
+		expected = []string{"Status", "Chain"}
+	case "swap":
+		command = "swapon --show 2>&1"
+		expected = []string{"Filename", "/swap"}
+	case "sysctl":
+		command = "sysctl vm.swappiness 2>&1"
+		expected = []string{"vm.swappiness"}
+	default:
+		command = fmt.Sprintf("which %s 2>&1", shared.ShellQuote(component))
+	}
+
+	output, _, _, err := e.targetSSH.ExecContext(ctx, command)
+	if err != nil {
+		return err
+	}
+	output = strings.TrimSpace(output)
+	if len(expected) == 0 {
+		if output == "" {
+			return fmt.Errorf("verification returned no output for %s", component)
+		}
+		return nil
+	}
+	for _, token := range expected {
+		if strings.Contains(strings.ToLower(output), strings.ToLower(token)) {
+			return nil
+		}
+	}
+	return fmt.Errorf("verification failed for %s: %s", component, output)
 }
 
 // detectDistro detects the Linux distribution on the target.

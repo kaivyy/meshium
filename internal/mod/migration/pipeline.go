@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"log"
+	"sort"
 	"sync"
 	"time"
 
@@ -38,6 +39,7 @@ type PipelineContext struct {
 	TargetServer   *server.Server
 	Repo           PipelineRepo
 	JobRepo        JobRepository
+	Registry       *CategoryRegistry
 	OnProgress     StepCallback
 	StateMachine   *StateMachine
 	CheckpointData map[string]string // stage_name → checkpoint data
@@ -57,15 +59,15 @@ type PipelineContext struct {
 //   - Event driven: all state transitions emit WebSocket events
 //   - Rollback capable: automatic rollback on failure
 type Pipeline struct {
-	repo          PipelineRepo
-	jobRepo       JobRepository
-	srvRepo       server.Repo
-	pool          ConnectionPool
-	authSvc       AESKeyProvider
-	hosts         HostKeyStore
-	registry      *CategoryRegistry
-	stages        []PipelineStageHandler
-	mu            sync.Mutex
+	repo             PipelineRepo
+	jobRepo          JobRepository
+	srvRepo          server.Repo
+	pool             ConnectionPool
+	authSvc          AESKeyProvider
+	hosts            HostKeyStore
+	registry         *CategoryRegistry
+	stages           []PipelineStageHandler
+	mu               sync.Mutex
 	runningPipelines sync.Map // migrationID → struct{} (prevents concurrent execution)
 }
 
@@ -79,7 +81,10 @@ func NewPipeline(
 	authSvc AESKeyProvider,
 	hosts HostKeyStore,
 	registry *CategoryRegistry,
-) *Pipeline {
+) (*Pipeline, error) {
+	if registry == nil {
+		return nil, fmt.Errorf("category registry is required")
+	}
 	p := &Pipeline{
 		repo:     repo,
 		jobRepo:  jobRepo,
@@ -89,8 +94,9 @@ func NewPipeline(
 		hosts:    hosts,
 		registry: registry,
 	}
+	defaultRegistry = registry
 	p.registerDefaultStages()
-	return p
+	return p, nil
 }
 
 // registerDefaultStages registers the 14 pipeline stages in order.
@@ -173,7 +179,10 @@ func (p *Pipeline) Execute(ctx context.Context, migrationID int, onProgress Step
 		if err := sm.Transition(StateResuming); err != nil {
 			return fmt.Errorf("failed to transition to resuming: %w", err)
 		}
-		p.jobRepo.SetMigrationStateContext(ctx, migrationID, StateResuming)
+		if err := p.jobRepo.SetMigrationStateContext(ctx, migrationID, StateResuming); err != nil {
+			log.Printf("warning: failed to persist resuming state for migration %d: %v", migrationID, err)
+			onProgress(WSMessage{Step: "pipeline", Status: "warning", Value: fmt.Sprintf("Failed to persist resuming state: %v", err)})
+		}
 		onProgress(WSMessage{Step: "pipeline", Status: "progress", Value: "Resuming migration..."})
 	}
 
@@ -219,19 +228,25 @@ func (p *Pipeline) Execute(ctx context.Context, migrationID int, onProgress Step
 		Migration:      migration,
 		Config:         config,
 		SourceSSH:      sourceSSH,
-		TargetSSH:       targetSSH,
+		TargetSSH:      targetSSH,
 		SourceServer:   sourceServer,
 		TargetServer:   targetServer,
 		Repo:           p.repo,
 		JobRepo:        p.jobRepo,
+		Registry:       p.registry,
 		OnProgress:     onProgress,
 		StateMachine:   sm,
 		CheckpointData: make(map[string]string),
 	}
 
+	p.mu.Lock()
+	stages := make([]PipelineStageHandler, len(p.stages))
+	copy(stages, p.stages)
+	p.mu.Unlock()
+
 	// Run each stage
-	stageTotal := len(p.stages)
-	for i, stage := range p.stages {
+	stageTotal := len(stages)
+	for i, stage := range stages {
 		// Check context cancellation
 		if err := ctx.Err(); err != nil {
 			p.interruptPipeline(ctx, sm, migrationID, onProgress)
@@ -253,11 +268,14 @@ func (p *Pipeline) Execute(ctx context.Context, migrationID int, onProgress Step
 		// Create stage record
 		stageID, err := p.repo.CreateStage(ctx, migrationID, stageName, i)
 		if err != nil {
-			log.Printf("warning: failed to create stage record: %v", err)
+			return fmt.Errorf("create stage %s: %w", stageName, err)
 		}
 
 		// Update stage state to running
-		p.repo.UpdateStageState(ctx, stageID, StageStateRunning, "")
+		if err := p.repo.UpdateStageState(ctx, stageID, StageStateRunning, ""); err != nil {
+			log.Printf("warning: failed to update stage %s to running: %v", stageName, err)
+			onProgress(WSMessage{Step: stageName, Status: "warning", Value: fmt.Sprintf("Failed to persist stage state: %v", err)})
+		}
 
 		onProgress(WSMessage{
 			Step:   stageName,
@@ -278,7 +296,10 @@ func (p *Pipeline) Execute(ctx context.Context, migrationID int, onProgress Step
 		var stageErr error
 		for attempt := 0; attempt <= maxRetries; attempt++ {
 			if attempt > 0 {
-				p.repo.IncrementStageAttempt(ctx, stageID)
+				if err := p.repo.IncrementStageAttempt(ctx, stageID); err != nil {
+					log.Printf("warning: failed to increment stage %s attempt: %v", stageName, err)
+					onProgress(WSMessage{Step: stageName, Status: "warning", Value: fmt.Sprintf("Failed to persist retry attempt: %v", err)})
+				}
 				onProgress(WSMessage{
 					Step:   stageName,
 					Status: "progress",
@@ -307,7 +328,10 @@ func (p *Pipeline) Execute(ctx context.Context, migrationID int, onProgress Step
 
 		if stageErr != nil {
 			// Stage failed after all retries
-			p.repo.UpdateStageState(ctx, stageID, StageStateFailed, stageErr.Error())
+			if err := p.repo.UpdateStageState(ctx, stageID, StageStateFailed, stageErr.Error()); err != nil {
+				log.Printf("warning: failed to mark stage %s as failed: %v", stageName, err)
+				onProgress(WSMessage{Step: stageName, Status: "warning", Value: fmt.Sprintf("Failed to persist stage failure: %v", err)})
+			}
 			onProgress(WSMessage{
 				Step:   stageName,
 				Status: "error",
@@ -320,7 +344,10 @@ func (p *Pipeline) Execute(ctx context.Context, migrationID int, onProgress Step
 		}
 
 		// Stage succeeded
-		p.repo.UpdateStageState(ctx, stageID, StageStateCompleted, "")
+		if err := p.repo.UpdateStageState(ctx, stageID, StageStateCompleted, ""); err != nil {
+			log.Printf("warning: failed to mark stage %s completed: %v", stageName, err)
+			onProgress(WSMessage{Step: stageName, Status: "warning", Value: fmt.Sprintf("Failed to persist stage completion: %v", err)})
+		}
 		onProgress(WSMessage{
 			Step:   stageName,
 			Status: "success",
@@ -328,23 +355,248 @@ func (p *Pipeline) Execute(ctx context.Context, migrationID int, onProgress Step
 		})
 
 		// Audit log
-		p.repo.CreateAuditEntry(ctx, AuditEntry{
-			MigrationID:  migrationID,
-			EventType:    "stage_completed",
-			NewState:     stageName,
-			Actor:        "pipeline",
-		})
+		if _, err := p.repo.CreateAuditEntry(ctx, AuditEntry{
+			MigrationID: migrationID,
+			EventType:   "stage_completed",
+			NewState:    stageName,
+			Actor:       "pipeline",
+		}); err != nil {
+			log.Printf("warning: failed to create audit entry for stage %s: %v", stageName, err)
+			onProgress(WSMessage{Step: stageName, Status: "warning", Value: fmt.Sprintf("Failed to persist audit entry: %v", err)})
+		}
 	}
 
 	// All stages completed — commit
 	if err := sm.Transition(StateCommitted); err != nil {
 		sm.ForceTransition(StateCommitted)
 	}
-	p.jobRepo.SetMigrationStateContext(ctx, migrationID, StateCommitted)
-	p.jobRepo.SetMigrationCompletedAt(migrationID, time.Now().Format(time.RFC3339))
+	if err := p.jobRepo.SetMigrationStateContext(ctx, migrationID, StateCommitted); err != nil {
+		log.Printf("warning: failed to persist committed state for migration %d: %v", migrationID, err)
+		onProgress(WSMessage{Step: "pipeline", Status: "warning", Value: fmt.Sprintf("Failed to persist committed state: %v", err)})
+	}
+	if err := p.jobRepo.SetMigrationCompletedAt(migrationID, time.Now().Format(time.RFC3339)); err != nil {
+		log.Printf("warning: failed to persist migration completion time for migration %d: %v", migrationID, err)
+		onProgress(WSMessage{Step: "pipeline", Status: "warning", Value: fmt.Sprintf("Failed to persist migration completion time: %v", err)})
+	}
 
 	onProgress(WSMessage{Step: "pipeline", Status: "complete", Value: "Migration committed successfully"})
 	return nil
+}
+
+// Pause marks a running migration as interrupted so it can be resumed later.
+func (p *Pipeline) Pause(ctx context.Context, migrationID int, onProgress StepCallback) error {
+	if onProgress == nil {
+		onProgress = func(WSMessage) {}
+	}
+
+	migration, err := p.jobRepo.GetMigration(migrationID)
+	if err != nil {
+		return fmt.Errorf("migration not found: %w", err)
+	}
+
+	currentState, err := p.jobRepo.GetMigrationState(migrationID)
+	if err != nil {
+		currentState, _ = StateFromString(migration.Status)
+	}
+
+	if currentState == StateInterrupted {
+		return nil
+	}
+
+	sm := NewStateMachine(currentState)
+	if err := sm.Transition(StateInterrupted); err != nil {
+		return fmt.Errorf("migration cannot be paused from state %s: %w", currentState, err)
+	}
+
+	if err := p.jobRepo.SetMigrationStateContext(ctx, migrationID, StateInterrupted); err != nil {
+		return err
+	}
+
+	_, _ = p.repo.CreateAuditEntry(ctx, AuditEntry{
+		MigrationID:   migrationID,
+		EventType:     "migration_paused",
+		PreviousState: currentState.String(),
+		NewState:      StateInterrupted.String(),
+		Actor:         "user",
+	})
+
+	onProgress(WSMessage{Step: "pipeline", Status: "warning", Value: "Migration paused"})
+	return nil
+}
+
+// Cutover confirms the traffic switch and advances the migration into observation.
+func (p *Pipeline) Cutover(ctx context.Context, migrationID int, onProgress StepCallback) error {
+	if onProgress == nil {
+		onProgress = func(WSMessage) {}
+	}
+
+	migration, err := p.jobRepo.GetMigration(migrationID)
+	if err != nil {
+		return fmt.Errorf("migration not found: %w", err)
+	}
+
+	currentState, err := p.jobRepo.GetMigrationState(migrationID)
+	if err != nil {
+		currentState, _ = StateFromString(migration.Status)
+	}
+
+	switch currentState {
+	case StateObservation, StateCommitted:
+		return nil
+	case StateVerification, StatePreCutover, StateTrafficSwitch, StatePostVerification:
+		// valid cutover entry points
+	default:
+		return fmt.Errorf("migration cannot be cut over from state %s", currentState)
+	}
+
+	cutoverRecord := CutoverRecord{
+		MigrationID:     migrationID,
+		CutoverType:     "manual",
+		PreviousState:   currentState.String(),
+		TrafficSwitched: true,
+		StartedAt:       time.Now().Format(time.RFC3339),
+	}
+	cutoverID, err := p.repo.CreateCutoverRecord(ctx, cutoverRecord)
+	if err != nil {
+		return fmt.Errorf("failed to record cutover: %w", err)
+	}
+
+	sm := NewStateMachine(currentState)
+	transitionTo := func(next MigrationState) error {
+		if err := sm.Transition(next); err != nil {
+			return fmt.Errorf("failed to transition to %s: %w", next, err)
+		}
+		if err := p.jobRepo.SetMigrationStateContext(ctx, migrationID, next); err != nil {
+			return err
+		}
+		currentState = next
+		return nil
+	}
+
+	if currentState == StateVerification {
+		if err := transitionTo(StatePreCutover); err != nil {
+			return err
+		}
+	}
+	if currentState == StatePreCutover {
+		if err := transitionTo(StateTrafficSwitch); err != nil {
+			return err
+		}
+	}
+	if currentState == StateTrafficSwitch {
+		if err := transitionTo(StatePostVerification); err != nil {
+			return err
+		}
+	}
+	if currentState == StatePostVerification {
+		if err := transitionTo(StateObservation); err != nil {
+			return err
+		}
+	}
+
+	if err := p.repo.UpdateCutoverRecord(ctx, cutoverID, time.Now().Format(time.RFC3339), ""); err != nil {
+		log.Printf("warning: failed to update cutover record for migration %d: %v", migrationID, err)
+	}
+
+	_, _ = p.repo.CreateAuditEntry(ctx, AuditEntry{
+		MigrationID:   migrationID,
+		EventType:     "migration_cutover_confirmed",
+		PreviousState: cutoverRecord.PreviousState,
+		NewState:      currentState.String(),
+		Actor:         "user",
+	})
+
+	onProgress(WSMessage{Step: "cutover", Status: "success", Value: "Cutover confirmed"})
+	return nil
+}
+
+// Commit finalizes a successful migration.
+func (p *Pipeline) Commit(ctx context.Context, migrationID int, onProgress StepCallback) error {
+	if onProgress == nil {
+		onProgress = func(WSMessage) {}
+	}
+
+	migration, err := p.jobRepo.GetMigration(migrationID)
+	if err != nil {
+		return fmt.Errorf("migration not found: %w", err)
+	}
+
+	currentState, err := p.jobRepo.GetMigrationState(migrationID)
+	if err != nil {
+		currentState, _ = StateFromString(migration.Status)
+	}
+
+	if currentState == StateCommitted {
+		return nil
+	}
+	if currentState != StateObservation {
+		return fmt.Errorf("migration cannot be committed from state %s", currentState)
+	}
+
+	sm := NewStateMachine(currentState)
+	if err := sm.Transition(StateCommitted); err != nil {
+		return fmt.Errorf("failed to transition to committed: %w", err)
+	}
+
+	if err := p.jobRepo.SetMigrationStateContext(ctx, migrationID, StateCommitted); err != nil {
+		return err
+	}
+	if err := p.jobRepo.SetMigrationCompletedAt(migrationID, time.Now().Format(time.RFC3339)); err != nil {
+		return err
+	}
+
+	_, _ = p.repo.CreateAuditEntry(ctx, AuditEntry{
+		MigrationID:   migrationID,
+		EventType:     "migration_committed",
+		PreviousState: currentState.String(),
+		NewState:      StateCommitted.String(),
+		Actor:         "user",
+	})
+
+	onProgress(WSMessage{Step: "pipeline", Status: "complete", Value: "Migration committed"})
+	return nil
+}
+
+// Retry restarts a failed or interrupted migration from the last checkpoint.
+func (p *Pipeline) Retry(ctx context.Context, migrationID int, onProgress StepCallback) error {
+	if onProgress == nil {
+		onProgress = func(WSMessage) {}
+	}
+
+	migration, err := p.jobRepo.GetMigration(migrationID)
+	if err != nil {
+		return fmt.Errorf("migration not found: %w", err)
+	}
+
+	currentState, err := p.jobRepo.GetMigrationState(migrationID)
+	if err != nil {
+		currentState, _ = StateFromString(migration.Status)
+	}
+
+	switch currentState {
+	case StateInterrupted:
+		return p.Resume(ctx, migrationID, onProgress)
+	case StateFailed:
+		sm := NewStateMachine(currentState)
+		if err := sm.Transition(StateInterrupted); err != nil {
+			return fmt.Errorf("failed to prepare retry from state %s: %w", currentState, err)
+		}
+		if err := p.jobRepo.SetMigrationStateContext(ctx, migrationID, StateInterrupted); err != nil {
+			return err
+		}
+		_, _ = p.repo.CreateAuditEntry(ctx, AuditEntry{
+			MigrationID:   migrationID,
+			EventType:     "migration_retried",
+			PreviousState: currentState.String(),
+			NewState:      StateInterrupted.String(),
+			Actor:         "user",
+		})
+		return p.Resume(ctx, migrationID, onProgress)
+	case StateResuming:
+		return p.Resume(ctx, migrationID, onProgress)
+	default:
+		return fmt.Errorf("migration cannot be retried from state %s", currentState)
+	}
 }
 
 // Resume resumes an interrupted migration from the last checkpoint.
@@ -374,7 +626,10 @@ func (p *Pipeline) Resume(ctx context.Context, migrationID int, onProgress StepC
 	if err := sm.Transition(StateResuming); err != nil {
 		return fmt.Errorf("failed to transition to resuming: %w", err)
 	}
-	p.jobRepo.SetMigrationStateContext(ctx, migrationID, StateResuming)
+	if err := p.jobRepo.SetMigrationStateContext(ctx, migrationID, StateResuming); err != nil {
+		log.Printf("warning: failed to persist resuming state for migration %d: %v", migrationID, err)
+		onProgress(WSMessage{Step: "pipeline", Status: "warning", Value: fmt.Sprintf("Failed to persist resuming state: %v", err)})
+	}
 	onProgress(WSMessage{Step: "pipeline", Status: "progress", Value: "Resuming migration..."})
 
 	// Delegate to Execute which will skip completed stages
@@ -398,13 +653,17 @@ func (p *Pipeline) Rollback(ctx context.Context, migrationID int, onProgress Ste
 	if err != nil {
 		currentState, _ = StateFromString(migration.Status)
 	}
-	sm := NewStateMachine(currentState)
-
-	// Transition to Rollback
-	if err := sm.Transition(StateRollback); err != nil {
-		sm.ForceTransition(StateRollback)
+	if currentState == StateRollback || currentState == StateRolledBack {
+		return nil
 	}
-	p.jobRepo.SetMigrationStateContext(ctx, migrationID, StateRollback)
+
+	sm := NewStateMachine(currentState)
+	if err := sm.Transition(StateRollback); err != nil {
+		return fmt.Errorf("migration cannot be rolled back from state %s: %w", currentState, err)
+	}
+	if err := p.jobRepo.SetMigrationStateContext(ctx, migrationID, StateRollback); err != nil {
+		return err
+	}
 	onProgress(WSMessage{Step: "rollback", Status: "progress", Value: "Starting rollback..."})
 
 	// Get completed stages to know what to roll back
@@ -435,15 +694,22 @@ func (p *Pipeline) Rollback(ctx context.Context, migrationID int, onProgress Ste
 		TargetSSH:    targetSSH,
 		Repo:         p.repo,
 		JobRepo:      p.jobRepo,
+		Registry:     p.registry,
 		OnProgress:   onProgress,
 		StateMachine: sm,
 	}
 
+	p.mu.Lock()
+	stages := make([]PipelineStageHandler, len(p.stages))
+	copy(stages, p.stages)
+	p.mu.Unlock()
+
+	// Roll back stages in reverse order
 	// Roll back stages in reverse order
 	for i := len(completedStages) - 1; i >= 0; i-- {
 		stage := completedStages[i]
 		// Find the stage handler
-		for _, handler := range p.stages {
+		for _, handler := range stages {
 			if string(handler.Name()) == stage.StageName {
 				onProgress(WSMessage{
 					Step:   stage.StageName,
@@ -466,8 +732,14 @@ func (p *Pipeline) Rollback(ctx context.Context, migrationID int, onProgress Ste
 	if err := sm.Transition(StateRolledBack); err != nil {
 		sm.ForceTransition(StateRolledBack)
 	}
-	p.jobRepo.SetMigrationStateContext(ctx, migrationID, StateRolledBack)
-	p.jobRepo.SetMigrationRolledBackAt(migrationID, time.Now().Format(time.RFC3339))
+	if err := p.jobRepo.SetMigrationStateContext(ctx, migrationID, StateRolledBack); err != nil {
+		log.Printf("warning: failed to persist rolled back state for migration %d: %v", migrationID, err)
+		onProgress(WSMessage{Step: "rollback", Status: "warning", Value: fmt.Sprintf("Failed to persist rolled back state: %v", err)})
+	}
+	if err := p.jobRepo.SetMigrationRolledBackAt(migrationID, time.Now().Format(time.RFC3339)); err != nil {
+		log.Printf("warning: failed to persist rolled back timestamp for migration %d: %v", migrationID, err)
+		onProgress(WSMessage{Step: "rollback", Status: "warning", Value: fmt.Sprintf("Failed to persist rollback timestamp: %v", err)})
+	}
 
 	onProgress(WSMessage{Step: "rollback", Status: "complete", Value: "Rollback complete"})
 	return nil
@@ -485,21 +757,29 @@ func (p *Pipeline) Cancel(ctx context.Context, migrationID int, onProgress StepC
 		return fmt.Errorf("failed to get migration state: %w", err)
 	}
 
-	// Transition to Cancelled
+	if currentState == StateCancelled {
+		return nil
+	}
+
 	sm := NewStateMachine(currentState)
 	if err := sm.Transition(StateCancelled); err != nil {
-		sm.ForceTransition(StateCancelled)
+		return fmt.Errorf("migration cannot be cancelled from state %s: %w", currentState, err)
 	}
-	p.jobRepo.SetMigrationStateContext(ctx, migrationID, StateCancelled)
+	if err := p.jobRepo.SetMigrationStateContext(ctx, migrationID, StateCancelled); err != nil {
+		return err
+	}
 
 	// Audit log
-	p.repo.CreateAuditEntry(ctx, AuditEntry{
-		MigrationID:  migrationID,
-		EventType:    "migration_cancelled",
+	if _, err := p.repo.CreateAuditEntry(ctx, AuditEntry{
+		MigrationID:   migrationID,
+		EventType:     "migration_cancelled",
 		PreviousState: currentState.String(),
-		NewState:     StateCancelled.String(),
-		Actor:        "user",
-	})
+		NewState:      StateCancelled.String(),
+		Actor:         "user",
+	}); err != nil {
+		log.Printf("warning: failed to create cancel audit entry for migration %d: %v", migrationID, err)
+		onProgress(WSMessage{Step: "pipeline", Status: "warning", Value: fmt.Sprintf("Failed to persist cancel audit entry: %v", err)})
+	}
 
 	onProgress(WSMessage{Step: "pipeline", Status: "complete", Value: "Migration cancelled"})
 	return nil
@@ -541,8 +821,12 @@ func (p *Pipeline) failPipeline(ctx context.Context, sm *StateMachine, migration
 	if err := sm.Transition(StateFailed); err != nil {
 		sm.ForceTransition(StateFailed)
 	}
-	p.jobRepo.SetMigrationStateContext(ctx, migrationID, StateFailed)
-	p.jobRepo.UpdateMigrationStatus(migrationID, StatusFailed, errMsg)
+	if err := p.jobRepo.SetMigrationStateContext(ctx, migrationID, StateFailed); err != nil {
+		log.Printf("warning: failed to persist failed state for migration %d: %v", migrationID, err)
+	}
+	if err := p.jobRepo.UpdateMigrationStatus(migrationID, StatusFailed, errMsg); err != nil {
+		log.Printf("warning: failed to update failed migration status for migration %d: %v", migrationID, err)
+	}
 }
 
 func (p *Pipeline) interruptPipeline(ctx context.Context, sm *StateMachine, migrationID int, onProgress StepCallback) {
@@ -550,8 +834,12 @@ func (p *Pipeline) interruptPipeline(ctx context.Context, sm *StateMachine, migr
 	if err := sm.Transition(StateInterrupted); err != nil {
 		sm.ForceTransition(StateInterrupted)
 	}
-	p.jobRepo.SetMigrationStateContext(context.Background(), migrationID, StateInterrupted)
-	p.jobRepo.UpdateMigrationStatus(migrationID, StatusInterrupted, "interrupted by context cancellation")
+	if err := p.jobRepo.SetMigrationStateContext(context.Background(), migrationID, StateInterrupted); err != nil {
+		log.Printf("warning: failed to persist interrupted state for migration %d: %v", migrationID, err)
+	}
+	if err := p.jobRepo.UpdateMigrationStatus(migrationID, StatusInterrupted, "interrupted by context cancellation"); err != nil {
+		log.Printf("warning: failed to update interrupted migration status for migration %d: %v", migrationID, err)
+	}
 }
 
 func (p *Pipeline) rollbackPipeline(ctx context.Context, sm *StateMachine, migrationID int, failedStageIndex int, onProgress StepCallback) {
@@ -561,12 +849,16 @@ func (p *Pipeline) rollbackPipeline(ctx context.Context, sm *StateMachine, migra
 	if err := sm.Transition(StateFailed); err != nil {
 		sm.ForceTransition(StateFailed)
 	}
-	p.jobRepo.SetMigrationStateContext(ctx, migrationID, StateFailed)
+	if err := p.jobRepo.SetMigrationStateContext(ctx, migrationID, StateFailed); err != nil {
+		log.Printf("warning: failed to persist failed state for migration %d: %v", migrationID, err)
+	}
 
 	if err := sm.Transition(StateRollback); err != nil {
 		sm.ForceTransition(StateRollback)
 	}
-	p.jobRepo.SetMigrationStateContext(ctx, migrationID, StateRollback)
+	if err := p.jobRepo.SetMigrationStateContext(ctx, migrationID, StateRollback); err != nil {
+		log.Printf("warning: failed to persist rollback state for migration %d: %v", migrationID, err)
+	}
 
 	// Roll back completed stages in reverse order
 	completedStages, err := p.repo.GetCompletedStages(migrationID)
@@ -602,14 +894,20 @@ func (p *Pipeline) rollbackPipeline(ctx context.Context, sm *StateMachine, migra
 		TargetSSH:    targetSSH,
 		Repo:         p.repo,
 		JobRepo:      p.jobRepo,
+		Registry:     p.registry,
 		OnProgress:   onProgress,
 		StateMachine: sm,
 	}
 
+	p.mu.Lock()
+	stages := make([]PipelineStageHandler, len(p.stages))
+	copy(stages, p.stages)
+	p.mu.Unlock()
+
 	// Roll back in reverse order
 	for i := len(completedStages) - 1; i >= 0; i-- {
 		stage := completedStages[i]
-		for _, handler := range p.stages {
+		for _, handler := range stages {
 			if string(handler.Name()) == stage.StageName {
 				onProgress(WSMessage{
 					Step:   stage.StageName,
@@ -632,8 +930,12 @@ func (p *Pipeline) rollbackPipeline(ctx context.Context, sm *StateMachine, migra
 	if err := sm.Transition(StateRolledBack); err != nil {
 		sm.ForceTransition(StateRolledBack)
 	}
-	p.jobRepo.SetMigrationStateContext(ctx, migrationID, StateRolledBack)
-	p.jobRepo.SetMigrationRolledBackAt(migrationID, time.Now().Format(time.RFC3339))
+	if err := p.jobRepo.SetMigrationStateContext(ctx, migrationID, StateRolledBack); err != nil {
+		log.Printf("warning: failed to persist rolled back state for migration %d: %v", migrationID, err)
+	}
+	if err := p.jobRepo.SetMigrationRolledBackAt(migrationID, time.Now().Format(time.RFC3339)); err != nil {
+		log.Printf("warning: failed to persist rolled back timestamp for migration %d: %v", migrationID, err)
+	}
 	onProgress(WSMessage{Step: "pipeline", Status: "complete", Value: "Rollback complete"})
 }
 
@@ -641,11 +943,11 @@ func (p *Pipeline) rollbackPipeline(ctx context.Context, sm *StateMachine, migra
 
 // discoveryStage runs full discovery collectors on source and target.
 type discoveryStage struct {
-	repo     PipelineRepo
-	srvRepo  server.Repo
-	pool     ConnectionPool
-	authSvc  AESKeyProvider
-	hosts    HostKeyStore
+	repo    PipelineRepo
+	srvRepo server.Repo
+	pool    ConnectionPool
+	authSvc AESKeyProvider
+	hosts   HostKeyStore
 }
 
 func (s *discoveryStage) Name() PipelineStageName { return StageDiscovery }
@@ -713,12 +1015,12 @@ func (s *analysisStage) Rollback(ctx context.Context, pc *PipelineContext) error
 
 // planningStage collects data from the source server for each category.
 type planningStage struct {
-	repo      PipelineRepo
-	registry  *CategoryRegistry
-	srvRepo   server.Repo
-	pool      ConnectionPool
-	authSvc   AESKeyProvider
-	hosts     HostKeyStore
+	repo     PipelineRepo
+	registry *CategoryRegistry
+	srvRepo  server.Repo
+	pool     ConnectionPool
+	authSvc  AESKeyProvider
+	hosts    HostKeyStore
 }
 
 func (s *planningStage) Name() PipelineStageName { return StagePlanning }
@@ -863,6 +1165,9 @@ func (s *initialSyncStage) Name() PipelineStageName { return StageInitialSync }
 func (s *initialSyncStage) Execute(ctx context.Context, pc *PipelineContext) error {
 	pc.OnProgress(WSMessage{Step: "initial_sync", Status: "progress", Value: "Starting initial data sync..."})
 
+	// Prepare target SSH metadata for sync-related stages and verification.
+	_ = syncConfigFromPipelineContext(pc)
+
 	// Apply collected data to target (this is the "initial sync" for file-based categories)
 	steps, err := pc.JobRepo.GetSteps(pc.MigrationID)
 	if err != nil {
@@ -874,8 +1179,10 @@ func (s *initialSyncStage) Execute(ctx context.Context, pc *PipelineContext) err
 	if err := json.Unmarshal([]byte(pc.Migration.Categories), &categories); err != nil {
 		return fmt.Errorf("failed to parse categories: %w", err)
 	}
+	_ = categories
 
 	appliedOrder := make([]string, 0)
+	skippedSet := make(map[string]struct{})
 
 	for _, step := range steps {
 		if ctx.Err() != nil {
@@ -888,12 +1195,16 @@ func (s *initialSyncStage) Execute(ctx context.Context, pc *PipelineContext) err
 		// Get the category module
 		mod, ok := getRegistryFromContext(pc).Get(step.Category)
 		if !ok {
+			skippedSet[step.Category] = struct{}{}
+			pc.OnProgress(WSMessage{Step: "initial_sync", Status: "warning", Value: fmt.Sprintf("Skipping %s: category not registered", step.Category)})
 			continue
 		}
 
 		// Parse the collected data
 		var data CategoryData
 		if err := json.Unmarshal([]byte(step.Data), &data); err != nil {
+			skippedSet[step.Category] = struct{}{}
+			pc.OnProgress(WSMessage{Step: "initial_sync", Status: "warning", Value: fmt.Sprintf("Skipping %s: invalid step data: %v", step.Category, err)})
 			continue
 		}
 
@@ -911,14 +1222,44 @@ func (s *initialSyncStage) Execute(ctx context.Context, pc *PipelineContext) err
 		}
 
 		// Checkpoint
-		pc.JobRepo.UpdateStepStatus(step.ID, StepStatusApplied, "")
+		if err := pc.JobRepo.UpdateStepStatus(step.ID, StepStatusApplied, ""); err != nil {
+			log.Printf("warning: failed to persist applied step for %s: %v", step.Category, err)
+			pc.OnProgress(WSMessage{Step: "initial_sync", Status: "warning", Value: fmt.Sprintf("Failed to persist applied state for %s: %v", step.Category, err)})
+		}
 		appliedOrder = append(appliedOrder, step.Category)
 
 		pc.OnProgress(WSMessage{Step: "initial_sync", Status: "success", Value: fmt.Sprintf("Applied %s", step.Category)})
 	}
 
+	if len(skippedSet) > 0 {
+		skippedCategories := make([]string, 0, len(skippedSet))
+		for category := range skippedSet {
+			skippedCategories = append(skippedCategories, category)
+		}
+		sort.Strings(skippedCategories)
+		if len(appliedOrder) > 0 {
+			s.rollbackApplied(ctx, pc, appliedOrder)
+		}
+		return fmt.Errorf("initial sync skipped %d categories: %v", len(skippedCategories), skippedCategories)
+	}
+
 	pc.OnProgress(WSMessage{Step: "initial_sync", Status: "success", Value: "Initial sync completed"})
 	return nil
+}
+
+func syncConfigFromPipelineContext(pc *PipelineContext) SyncConfig {
+	cfg := SyncConfig{}
+	if pc == nil {
+		return cfg
+	}
+
+	cfg.MigrationID = pc.MigrationID
+	if pc.TargetServer != nil {
+		cfg.TargetHost = pc.TargetServer.Host
+		cfg.TargetPort = pc.TargetServer.Port
+		cfg.TargetUser = pc.TargetServer.Username
+	}
+	return cfg
 }
 
 func (s *initialSyncStage) Rollback(ctx context.Context, pc *PipelineContext) error {
@@ -1130,10 +1471,10 @@ func (s *trafficSwitchStage) Rollback(ctx context.Context, pc *PipelineContext) 
 
 	// Revert traffic switch
 	pc.Repo.CreateRollbackRecord(ctx, RollbackRecord{
-		MigrationID:      pc.MigrationID,
-		RollbackType:     "traffic",
-		TrafficReverted:  true,
-		StartedAt:        time.Now().Format(time.RFC3339),
+		MigrationID:     pc.MigrationID,
+		RollbackType:    "traffic",
+		TrafficReverted: true,
+		StartedAt:       time.Now().Format(time.RFC3339),
 	})
 
 	return nil
@@ -1175,10 +1516,10 @@ func (s *postCutoverObservationStage) Execute(ctx context.Context, pc *PipelineC
 		// Record health check
 		pc.Repo.CreateHealthCheckResult(ctx, HealthCheckResult{
 			MigrationID: pc.MigrationID,
-			ServerID:   pc.Migration.TargetID,
-			CheckType:  HealthCheckTCP,
+			ServerID:    pc.Migration.TargetID,
+			CheckType:   HealthCheckTCP,
 			CheckTarget: pc.TargetServer.Host,
-			Status:     "healthy",
+			Status:      "healthy",
 			HealthScore: 100,
 		})
 
@@ -1250,12 +1591,14 @@ func (s *archiveStage) Execute(ctx context.Context, pc *PipelineContext) error {
 	pc.OnProgress(WSMessage{Step: "archive", Status: "progress", Value: "Archiving migration..."})
 
 	// Create audit entry
-	pc.Repo.CreateAuditEntry(ctx, AuditEntry{
+	if _, err := pc.Repo.CreateAuditEntry(ctx, AuditEntry{
 		MigrationID: pc.MigrationID,
 		EventType:   "migration_archived",
 		NewState:    StateCommitted.String(),
 		Actor:       "pipeline",
-	})
+	}); err != nil {
+		log.Printf("warning: failed to create archive audit entry for migration %d: %v", pc.MigrationID, err)
+	}
 
 	pc.OnProgress(WSMessage{Step: "archive", Status: "success", Value: "Migration archived"})
 	return nil
@@ -1267,14 +1610,15 @@ func (s *archiveStage) Rollback(ctx context.Context, pc *PipelineContext) error 
 
 // --- Helper ---
 
-// getRegistryFromContext is a helper that extracts the category registry
-// from the pipeline. Since PipelineContext doesn't carry the registry
-// directly, we use a package-level approach.
+// getRegistryFromContext returns the registry associated with the pipeline
+// context. It prefers the per-request registry and falls back to the default
+// registry for legacy call sites.
 func getRegistryFromContext(pc *PipelineContext) *CategoryRegistry {
-	// The registry is set on the Pipeline, not the PipelineContext.
-	// We use a package-level default registry for stage handlers that need it.
+	if pc != nil && pc.Registry != nil {
+		return pc.Registry
+	}
 	return defaultRegistry
 }
 
-// defaultRegistry is set by NewPipeline to allow stage handlers to access it.
+// defaultRegistry is set by NewPipeline to allow legacy stage helpers to access it.
 var defaultRegistry *CategoryRegistry
