@@ -142,6 +142,7 @@ func (f *HandlerFactoryImpl) createMigrationHandler(job *jobengine.Job) (jobengi
 }
 
 // getSSHExecuter creates an SSH connection to the given server.
+// If the server has a bastion configured, the connection is tunneled through it.
 func (f *HandlerFactoryImpl) getSSHExecuter(serverID int) (transport.SSHExecuter, error) {
 	srv, err := f.serverRepo.GetByID(serverID)
 	if err != nil {
@@ -176,6 +177,41 @@ func (f *HandlerFactoryImpl) getSSHExecuter(serverID int) (transport.SSHExecuter
 	}
 	if sshKey != "" {
 		cfg.PrivateKey = []byte(sshKey)
+	}
+
+	// Resolve bastion if configured
+	if srv.BastionID > 0 {
+		bastion, err := f.serverRepo.GetByID(srv.BastionID)
+		if err == nil {
+			bPassword, err := decryptCredential(aesKey, bastion.Password)
+			if err != nil {
+				return nil, fmt.Errorf("decrypt bastion password: %w", err)
+			}
+			bSSHKey, err := decryptCredential(aesKey, bastion.SSHKey)
+			if err != nil {
+				return nil, fmt.Errorf("decrypt bastion ssh key: %w", err)
+			}
+			bPassphrase, err := decryptCredential(aesKey, bastion.Passphrase)
+			if err != nil {
+				return nil, fmt.Errorf("decrypt bastion passphrase: %w", err)
+			}
+			bPort := bastion.Port
+			if bPort == 0 {
+				bPort = 22
+			}
+			bastionCfg := &ssh.BastionConfig{
+				Host:            bastion.Host,
+				Port:            bPort,
+				Username:        bastion.Username,
+				Password:        bPassword,
+				Passphrase:      bPassphrase,
+				HostKeyCallback: f.knownHosts.MakeHostKeyCallback(bastion.ID),
+			}
+			if bSSHKey != "" {
+				bastionCfg.PrivateKey = []byte(bSSHKey)
+			}
+			cfg.Bastion = bastionCfg
+		}
 	}
 
 	hostKeyCallback := f.knownHosts.MakeHostKeyCallback(serverID)

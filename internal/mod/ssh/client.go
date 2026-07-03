@@ -6,11 +6,14 @@ import (
 	"context"
 	"fmt"
 	"io"
+	"net"
+	"os"
 	"sync"
 	"time"
 
 	"github.com/pkg/sftp"
 	"golang.org/x/crypto/ssh"
+	"golang.org/x/crypto/ssh/agent"
 )
 
 // Client wraps an SSH connection.
@@ -64,6 +67,30 @@ func connect(cfg ServerConfig, hostKeyCallback ssh.HostKeyCallback) (*Client, er
 	}
 
 	var authMethods []ssh.AuthMethod
+
+	// SSH agent authentication (prepended so it's tried first)
+	if cfg.UseAgent {
+		agentSock := os.Getenv("SSH_AUTH_SOCK")
+		if agentSock != "" {
+			agentConn, err := net.Dial("unix", agentSock)
+			if err == nil {
+				defer agentConn.Close()
+
+				agentClient := agent.NewClient(agentConn)
+				signers, err := agentClient.Signers()
+				if err == nil && len(signers) > 0 {
+					var agentAuthMethods []ssh.AuthMethod
+					for _, signer := range signers {
+						agentAuthMethods = append(agentAuthMethods, ssh.PublicKeys(signer))
+					}
+					// Prepend agent signers so they're tried first
+					authMethods = append(agentAuthMethods, authMethods...)
+				}
+			}
+		}
+	}
+
+	// Primary private key
 	if len(cfg.PrivateKey) > 0 {
 		var signer ssh.Signer
 		var err error
@@ -77,9 +104,39 @@ func connect(cfg ServerConfig, hostKeyCallback ssh.HostKeyCallback) (*Client, er
 		}
 		authMethods = append(authMethods, ssh.PublicKeys(signer))
 	}
+
+	// Multiple private keys support
+	if len(cfg.PrivateKeys) > 0 {
+		for _, keyData := range cfg.PrivateKeys {
+			var signer ssh.Signer
+			var err error
+			if cfg.Passphrase != "" {
+				signer, err = ssh.ParsePrivateKeyWithPassphrase(keyData, []byte(cfg.Passphrase))
+			} else {
+				signer, err = ssh.ParsePrivateKey(keyData)
+			}
+			if err == nil {
+				authMethods = append(authMethods, ssh.PublicKeys(signer))
+			}
+		}
+	}
+
+	// Password authentication
 	if cfg.Password != "" {
 		authMethods = append(authMethods, ssh.Password(cfg.Password))
 	}
+
+	// Keyboard-interactive authentication
+	if cfg.KeyboardInteractive && cfg.Password != "" {
+		authMethods = append(authMethods, ssh.KeyboardInteractive(func(name, instruction string, questions []string, echos []bool) ([]string, error) {
+			answers := make([]string, len(questions))
+			for i := range questions {
+				answers[i] = cfg.Password
+			}
+			return answers, nil
+		}))
+	}
+
 	sshConfig.Auth = authMethods
 
 	targetAddr := fmt.Sprintf("%s:%d", cfg.Host, cfg.Port)
@@ -132,6 +189,12 @@ func connect(cfg ServerConfig, hostKeyCallback ssh.HostKeyCallback) (*Client, er
 		timeouts:  timeouts,
 		lastUsed:  now,
 	}, nil
+}
+
+// Connect creates an SSH connection using the provided config and host key callback.
+// It is an exported wrapper around the unexported connect function.
+func Connect(cfg ServerConfig, hostKeyCallback ssh.HostKeyCallback) (*Client, error) {
+	return connect(cfg, hostKeyCallback)
 }
 
 // dialBastion establishes a connection to the bastion/jump host.

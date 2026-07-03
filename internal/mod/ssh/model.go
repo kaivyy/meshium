@@ -86,17 +86,20 @@ func (cfg TimeoutConfig) withDefaults() TimeoutConfig {
 
 // ServerConfig holds the connection parameters for a server.
 type ServerConfig struct {
-	ID         int
-	Host       string
-	Port       int
-	Username   string
-	Password   string
-	PrivateKey []byte // raw PEM bytes
-	Passphrase string
-	Bastion    *BastionConfig // optional jump host configuration
-	// Timeouts optionally specifies timeout values for this connection.
-	// If zero, DefaultTimeouts is used.
-	Timeouts TimeoutConfig
+	ID                  int
+	Host                string
+	Port                int
+	Username            string
+	Password            string
+	PrivateKey          []byte // raw PEM bytes
+	Passphrase          string
+	Bastion             *BastionConfig // optional jump host configuration
+	Timeouts            TimeoutConfig
+	UseAgent            bool
+	KeyboardInteractive bool
+	AuthMethod          string
+	KeyType             string
+	PrivateKeys         [][]byte // Multiple private keys (for multiple key support)
 }
 
 // BastionConfig holds connection parameters for a bastion/jump host.
@@ -109,6 +112,26 @@ type BastionConfig struct {
 	Passphrase      string
 	HostKeyCallback xssh.HostKeyCallback // optional: if nil, connection will fail
 }
+
+// AuthMethod constants for specifying the authentication method.
+const (
+	AuthMethodPassword            = "password"
+	AuthMethodKey                 = "key"
+	AuthMethodAgent               = "agent"
+	AuthMethodKeyboardInteractive = "keyboard-interactive"
+)
+
+// CredentialStatus constants for tracking credential health.
+const (
+	CredentialStatusUnknown            = "unknown"
+	CredentialStatusValid              = "valid"
+	CredentialStatusInvalid            = "invalid"
+	CredentialStatusBroken             = "broken"
+	CredentialStatusNeverConnected     = "never_connected"
+	CredentialStatusVerificationFailed = "verification_failed"
+	CredentialStatusAuthFailed         = "auth_failed"
+	CredentialStatusFingerprintChanged = "fingerprint_changed"
+)
 
 // ConnectResult holds the result of a connection attempt.
 type ConnectResult struct {

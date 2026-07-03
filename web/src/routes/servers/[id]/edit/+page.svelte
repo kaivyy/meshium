@@ -17,6 +17,7 @@
   let password = '';
   let sshKey = '';
   let passphrase = '';
+  let keyType: 'rsa' | 'ed25519' | 'ecdsa' = 'ed25519';
   let tags = '';
   let environment = '';
   let region = '';
@@ -44,6 +45,7 @@
       bastionId = (server as any).bastionId || 0;
       authMethod = server.authMethod === 'key' ? 'key' : 'password';
       initialAuthMethod = authMethod;
+      keyType = (server as any).keyType || 'ed25519';
 
       // Load available servers for bastion selection
       try {
@@ -86,7 +88,8 @@
         environment,
         region,
         color,
-        bastionId: bastionId
+        bastionId: bastionId,
+        keyType: keyType
       };
 
       if (authMethod === 'password') {
@@ -212,6 +215,20 @@
                 />
               </div>
             {:else}
+              <div class="md:col-span-2">
+                <label for="keyType" class="mb-1 block text-sm font-medium text-slate-700">Key Type</label>
+                <select
+                  id="keyType"
+                  bind:value={keyType}
+                  class="w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-slate-900 shadow-sm outline-none transition focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20"
+                >
+                  <option value="ed25519">ED25519 (Recommended)</option>
+                  <option value="rsa">RSA 4096-bit</option>
+                  <option value="ecdsa">ECDSA 521-bit</option>
+                </select>
+                <p class="mt-1 text-xs text-slate-500">Used when generating or rotating keys</p>
+              </div>
+
               <div class="md:col-span-2">
                 <label for="sshKey" class="mb-1 block text-sm font-medium text-slate-700">SSH Key</label>
                 <textarea
