@@ -10,11 +10,12 @@ import (
 // mockSSH is a configurable SSHExecuter for testing.
 // It supports per-command output mapping and upload/download capture.
 type mockSSH struct {
-	execOutput map[string]string // cmd -> stdout
-	execErr   map[string]error   // cmd -> error
-	uploadData map[string][]byte // remotePath -> uploaded data
+	execOutput   map[string]string // cmd -> stdout
+	execErr      map[string]error  // cmd -> error
+	uploadData   map[string][]byte // remotePath -> uploaded data
 	downloadData map[string][]byte // remotePath -> data to serve on download
-	alive     bool
+	commands     []string
+	alive        bool
 }
 
 func newMockSSH() *mockSSH {
@@ -28,6 +29,7 @@ func newMockSSH() *mockSSH {
 }
 
 func (m *mockSSH) Exec(cmd string) (string, string, int, error) {
+	m.commands = append(m.commands, cmd)
 	// Try exact match first
 	if out, ok := m.execOutput[cmd]; ok {
 		if err, ok := m.execErr[cmd]; ok {
@@ -66,4 +68,22 @@ func (m *mockSSH) Download(remotePath string, dst io.Writer) error {
 		return nil
 	}
 	return nil
+}
+
+func containsCommand(commands []string, want string) bool {
+	for _, cmd := range commands {
+		if cmd == want {
+			return true
+		}
+	}
+	return false
+}
+
+func containsCommandPrefix(commands []string, prefix string) bool {
+	for _, cmd := range commands {
+		if strings.HasPrefix(cmd, prefix) {
+			return true
+		}
+	}
+	return false
 }

@@ -55,7 +55,13 @@ func (rm *RollbackManager) Rollback(ctx context.Context, migrationID int, onProg
 		return fmt.Errorf("migration not found: %w", err)
 	}
 
-	// 2. Update status to rolling_back
+	// 2. Validate migration state — only allow rollback if completed or failed
+	if migration.Status != StatusCompleted && migration.Status != StatusFailed {
+		sendError(onProgress, "rollback", "migration cannot be rolled back from state: "+migration.Status)
+		return fmt.Errorf("migration cannot be rolled back from state: %s", migration.Status)
+	}
+
+	// 3. Update status to rolling_back
 	rm.repo.UpdateMigrationStatus(migrationID, StatusRollingBack, "")
 	onProgress(WSMessage{Step: "rollback", Status: "progress", Value: "Starting rollback..."})
 

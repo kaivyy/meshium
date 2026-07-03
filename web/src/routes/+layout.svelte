@@ -8,22 +8,23 @@
   import TopBar from '$lib/components/TopBar.svelte';
   import Toast from '$lib/components/ui/Toast.svelte';
 
-  onMount(() => {
-    checkStatus();
+  let statusChecked = false;
+
+  onMount(async () => {
+    await checkStatus();
+    statusChecked = true;
   });
 
-  $: {
-    const state = $authStore;
+  // Only redirect after the auth status check has completed
+  $: if (statusChecked && !$authStore.loading) {
     const path = $page.url.pathname;
 
-    if (!state.loading) {
-      if (!state.setup && path !== '/setup') {
-        goto('/setup');
-      } else if (state.setup && path === '/setup') {
-        goto(state.locked ? '/login' : '/');
-      } else if (state.setup && state.locked && path !== '/login' && path !== '/setup') {
-        goto('/login');
-      }
+    if (!$authStore.setup && path !== '/setup') {
+      goto('/setup');
+    } else if ($authStore.setup && path === '/setup') {
+      goto($authStore.locked ? '/login' : '/');
+    } else if ($authStore.setup && $authStore.locked && path !== '/login' && path !== '/setup') {
+      goto('/login');
     }
   }
 

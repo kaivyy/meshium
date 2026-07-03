@@ -9,6 +9,8 @@ type Config struct {
 	DBPath     string
 	ServerPort string
 	DataDir    string
+	TLSCertFile string // path to TLS certificate file (empty = no TLS)
+	TLSKeyFile  string // path to TLS private key file (empty = no TLS)
 }
 
 func LoadConfig() (*Config, error) {
@@ -25,9 +27,11 @@ func LoadConfig() (*Config, error) {
 	}
 
 	return &Config{
-		DBPath:     filepath.Join(dataDir, "meshium.db"),
-		ServerPort: getEnv("MESHium_PORT", "8080"),
-		DataDir:    dataDir,
+		DBPath:      filepath.Join(dataDir, "meshium.db"),
+		ServerPort:  getEnv("MESHium_PORT", "8080"),
+		DataDir:     dataDir,
+		TLSCertFile: os.Getenv("MESHium_TLS_CERT"),
+		TLSKeyFile:  os.Getenv("MESHium_TLS_KEY"),
 	}, nil
 }
 

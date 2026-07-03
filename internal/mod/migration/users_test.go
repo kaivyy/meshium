@@ -3,6 +3,7 @@ package migration
 import (
 	"context"
 	"encoding/json"
+	"strings"
 	"testing"
 )
 
@@ -99,5 +100,26 @@ func TestUsersApplierApply(t *testing.T) {
 	last := progressMsgs[len(progressMsgs)-1]
 	if last.Status != "success" {
 		t.Errorf("expected last status 'success', got '%s'", last.Status)
+	}
+
+	if !containsCommand(ssh.commands, "groupadd -g 1000 'appuser' 2>/dev/null") {
+		t.Error("expected groupadd command to shell-quote the group name")
+	}
+	if !containsCommand(ssh.commands, "useradd -u 1000 -g 1000 -d '/home/appuser' -s '/bin/bash' -m 'appuser' 2>/dev/null") {
+		t.Error("expected useradd command to shell-quote user fields")
+	}
+	if !containsCommandPrefix(ssh.commands, "crontab -u 'appuser' '/tmp/meshium-crontab-") {
+		t.Error("expected crontab install to use a temporary uploaded file")
+	}
+	if len(ssh.uploadData) != 1 {
+		t.Fatalf("expected 1 uploaded temp file, got %d", len(ssh.uploadData))
+	}
+	for path, data := range ssh.uploadData {
+		if !strings.HasPrefix(path, "/tmp/meshium-crontab-") {
+			t.Fatalf("expected crontab temp file path, got %q", path)
+		}
+		if string(data) != ud.CronJobs["appuser"] {
+			t.Fatalf("unexpected crontab temp file content: %q", string(data))
+		}
 	}
 }

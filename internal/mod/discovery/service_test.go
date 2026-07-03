@@ -98,6 +98,95 @@ func (f *fakeServerRepo) GetServerInfo(serverID int) (*server.ServerInfo, error)
 	return nil, errors.New("not implemented")
 }
 
+// Stub implementations for enterprise SSH repo methods
+func (f *fakeServerRepo) GetRawServer(id int) (*server.Server, error) {
+	return f.GetByID(id)
+}
+func (f *fakeServerRepo) RecordConnection(entry server.ConnectionHistoryEntry) error {
+	return nil
+}
+func (f *fakeServerRepo) GetConnectionHistory(serverID int, limit int) ([]server.ConnectionHistoryEntry, error) {
+	return nil, nil
+}
+func (f *fakeServerRepo) GetConnectionMetrics(serverID int) (*server.ConnectionMetrics, error) {
+	return nil, nil
+}
+func (f *fakeServerRepo) UpdateAuthStatus(serverID int, status string, success bool) error {
+	return nil
+}
+func (f *fakeServerRepo) StoreServerKey(key server.ServerKey) (int, error) {
+	return 0, nil
+}
+func (f *fakeServerRepo) GetServerKeys(serverID int) ([]server.ServerKey, error) {
+	return nil, nil
+}
+func (f *fakeServerRepo) GetServerKey(serverID int, keyID int) (*server.ServerKey, error) {
+	return nil, nil
+}
+func (f *fakeServerRepo) UpdateServerKey(key server.ServerKey) error {
+	return nil
+}
+func (f *fakeServerRepo) DeleteServerKey(serverID int, keyID int) error {
+	return nil
+}
+func (f *fakeServerRepo) SetDefaultKey(serverID int, keyID int) error {
+	return nil
+}
+func (f *fakeServerRepo) GetAuthPriority() ([]server.AuthPriorityEntry, error) {
+	return nil, nil
+}
+func (f *fakeServerRepo) SetAuthPriority(entries []server.AuthPriorityEntry) error {
+	return nil
+}
+func (f *fakeServerRepo) ListConnectionProfiles() ([]server.ConnectionProfile, error) {
+	return nil, nil
+}
+func (f *fakeServerRepo) GetConnectionProfile(id int) (*server.ConnectionProfile, error) {
+	return nil, nil
+}
+func (f *fakeServerRepo) CreateConnectionProfile(p server.ConnectionProfile) (int, error) {
+	return 0, nil
+}
+func (f *fakeServerRepo) UpdateConnectionProfile(p server.ConnectionProfile) error {
+	return nil
+}
+func (f *fakeServerRepo) DeleteConnectionProfile(id int) error {
+	return nil
+}
+func (f *fakeServerRepo) GetRetryConfig(serverID int) (*server.RetryConfig, error) {
+	return nil, nil
+}
+func (f *fakeServerRepo) SetRetryConfig(config server.RetryConfig) error {
+	return nil
+}
+func (f *fakeServerRepo) ListKnownHosts() ([]server.KnownHostEntry, error) {
+	return nil, nil
+}
+func (f *fakeServerRepo) RemoveKnownHost(host string, port int) error {
+	return nil
+}
+func (f *fakeServerRepo) SetHostStatus(host string, port int, status string) error {
+	return nil
+}
+func (f *fakeServerRepo) ListHostKeyChanges(limit int) ([]server.HostKeyChange, error) {
+	return nil, nil
+}
+func (f *fakeServerRepo) RecordCredentialAudit(entry server.CredentialAuditEntry) error {
+	return nil
+}
+func (f *fakeServerRepo) ListCredentialAudit(serverID int, limit int) ([]server.CredentialAuditEntry, error) {
+	return nil, nil
+}
+func (f *fakeServerRepo) GetSSHAgentConfig(serverID int) (bool, string, bool, error) {
+	return false, "", false, nil
+}
+func (f *fakeServerRepo) SetSSHAgentConfig(serverID int, useAgent bool, preferredIdentity string, agentForwarding bool) error {
+	return nil
+}
+func (f *fakeServerRepo) GetAuthDashboard() (*server.AuthDashboard, error) {
+	return nil, nil
+}
+
 func TestRunConnectionTestWithMock(t *testing.T) {
 	key := make([]byte, 32)
 	for i := range key {

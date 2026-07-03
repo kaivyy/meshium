@@ -163,7 +163,7 @@ func (a *PackagesApplier) Apply(ctx context.Context, ssh SSHExecuter, data Categ
 			DistroInfo{Family: distroFamilyFromPM(targetPM)},
 			pkg,
 		)
-		packagesToInstall = append(packagesToInstall, mapped)
+		packagesToInstall = append(packagesToInstall, strings.Fields(mapped)...)
 	}
 
 	if onProgress != nil {

@@ -1,0 +1,17 @@
+services:
+  meshium:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    ports:
+      - "8080:8080"
+    environment:
+      MESHium_PORT: "8080"
+      MESHium_DATA_DIR: /data
+      MESHium_LOG_LEVEL: info
+    volumes:
+      - meshium-data:/data
+    restart: unless-stopped
+
+volumes:
+  meshium-data:

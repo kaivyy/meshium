@@ -71,3 +71,18 @@ func TestServicesApplierApply(t *testing.T) {
 		t.Errorf("expected last status 'success', got '%s'", last.Status)
 	}
 }
+
+func TestServicesApplierRollbackQuotesServiceNames(t *testing.T) {
+	ssh := newMockSSH()
+	ssh.execOutput["systemctl list-unit-files --type=service --state=enabled --no-legend 2>/dev/null"] =
+		"nginx.service      enabled\n"
+
+	applier := &ServicesApplier{}
+	backup, _ := json.Marshal(ServicesBackup{Services: []string{}})
+	if err := applier.Rollback(ssh, BackupData{Type: "services", Data: backup}); err != nil {
+		t.Fatalf("Rollback failed: %v", err)
+	}
+	if !containsCommand(ssh.commands, "systemctl disable --now 'nginx' 2>/dev/null") {
+		t.Fatal("expected rollback to shell-quote the service name")
+	}
+}
