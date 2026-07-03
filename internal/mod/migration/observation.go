@@ -10,29 +10,35 @@ import (
 // It performs periodic health checks and triggers automatic rollback
 // if error thresholds are exceeded.
 type ObservationEngine struct {
-	health *HealthEngine
-	repo   PipelineRepo
+	health        *HealthEngine
+	cutoverEngine *CutoverEngine
+	repo          PipelineRepo
 }
 
 // NewObservationEngine creates a new observation engine.
-func NewObservationEngine(health *HealthEngine, repo PipelineRepo) *ObservationEngine {
+func NewObservationEngine(health *HealthEngine, repo PipelineRepo, cutoverEngine ...*CutoverEngine) *ObservationEngine {
+	var engine *CutoverEngine
+	if len(cutoverEngine) > 0 {
+		engine = cutoverEngine[0]
+	}
 	return &ObservationEngine{
-		health: health,
-		repo:   repo,
+		health:        health,
+		cutoverEngine: engine,
+		repo:          repo,
 	}
 }
 
 // ObservationConfig configures post-cutover observation.
 type ObservationConfig struct {
-	MigrationID         int                `json:"migrationId"`
-	Duration            time.Duration      `json:"duration"`
-	CheckInterval       time.Duration      `json:"checkInterval"`
+	MigrationID         int                 `json:"migrationId"`
+	Duration            time.Duration       `json:"duration"`
+	CheckInterval       time.Duration       `json:"checkInterval"`
 	HealthChecks        []HealthCheckConfig `json:"healthChecks"`
-	MaxErrorRate        float64            `json:"maxErrorRate"`
-	MaxLatencyMs        int64              `json:"maxLatencyMs"`
-	MinHealthScore      float64            `json:"minHealthScore"`
-	AutoRollback        bool               `json:"autoRollback"`
-	ConsecutiveFailures int                `json:"consecutiveFailures"`
+	MaxErrorRate        float64             `json:"maxErrorRate"`
+	MaxLatencyMs        int64               `json:"maxLatencyMs"`
+	MinHealthScore      float64             `json:"minHealthScore"`
+	AutoRollback        bool                `json:"autoRollback"`
+	ConsecutiveFailures int                 `json:"consecutiveFailures"`
 }
 
 // DefaultObservationConfig returns sensible defaults.
@@ -53,6 +59,16 @@ func DefaultObservationConfig(migrationID int) ObservationConfig {
 // It checks health at regular intervals and returns an error if
 // thresholds are exceeded, triggering automatic rollback.
 func (e *ObservationEngine) Observe(ctx context.Context, config ObservationConfig) error {
+	if e == nil {
+		return fmt.Errorf("observation engine is nil")
+	}
+	if e.health == nil {
+		return fmt.Errorf("health engine not configured")
+	}
+	if e.repo == nil {
+		return fmt.Errorf("pipeline repo not configured")
+	}
+
 	if config.Duration == 0 {
 		config.Duration = 10 * time.Minute
 	}
@@ -69,26 +85,28 @@ func (e *ObservationEngine) Observe(ctx context.Context, config ObservationConfi
 		config.ConsecutiveFailures = 3
 	}
 
-	deadline := time.Now().Add(config.Duration)
-	consecutiveFailures := 0
-	checkCount := 0
+	deadlineTimer := time.NewTimer(config.Duration)
+	defer deadlineTimer.Stop()
 
 	ticker := time.NewTicker(config.CheckInterval)
 	defer ticker.Stop()
+
+	consecutiveFailures := 0
+	thresholdBreached := false
+	var breachErr error
 
 	for {
 		select {
 		case <-ctx.Done():
 			return ctx.Err()
 
-		case <-ticker.C:
-			if time.Now().After(deadline) {
-				// Observation period complete
-				return nil
+		case <-deadlineTimer.C:
+			if thresholdBreached {
+				return breachErr
 			}
+			return nil
 
-			checkCount++
-
+		case <-ticker.C:
 			// Run health checks
 			results, score := e.health.CheckAll(ctx, config.HealthChecks)
 
@@ -123,13 +141,22 @@ func (e *ObservationEngine) Observe(ctx context.Context, config ObservationConfi
 
 			// Check thresholds
 			thresholdOK := e.checkThresholds(score, config)
-
 			if !thresholdOK {
 				consecutiveFailures++
 				if consecutiveFailures >= config.ConsecutiveFailures {
-					if config.AutoRollback {
-						return fmt.Errorf("observation failed: %d consecutive threshold breaches (score=%.1f, error_rate=%.3f, avg_latency=%.0fms)",
+					thresholdBreached = true
+					if breachErr == nil {
+						breachErr = fmt.Errorf("observation failed: %d consecutive threshold breaches (score=%.1f, error_rate=%.3f, avg_latency=%.0fms)",
 							consecutiveFailures, score.Score, score.ErrorRate, score.AvgResponseMs)
+					}
+					if config.AutoRollback {
+						if e.cutoverEngine == nil {
+							return fmt.Errorf("%w (auto rollback requested but cutover engine not configured)", breachErr)
+						}
+						if err := e.cutoverEngine.Rollback(ctx, config.MigrationID); err != nil {
+							return fmt.Errorf("%v (rollback failed: %w)", breachErr, err)
+						}
+						return breachErr
 					}
 				}
 			} else {

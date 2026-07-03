@@ -40,6 +40,22 @@ func TestMigrateCreatesTables(t *testing.T) {
 	if err := dbConn.QueryRow("SELECT name FROM sqlite_master WHERE type='table' AND name='migration_steps'").Scan(&name); err != nil {
 		t.Error("migration_steps table not created")
 	}
+	// Check migration_events table exists
+	if err := dbConn.QueryRow("SELECT name FROM sqlite_master WHERE type='table' AND name='migration_events'").Scan(&name); err != nil {
+		t.Error("migration_events table not created")
+	}
+	// Check migration_rollback_steps table exists
+	if err := dbConn.QueryRow("SELECT name FROM sqlite_master WHERE type='table' AND name='migration_rollback_steps'").Scan(&name); err != nil {
+		t.Error("migration_rollback_steps table not created")
+	}
+	// Check migration_verifications table exists
+	if err := dbConn.QueryRow("SELECT name FROM sqlite_master WHERE type='table' AND name='migration_verifications'").Scan(&name); err != nil {
+		t.Error("migration_verifications table not created")
+	}
+	// Check migration_freezes table exists
+	if err := dbConn.QueryRow("SELECT name FROM sqlite_master WHERE type='table' AND name='migration_freezes'").Scan(&name); err != nil {
+		t.Error("migration_freezes table not created")
+	}
 	// Check migration_backups table exists
 	if err := dbConn.QueryRow("SELECT name FROM sqlite_master WHERE type='table' AND name='migration_backups'").Scan(&name); err != nil {
 		t.Error("migration_backups table not created")

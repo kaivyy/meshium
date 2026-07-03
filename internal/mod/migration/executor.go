@@ -387,7 +387,9 @@ func (e *Executor) executeWithSkip(ctx context.Context, migrationID int, onProgr
 	if err := e.repo.UpdateMigrationStatus(migrationID, StatusCompleted, ""); err != nil {
 		log.Printf("failed to update migration %d status to completed: %v", migrationID, err)
 	}
-	e.repo.SetMigrationCompletedAt(migrationID, now)
+	if err := e.repo.SetMigrationCompletedAt(migrationID, now); err != nil {
+		log.Printf("failed to persist completed-at timestamp for migration %d: %v", migrationID, err)
+	}
 
 	onProgress(WSMessage{Step: "execute", Status: "complete", Value: "Migration completed successfully"})
 

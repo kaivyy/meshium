@@ -9,6 +9,7 @@
     type ProvisionState, type ContainerHealthInfo, type AuditEntry,
     type MigrationConfig
   } from '$lib/api/pipeline';
+  import { APIError } from '$lib/api/client';
   import { migrationApi, type DryRunResult } from '$lib/api/migrations';
   import { toast } from '$lib/stores/toast';
 
@@ -69,7 +70,7 @@
   let actionLoading = false;
 
   onMount(async () => {
-    await loadSession();
+    await loadSession().catch(() => {});
   });
 
   onDestroy(() => {
@@ -85,7 +86,10 @@
     loading = true;
     try {
       session = await pipelineApi.getSession(migrationId);
-      if (session?.config) config = session.config;
+      if (session?.config) {
+        config = session.config;
+        if (session.config.observationDuration) observationDuration = session.config.observationDuration;
+      }
       if (session?.riskReport) riskReport = session.riskReport;
       if (session?.healthHistory) healthResults = session.healthHistory;
       if (session?.syncSessions) syncSessions = session.syncSessions;
@@ -107,11 +111,25 @@
     }
   }
 
+  function stopObservationTimer() {
+    if (observationTimer) clearInterval(observationTimer);
+    observationTimer = null;
+    observationStart = null;
+    observationElapsed = 0;
+  }
+
   function recoverStepFromState() {
     if (!session) return;
     const st = currentState.toLowerCase();
-    if (['completed', 'committed', 'archived'].includes(st)) { setStep(10); return; }
-    if (['observation', 'post_verification'].includes(st)) { setStep(9); return; }
+    if (['completed', 'committed', 'archived', 'rolled_back', 'cancelled'].includes(st)) {
+      stopObservationTimer();
+      setStep(10);
+      stepStatuses[9] = 'completed';
+      stepStatuses[10] = 'completed';
+      pipelineRunning = false;
+      return;
+    }
+    if (['observation', 'post_verification'].includes(st)) { setStep(9); startObservationTimer(); return; }
     if (['traffic_switch', 'pre_cutover'].includes(st)) { setStep(8); return; }
     if (['live_replication', 'verification'].includes(st)) { setStep(7); pipelineRunning = true; return; }
     if (['initial_sync', 'install_dependencies', 'provision_target'].includes(st)) { setStep(6); pipelineRunning = true; return; }
@@ -177,7 +195,7 @@
     actionLoading = true;
     stepStatuses[0] = 'running';
     try {
-      await loadSession();
+      await loadSession().catch(() => {});
       stepStatuses[0] = 'completed';
       toast.success('Discovery completed');
     } catch {
@@ -324,13 +342,35 @@
     if (msg.queueInfo) queueStates = msg.queueInfo;
   }
 
+  function actionErrorMessage(err: unknown, fallback: string): string {
+    if (err instanceof APIError) return err.message || fallback;
+    if (err instanceof Error) return err.message || fallback;
+    return fallback;
+  }
+
+  function isTerminalState(state: string): boolean {
+    return ['completed', 'committed', 'archived', 'rolled_back', 'cancelled'].includes(state.toLowerCase());
+  }
+
+  function canRetryState(state: string): boolean {
+    return ['failed', 'interrupted'].includes(state.toLowerCase());
+  }
+
   // Step 8: Cutover
-  function confirmCutover() {
+  async function confirmCutover() {
     if (!confirm('⚠️ CUTOVER: This will switch all traffic from source to target. Make sure replication is caught up and target is healthy. Continue?')) return;
     cutoverConfirmed = true;
-    // The pipeline is already running — cutover happens automatically
-    // at the PreCutover/TrafficSwitch stage
-    toast.info('Cutover confirmed — traffic switch in progress');
+    actionLoading = true;
+    try {
+      await pipelineApi.cutover(migrationId);
+      await loadSession().catch(() => {});
+      toast.success('Cutover confirmed');
+    } catch (err) {
+      cutoverConfirmed = false;
+      toast.error(actionErrorMessage(err, 'Cutover failed'));
+    } finally {
+      actionLoading = false;
+    }
   }
 
   // Step 9: Observation
@@ -347,41 +387,63 @@
     }, 1000);
   }
 
-  function commitMigration() {
-    stepStatuses[9] = 'completed';
-    currentStep = 10;
-    stepStatuses[10] = 'completed';
-    pipelineRunning = false;
-    toast.success('Migration committed successfully!');
+  async function commitMigration() {
+    actionLoading = true;
+    try {
+      await pipelineApi.commit(migrationId);
+      await loadSession().catch(() => {});
+      toast.success('Migration committed successfully!');
+    } catch (err) {
+      toast.error(actionErrorMessage(err, 'Commit failed'));
+    } finally {
+      actionLoading = false;
+    }
   }
 
   // ── Control Actions ──
 
   async function pausePipeline() {
+    actionLoading = true;
     try {
       await pipelineApi.pause(migrationId);
       pipelinePaused = true;
+      await loadSession().catch(() => {});
       toast.success('Pipeline paused');
-    } catch { toast.error('Pause failed'); }
+    } catch (err) {
+      toast.error(actionErrorMessage(err, 'Pause failed'));
+    } finally {
+      actionLoading = false;
+    }
   }
 
   async function resumePipeline() {
+    actionLoading = true;
     try {
       await pipelineApi.resume(migrationId);
       pipelinePaused = false;
+      await loadSession().catch(() => {});
       toast.success('Pipeline resumed');
-      startPipeline();
-    } catch { toast.error('Resume failed'); }
+    } catch (err) {
+      toast.error(actionErrorMessage(err, 'Resume failed'));
+    } finally {
+      actionLoading = false;
+    }
   }
 
   async function rollbackPipeline() {
     if (!confirm('⚠️ ROLLBACK: This will revert all changes. Are you sure?')) return;
+    actionLoading = true;
     try {
-      await migrationApi.rollback(migrationId);
+      await pipelineApi.rollbackMigration(migrationId);
       pipelineRunning = false;
+      pipelinePaused = false;
+      await loadSession().catch(() => {});
       toast.success('Rollback initiated');
-      loadSession();
-    } catch { toast.error('Rollback failed'); }
+    } catch (err) {
+      toast.error(actionErrorMessage(err, 'Rollback failed'));
+    } finally {
+      actionLoading = false;
+    }
   }
 
   async function exportReport() {
@@ -407,6 +469,19 @@
     try {
       queueStates = await pipelineApi.getQueueStates(migrationId);
     } catch { /* ignore */ }
+  }
+
+  async function retryPipeline() {
+    actionLoading = true;
+    try {
+      await pipelineApi.retry(migrationId);
+      await loadSession().catch(() => {});
+      toast.success('Pipeline retried');
+    } catch (err) {
+      toast.error(actionErrorMessage(err, 'Retry failed'));
+    } finally {
+      actionLoading = false;
+    }
   }
 
   async function refreshAudit() {
@@ -520,7 +595,13 @@
           Resume
         </button>
       {/if}
-      {#if pipelineRunning || pipelinePaused}
+      {#if canRetryState(currentState)}
+        <button on:click={retryPipeline} class="flex items-center gap-1.5 px-3 py-1.5 bg-indigo-600 hover:bg-indigo-700 rounded-lg text-xs font-medium transition-colors">
+          <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 2v6h6"/><path d="M3 8a9 9 0 1 1 3.5 7"/></svg>
+          Retry
+        </button>
+      {/if}
+      {#if !isTerminalState(currentState)}
         <button on:click={rollbackPipeline} class="flex items-center gap-1.5 px-3 py-1.5 bg-red-600 hover:bg-red-700 rounded-lg text-xs font-medium transition-colors">
           <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 12a9 9 0 1 0 9-9 9.75 9.75 0 0 0-6.74 2.74L3 8"/><path d="M3 3v5h5"/></svg>
           Rollback
@@ -1196,7 +1277,7 @@
                   <li>Resume writes on target</li>
                 </ol>
                 <p class="text-xs text-gray-400 mb-4">Current replication lag: <strong>{replicationLag}s</strong> &middot; Health score: <strong>{healthScore.toFixed(0)}</strong></p>
-                <button on:click={confirmCutover} class="px-6 py-2.5 bg-yellow-600 hover:bg-yellow-700 rounded-lg font-medium transition-colors">
+                <button on:click={confirmCutover} disabled={actionLoading} class="px-6 py-2.5 bg-yellow-600 hover:bg-yellow-700 rounded-lg font-medium transition-colors disabled:opacity-50 disabled:cursor-not-allowed">
                   Confirm Cutover
                 </button>
               </div>
@@ -1248,7 +1329,7 @@
             {#if stepStatuses[9] === 'completed'}
               <div class="text-center">
                 <p class="text-green-400 font-medium mb-4">Observation period completed. All health checks passing.</p>
-                <button on:click={commitMigration} class="px-8 py-3 bg-green-600 hover:bg-green-700 rounded-lg font-medium text-lg transition-colors">
+                <button on:click={commitMigration} disabled={actionLoading} class="px-8 py-3 bg-green-600 hover:bg-green-700 rounded-lg font-medium text-lg transition-colors disabled:opacity-50 disabled:cursor-not-allowed">
                   Commit Migration
                 </button>
               </div>

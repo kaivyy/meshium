@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"time"
 )
 
 // PipelineRepo extends the existing Repo and JobRepository interfaces with
@@ -85,6 +86,10 @@ type PipelineRepo interface {
 	// --- Migration config ---
 	SetMigrationConfig(migrationID int, config *MigrationConfig) error
 	GetMigrationConfig(migrationID int) (*MigrationConfig, error)
+
+	// --- Events ---
+	CreateEvent(ctx context.Context, event MigrationEvent) error
+	GetEvents(ctx context.Context, migrationID int, afterSequence int64, limit int) ([]MigrationEvent, error)
 
 	// --- Risk ---
 	SetMigrationRisk(migrationID int, score float64, class string) error
@@ -1161,6 +1166,96 @@ func (r *sqliteRepo) GetMigrationConfig(migrationID int) (*MigrationConfig, erro
 func (r *sqliteRepo) SetMigrationRisk(migrationID int, score float64, class string) error {
 	_, err := r.db.Exec("UPDATE migrations SET risk_score = ?, risk_class = ? WHERE id = ?", score, class, migrationID)
 	return err
+}
+
+// --- Events ---
+
+func (r *sqliteRepo) CreateEvent(ctx context.Context, event MigrationEvent) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	if event.Timestamp.IsZero() {
+		event.Timestamp = time.Now().UTC()
+	} else {
+		event.Timestamp = event.Timestamp.UTC()
+	}
+	if event.Level == "" {
+		event.Level = EventLevelInfo
+	}
+	details := string(event.Details)
+	if len(event.Details) == 0 {
+		details = "{}"
+	}
+	_, err := r.db.Exec(
+		`INSERT INTO migration_events (
+			migration_id, sequence, timestamp, level, stage, type, message, details, source, correlation_id
+		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		event.MigrationID, event.Sequence, event.Timestamp.Format(time.RFC3339Nano), string(event.Level),
+		event.Stage, event.Type, event.Message, details, event.Source, event.CorrelationID,
+	)
+	return err
+}
+
+func (r *sqliteRepo) GetEvents(ctx context.Context, migrationID int, afterSequence int64, limit int) ([]MigrationEvent, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+	if limit <= 0 {
+		limit = 100
+	}
+	rows, err := r.db.Query(
+		`SELECT id, migration_id, sequence, timestamp, level, stage, type, message, details, source, correlation_id
+		 FROM migration_events
+		 WHERE migration_id = ? AND sequence > ?
+		 ORDER BY sequence ASC
+		 LIMIT ?`,
+		migrationID, afterSequence, limit,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	events := make([]MigrationEvent, 0)
+	for rows.Next() {
+		var e MigrationEvent
+		var ts, details, correlationID sql.NullString
+		if err := rows.Scan(
+			&e.ID, &e.MigrationID, &e.Sequence, &ts, &e.Level, &e.Stage, &e.Type, &e.Message, &details, &e.Source, &correlationID,
+		); err != nil {
+			return nil, err
+		}
+		if ts.Valid && ts.String != "" {
+			parsed, err := parseMigrationEventTimestamp(ts.String)
+			if err != nil {
+				return nil, err
+			}
+			e.Timestamp = parsed
+		}
+		if details.Valid && details.String != "" {
+			e.Details = json.RawMessage(details.String)
+		} else {
+			e.Details = json.RawMessage(`{}`)
+		}
+		if correlationID.Valid {
+			e.CorrelationID = correlationID.String
+		}
+		events = append(events, e)
+	}
+	return events, nil
+}
+
+func parseMigrationEventTimestamp(value string) (time.Time, error) {
+	layouts := []string{time.RFC3339Nano, time.RFC3339, "2006-01-02 15:04:05"}
+	var parseErr error
+	for _, layout := range layouts {
+		if ts, err := time.Parse(layout, value); err == nil {
+			return ts.UTC(), nil
+		} else {
+			parseErr = err
+		}
+	}
+	return time.Time{}, fmt.Errorf("parse migration event timestamp %q: %w", value, parseErr)
 }
 
 // --- Helpers ---

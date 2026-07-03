@@ -117,6 +117,53 @@ func Migrate(db *sql.DB) error {
 			completed_at DATETIME,
 			UNIQUE(migration_id, step_name)
 		);`,
+		`CREATE TABLE IF NOT EXISTS migration_events (
+			id INTEGER PRIMARY KEY AUTOINCREMENT,
+			migration_id INTEGER NOT NULL,
+			sequence INTEGER NOT NULL,
+			timestamp DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+			level TEXT NOT NULL DEFAULT 'info',
+			stage TEXT NOT NULL DEFAULT '',
+			type TEXT NOT NULL DEFAULT '',
+			message TEXT NOT NULL DEFAULT '',
+			details TEXT DEFAULT '{}',
+			source TEXT NOT NULL DEFAULT '',
+			correlation_id TEXT DEFAULT '',
+			FOREIGN KEY (migration_id) REFERENCES migrations(id) ON DELETE CASCADE
+		);`,
+		`CREATE TABLE IF NOT EXISTS migration_rollback_steps (
+			id INTEGER PRIMARY KEY AUTOINCREMENT,
+			migration_id INTEGER NOT NULL,
+			step_order INTEGER NOT NULL,
+			name TEXT NOT NULL,
+			status TEXT NOT NULL DEFAULT 'pending',
+			error TEXT DEFAULT '',
+			started_at DATETIME,
+			completed_at DATETIME,
+			FOREIGN KEY (migration_id) REFERENCES migrations(id) ON DELETE CASCADE
+		);`,
+		`CREATE TABLE IF NOT EXISTS migration_verifications (
+			id INTEGER PRIMARY KEY AUTOINCREMENT,
+			migration_id INTEGER NOT NULL,
+			component TEXT NOT NULL,
+			check_type TEXT NOT NULL,
+			status TEXT NOT NULL DEFAULT 'pending',
+			message TEXT DEFAULT '',
+			checked_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+			FOREIGN KEY (migration_id) REFERENCES migrations(id) ON DELETE CASCADE
+		);`,
+		`CREATE TABLE IF NOT EXISTS migration_freezes (
+			id INTEGER PRIMARY KEY AUTOINCREMENT,
+			migration_id INTEGER NOT NULL,
+			method TEXT NOT NULL,
+			frozen_dbs TEXT DEFAULT '[]',
+			frozen_apps TEXT DEFAULT '[]',
+			errors TEXT DEFAULT '[]',
+			success INTEGER NOT NULL DEFAULT 0,
+			started_at DATETIME,
+			completed_at DATETIME,
+			FOREIGN KEY (migration_id) REFERENCES migrations(id) ON DELETE CASCADE
+		);`,
 
 		// --- Zero-Downtime Pipeline Tables ---
 
@@ -374,6 +421,7 @@ func Migrate(db *sql.DB) error {
 		`CREATE INDEX IF NOT EXISTS idx_migrations_source ON migrations(source_id)`,
 		`CREATE INDEX IF NOT EXISTS idx_migrations_target ON migrations(target_id)`,
 		`CREATE INDEX IF NOT EXISTS idx_migration_steps_migration ON migration_steps(migration_id, status)`,
+		`CREATE INDEX IF NOT EXISTS idx_events_migration_seq ON migration_events(migration_id, sequence)`,
 		`CREATE INDEX IF NOT EXISTS idx_migration_stages_migration ON migration_stages(migration_id, stage_index)`,
 		`CREATE INDEX IF NOT EXISTS idx_migration_stages_state ON migration_stages(state)`,
 		`CREATE INDEX IF NOT EXISTS idx_replication_status_migration ON replication_status(migration_id)`,
