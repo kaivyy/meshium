@@ -131,6 +131,99 @@ func (m *mockServerRepo) SaveServerInfo(serverID int, info server.ServerInfo, ra
 func (m *mockServerRepo) GetServerInfo(serverID int) (*server.ServerInfo, error) {
 	return nil, nil
 }
+func (m *mockServerRepo) UpdateAuthStatus(serverID int, authMethod string, credentialStatus string, fingerprint string) error {
+	return nil
+}
+func (m *mockServerRepo) RecordConnection(serverID int, success bool, durationMs int, reason string, remoteIP string, fingerprint string, authMethod string) error {
+	return nil
+}
+func (m *mockServerRepo) GetConnectionHistory(serverID int, limit int) ([]server.ConnectionHistoryEntry, error) {
+	return nil, nil
+}
+func (m *mockServerRepo) GetConnectionMetrics(serverID int) (*server.ConnectionMetrics, error) {
+	return nil, nil
+}
+func (m *mockServerRepo) RemovePassword(serverID int) error {
+	return nil
+}
+func (m *mockServerRepo) ClearSSHKey(serverID int) error {
+	return nil
+}
+func (m *mockServerRepo) UpdateFingerprint(serverID int, fingerprint string) error {
+	return nil
+}
+func (m *mockServerRepo) StoreServerKey(key server.ServerKey) (int, error) {
+	return 0, nil
+}
+func (m *mockServerRepo) GetServerKeys(serverID int) ([]server.ServerKey, error) {
+	return nil, nil
+}
+func (m *mockServerRepo) GetServerKey(serverID int, keyID int) (*server.ServerKey, error) {
+	return nil, nil
+}
+func (m *mockServerRepo) UpdateServerKey(key server.ServerKey) error {
+	return nil
+}
+func (m *mockServerRepo) DeleteServerKey(serverID int, keyID int) error {
+	return nil
+}
+func (m *mockServerRepo) SetDefaultKey(serverID int, keyID int) error {
+	return nil
+}
+func (m *mockServerRepo) GetAuthPriority() ([]server.AuthPriorityEntry, error) {
+	return nil, nil
+}
+func (m *mockServerRepo) SetAuthPriority(entries []server.AuthPriorityEntry) error {
+	return nil
+}
+func (m *mockServerRepo) ListConnectionProfiles() ([]server.ConnectionProfile, error) {
+	return nil, nil
+}
+func (m *mockServerRepo) GetConnectionProfile(id int) (*server.ConnectionProfile, error) {
+	return nil, nil
+}
+func (m *mockServerRepo) CreateConnectionProfile(profile server.ConnectionProfile) (int, error) {
+	return 0, nil
+}
+func (m *mockServerRepo) UpdateConnectionProfile(profile server.ConnectionProfile) error {
+	return nil
+}
+func (m *mockServerRepo) DeleteConnectionProfile(id int) error {
+	return nil
+}
+func (m *mockServerRepo) GetRetryConfig(serverID int) (*server.RetryConfig, error) {
+	return nil, nil
+}
+func (m *mockServerRepo) SetRetryConfig(config server.RetryConfig) error {
+	return nil
+}
+func (m *mockServerRepo) ListKnownHosts() ([]server.KnownHostEntry, error) {
+	return nil, nil
+}
+func (m *mockServerRepo) RemoveKnownHost(host string, port int) error {
+	return nil
+}
+func (m *mockServerRepo) SetHostStatus(host string, port int, status string) error {
+	return nil
+}
+func (m *mockServerRepo) ListHostKeyChanges(limit int) ([]server.HostKeyChange, error) {
+	return nil, nil
+}
+func (m *mockServerRepo) RecordCredentialAudit(entry server.CredentialAuditEntry) error {
+	return nil
+}
+func (m *mockServerRepo) ListCredentialAudit(serverID int, limit int) ([]server.CredentialAuditEntry, error) {
+	return nil, nil
+}
+func (m *mockServerRepo) GetSSHAgentConfig(serverID int) (bool, string, bool, error) {
+	return false, "", false, nil
+}
+func (m *mockServerRepo) SetSSHAgentConfig(serverID int, useAgent bool, preferredIdentity string, agentForwarding bool) error {
+	return nil
+}
+func (m *mockServerRepo) GetAuthDashboard() (*server.AuthDashboard, error) {
+	return nil, nil
+}
 
 // --- Mock Connection Pool ---
 

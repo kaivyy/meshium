@@ -2,7 +2,6 @@ package migration
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 	"log"
 
@@ -44,20 +43,20 @@ func NewRecoveryManager(
 
 // InterruptedMigration holds an interrupted migration and its recovery options.
 type InterruptedMigration struct {
-	Migration     *Migration     `json:"migration"`
-	State         MigrationState `json:"state"`
-	AppliedSteps  []string       `json:"appliedSteps"`
-	PendingSteps  []string       `json:"pendingSteps"`
-	CanResume     bool           `json:"canResume"`
-	CanCancel     bool           `json:"canCancel"`
+	Migration    *Migration     `json:"migration"`
+	State        MigrationState `json:"state"`
+	AppliedSteps []string       `json:"appliedSteps"`
+	PendingSteps []string       `json:"pendingSteps"`
+	CanResume    bool           `json:"canResume"`
+	CanCancel    bool           `json:"canCancel"`
 }
 
 // RecoveryResult holds the result of a recovery operation.
 type RecoveryResult struct {
-	Action       string         `json:"action"` // "resumed" or "cancelled"
-	MigrationID  int            `json:"migrationId"`
-	FinalState   MigrationState `json:"finalState"`
-	Message      string         `json:"message"`
+	Action      string         `json:"action"` // "resumed" or "cancelled"
+	MigrationID int            `json:"migrationId"`
+	FinalState  MigrationState `json:"finalState"`
+	Message     string         `json:"message"`
 }
 
 // DiscoverInterrupted loads all migrations in an interrupted state.
@@ -88,11 +87,7 @@ func (rm *RecoveryManager) DiscoverInterrupted() ([]InterruptedMigration, error)
 			applied = append(applied, cp.StepName)
 		}
 
-		// Parse categories to determine pending steps
-		var categories []string
-		if err := json.Unmarshal([]byte(m.Categories), &categories); err != nil {
-			log.Printf("warning: failed to parse categories for migration %d: %v", m.ID, err)
-		}
+		categories := m.Categories
 
 		appliedSet := make(map[string]bool, len(applied))
 		for _, name := range applied {
@@ -144,11 +139,7 @@ func (rm *RecoveryManager) ResumeMigration(ctx context.Context, migrationID int,
 		return nil, fmt.Errorf("migration %d is in state %s, cannot resume", migrationID, state)
 	}
 
-	// Build steps from categories
-	var categories []string
-	if err := json.Unmarshal([]byte(migration.Categories), &categories); err != nil {
-		return nil, fmt.Errorf("failed to parse migration categories: %w", err)
-	}
+	categories := migration.Categories
 
 	steps, err := rm.engine.BuildStepsFromCategories(ctx, migrationID, categories)
 	if err != nil {
@@ -213,11 +204,7 @@ func (rm *RecoveryManager) CancelMigration(ctx context.Context, migrationID int,
 		return nil, fmt.Errorf("SSH connection failed: %w", err)
 	}
 
-	// Build steps from categories for rollback
-	var categories []string
-	if err := json.Unmarshal([]byte(migration.Categories), &categories); err != nil {
-		return nil, fmt.Errorf("failed to parse migration categories: %w", err)
-	}
+	categories := migration.Categories
 
 	// Build a map of step name → step for rollback
 	stepMap := make(map[string]MigrationStep)

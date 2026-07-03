@@ -29,12 +29,12 @@ func NewQueueEngine(sourceSSH, targetSSH SSHExecuter, repo PipelineRepo) *QueueE
 
 // QueueConfig configures queue management for a migration.
 type QueueConfig struct {
-	QueueType string `json:"queueType"` // bullmq, redis, rabbitmq
-	QueueName string `json:"queueName"`
-	RedisHost string `json:"redisHost,omitempty"`
-	RedisPort int    `json:"redisPort,omitempty"`
-	RedisDB   int    `json:"redisDB,omitempty"`
-	MigrationID int  `json:"migrationId"`
+	QueueType   string `json:"queueType"` // bullmq, redis, rabbitmq
+	QueueName   string `json:"queueName"`
+	RedisHost   string `json:"redisHost,omitempty"`
+	RedisPort   int    `json:"redisPort,omitempty"`
+	RedisDB     int    `json:"redisDB,omitempty"`
+	MigrationID int    `json:"migrationId"`
 }
 
 // PauseQueue pauses queue processing on the source server.
@@ -182,6 +182,10 @@ func (e *QueueEngine) pauseBullMQ(ctx context.Context, config QueueConfig, state
 	if redisPort == 0 {
 		redisPort = 6379
 	}
+	targetRedisHost := config.RedisHost
+	if targetRedisHost == "" {
+		targetRedisHost = "127.0.0.1"
+	}
 
 	cmd := fmt.Sprintf("redis-cli -h %s -p %d SET bull:%s:paused 1 2>&1",
 		shared.ShellQuote(redisHost), redisPort, shared.ShellQuote(queueName))
@@ -209,6 +213,10 @@ func (e *QueueEngine) syncBullMQ(ctx context.Context, config QueueConfig, stateI
 	if redisPort == 0 {
 		redisPort = 6379
 	}
+	targetRedisHost := config.RedisHost
+	if targetRedisHost == "" {
+		targetRedisHost = "127.0.0.1"
+	}
 
 	// Dump BullMQ keys from source Redis
 	pattern := fmt.Sprintf("bull:%s:*", queueName)
@@ -231,7 +239,8 @@ func (e *QueueEngine) syncBullMQ(ctx context.Context, config QueueConfig, stateI
 			shared.ShellQuote(redisHost), redisPort, shared.ShellQuote(key))
 		dump, _, _, err := e.sourceSSH.ExecContext(ctx, dumpCmd)
 		if err != nil {
-			continue
+			e.repo.UpdateQueueState(ctx, stateID, true, 0, false, false, false, err.Error())
+			return fmt.Errorf("dump redis key %s: %w", key, err)
 		}
 
 		// Get TTL
@@ -245,9 +254,12 @@ func (e *QueueEngine) syncBullMQ(ctx context.Context, config QueueConfig, stateI
 
 		// Restore on target
 		restoreCmd := fmt.Sprintf("redis-cli -h %s -p %d RESTORE %s %s %s 2>&1",
-			shared.ShellQuote(config.RedisHost), redisPort,
+			shared.ShellQuote(targetRedisHost), redisPort,
 			shared.ShellQuote(key), ttl, shared.ShellQuote(dump))
-		e.targetSSH.ExecContext(ctx, restoreCmd)
+		if _, _, _, err := e.targetSSH.ExecContext(ctx, restoreCmd); err != nil {
+			e.repo.UpdateQueueState(ctx, stateID, true, 0, false, false, false, err.Error())
+			return fmt.Errorf("restore redis key %s: %w", key, err)
+		}
 	}
 
 	e.repo.UpdateQueueState(ctx, stateID, true, 0, true, true, false, "")

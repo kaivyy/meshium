@@ -102,7 +102,7 @@ func (f *fakeServerRepo) GetServerInfo(serverID int) (*server.ServerInfo, error)
 func (f *fakeServerRepo) GetRawServer(id int) (*server.Server, error) {
 	return f.GetByID(id)
 }
-func (f *fakeServerRepo) RecordConnection(entry server.ConnectionHistoryEntry) error {
+func (f *fakeServerRepo) RecordConnection(serverID int, success bool, durationMs int, reason string, remoteIP string, fingerprint string, authMethod string) error {
 	return nil
 }
 func (f *fakeServerRepo) GetConnectionHistory(serverID int, limit int) ([]server.ConnectionHistoryEntry, error) {
@@ -111,7 +111,16 @@ func (f *fakeServerRepo) GetConnectionHistory(serverID int, limit int) ([]server
 func (f *fakeServerRepo) GetConnectionMetrics(serverID int) (*server.ConnectionMetrics, error) {
 	return nil, nil
 }
-func (f *fakeServerRepo) UpdateAuthStatus(serverID int, status string, success bool) error {
+func (f *fakeServerRepo) UpdateAuthStatus(serverID int, authMethod string, credentialStatus string, fingerprint string) error {
+	return nil
+}
+func (f *fakeServerRepo) RemovePassword(serverID int) error {
+	return nil
+}
+func (f *fakeServerRepo) ClearSSHKey(serverID int) error {
+	return nil
+}
+func (f *fakeServerRepo) UpdateFingerprint(serverID int, fingerprint string) error {
 	return nil
 }
 func (f *fakeServerRepo) StoreServerKey(key server.ServerKey) (int, error) {

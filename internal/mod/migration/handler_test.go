@@ -10,8 +10,8 @@ import (
 // mockRepo implements Repo for testing.
 type mockRepo struct {
 	migrations []Migration
-	steps       []MigrationStepRecord
-	backups     []MigrationBackup
+	steps      []MigrationStepRecord
+	backups    []MigrationBackup
 }
 
 func (m *mockRepo) CreateMigration(sourceID, targetID int, categories []string) (int, error) {
@@ -20,7 +20,7 @@ func (m *mockRepo) CreateMigration(sourceID, targetID int, categories []string) 
 		ID:         id,
 		SourceID:   sourceID,
 		TargetID:   targetID,
-		Categories: `[` + strings.Join(categories, `,`) + `]`,
+		Categories: categories,
 		Status:     StatusPlanned,
 	})
 	return id, nil

@@ -10,6 +10,7 @@ import (
 	"net"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 
 	"meshium/internal/db"
@@ -71,6 +72,22 @@ func TestHandleCreateServer(t *testing.T) {
 	}
 	if server.Password != "" {
 		t.Error("password should not be in response")
+	}
+}
+
+func TestHandleListEmptyReturnsArray(t *testing.T) {
+	h, d := setupHandlerTest(t)
+	defer d.Close()
+
+	req := httptest.NewRequest(http.MethodGet, "/api/servers", nil)
+	w := httptest.NewRecorder()
+	h.handleList(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d", w.Code)
+	}
+	if got := strings.TrimSpace(w.Body.String()); got != "[]" {
+		t.Fatalf("expected empty JSON array, got %q", got)
 	}
 }
 

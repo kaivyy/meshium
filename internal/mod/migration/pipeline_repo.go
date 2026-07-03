@@ -110,13 +110,23 @@ func (r *sqliteRepo) CreateStage(ctx context.Context, migrationID int, stageName
 	res, err := r.db.Exec(
 		`INSERT INTO migration_stages (migration_id, stage_name, stage_index, state, started_at)
 		 VALUES (?, ?, ?, 'pending', CURRENT_TIMESTAMP)
-		 ON CONFLICT(migration_id, stage_name) DO UPDATE SET state = 'pending'`,
+		 ON CONFLICT(migration_id, stage_name) DO UPDATE SET
+			stage_index = excluded.stage_index,
+			state = 'pending',
+			error = '',
+			started_at = CURRENT_TIMESTAMP,
+			completed_at = NULL`,
 		migrationID, stageName, stageIndex,
 	)
 	if err != nil {
 		return 0, err
 	}
-	id, err := res.LastInsertId()
+	_ = res
+	var id int64
+	err = r.db.QueryRowContext(ctx,
+		`SELECT id FROM migration_stages WHERE migration_id = ? AND stage_name = ?`,
+		migrationID, stageName,
+	).Scan(&id)
 	return id, err
 }
 
@@ -378,6 +388,24 @@ func (r *sqliteRepo) UpdateTrafficSwitchState(ctx context.Context, id int64, sta
 	_, err := r.db.Exec(
 		`UPDATE traffic_switch_config SET switch_state = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?`,
 		state, id,
+	)
+	return err
+}
+
+func (r *sqliteRepo) UpdateTrafficSwitchConfig(ctx context.Context, cfg TrafficSwitchConfig) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	_, err := r.db.Exec(
+		`UPDATE traffic_switch_config SET
+			original_config = ?,
+			new_config = ?,
+			switch_state = ?,
+			health_check_url = ?,
+			rollback_config = ?,
+			updated_at = CURRENT_TIMESTAMP
+		 WHERE id = ?`,
+		cfg.OriginalConfig, cfg.NewConfig, cfg.SwitchState, cfg.HealthCheckURL, cfg.RollbackConfig, cfg.ID,
 	)
 	return err
 }

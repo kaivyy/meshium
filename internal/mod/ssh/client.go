@@ -52,6 +52,71 @@ func (c *Client) LastUsed() time.Time {
 	return c.lastUsed
 }
 
+func buildAuthMethods(cfg ServerConfig) ([]ssh.AuthMethod, error) {
+	var authMethods []ssh.AuthMethod
+
+	if cfg.UseAgent {
+		agentSock := os.Getenv("SSH_AUTH_SOCK")
+		if agentSock != "" {
+			agentConn, err := net.Dial("unix", agentSock)
+			if err == nil {
+				defer agentConn.Close()
+
+				agentClient := agent.NewClient(agentConn)
+				signers, err := agentClient.Signers()
+				if err == nil && len(signers) > 0 {
+					for _, signer := range signers {
+						authMethods = append(authMethods, ssh.PublicKeys(signer))
+					}
+				}
+			}
+		}
+	}
+
+	if len(cfg.PrivateKey) > 0 {
+		var signer ssh.Signer
+		var err error
+		if cfg.Passphrase != "" {
+			signer, err = ssh.ParsePrivateKeyWithPassphrase(cfg.PrivateKey, []byte(cfg.Passphrase))
+		} else {
+			signer, err = ssh.ParsePrivateKey(cfg.PrivateKey)
+		}
+		if err != nil {
+			return nil, fmt.Errorf("parse private key: %w", err)
+		}
+		authMethods = append(authMethods, ssh.PublicKeys(signer))
+	}
+
+	for _, keyData := range cfg.PrivateKeys {
+		var signer ssh.Signer
+		var err error
+		if cfg.Passphrase != "" {
+			signer, err = ssh.ParsePrivateKeyWithPassphrase(keyData, []byte(cfg.Passphrase))
+		} else {
+			signer, err = ssh.ParsePrivateKey(keyData)
+		}
+		if err == nil {
+			authMethods = append(authMethods, ssh.PublicKeys(signer))
+		}
+	}
+
+	if cfg.Password != "" {
+		authMethods = append(authMethods, ssh.Password(cfg.Password))
+	}
+
+	if cfg.KeyboardInteractive && cfg.Password != "" {
+		authMethods = append(authMethods, ssh.KeyboardInteractive(func(name, instruction string, questions []string, echos []bool) ([]string, error) {
+			answers := make([]string, len(questions))
+			for i := range questions {
+				answers[i] = cfg.Password
+			}
+			return answers, nil
+		}))
+	}
+
+	return authMethods, nil
+}
+
 // connect establishes an SSH connection.
 // If a bastion config is provided, the connection is tunneled through the bastion.
 func connect(cfg ServerConfig, hostKeyCallback ssh.HostKeyCallback) (*Client, error) {
@@ -172,7 +237,7 @@ func connect(cfg ServerConfig, hostKeyCallback ssh.HostKeyCallback) (*Client, er
 			bastionConn: bastionClient,
 			createdAt:   now,
 			timeouts:    timeouts,
-			lastUsed:     now,
+			lastUsed:    now,
 		}, nil
 	}
 

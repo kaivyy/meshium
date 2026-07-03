@@ -9,6 +9,7 @@ import (
 	"strconv"
 	"strings"
 
+	"meshium/internal/mod/auth"
 	"meshium/internal/shared"
 
 	"github.com/gorilla/websocket"
@@ -251,7 +252,7 @@ func (h *Handler) handlePlanWS(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	conn, err := h.upgrader.Upgrade(w, r, nil)
+	conn, err := h.upgradeWebSocket(w, r)
 	if err != nil {
 		log.Printf("websocket upgrade failed: %v", err)
 		return
@@ -305,7 +306,7 @@ func (h *Handler) handleMigrateWS(w http.ResponseWriter, r *http.Request) {
 		action = "rollback"
 	}
 
-	conn, err := h.upgrader.Upgrade(w, r, nil)
+	conn, err := h.upgradeWebSocket(w, r)
 	if err != nil {
 		log.Printf("websocket upgrade failed: %v", err)
 		return
@@ -384,7 +385,7 @@ func (h *Handler) handleDryRunWS(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	conn, err := h.upgrader.Upgrade(w, r, nil)
+	conn, err := h.upgradeWebSocket(w, r)
 	if err != nil {
 		log.Printf("websocket upgrade failed: %v", err)
 		return
@@ -476,7 +477,7 @@ func (h *Handler) handleDiffWS(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	conn, err := h.upgrader.Upgrade(w, r, nil)
+	conn, err := h.upgradeWebSocket(w, r)
 	if err != nil {
 		log.Printf("websocket upgrade failed: %v", err)
 		return
@@ -541,4 +542,12 @@ func isSameOrigin(origin, host string) bool {
 	originHost = strings.Split(originHost, ":")[0]
 	hostOnly := strings.Split(host, ":")[0]
 	return originHost == hostOnly || originHost == "localhost" || originHost == "127.0.0.1"
+}
+
+func (h *Handler) upgradeWebSocket(w http.ResponseWriter, r *http.Request) (*websocket.Conn, error) {
+	responseHeader := http.Header{}
+	if proto := auth.WebSocketSubprotocolToken(r); proto != "" {
+		responseHeader.Set("Sec-WebSocket-Protocol", proto)
+	}
+	return h.upgrader.Upgrade(w, r, responseHeader)
 }

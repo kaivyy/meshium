@@ -56,6 +56,7 @@
   $: warnings = plannerResult?.warnings || [];
   $: blockingCount = warnings.filter((w: any) => w.blocking).length;
   $: criticalIssues = compatIssues.filter((i: any) => i.blocking).length;
+  $: riskScore = plannerResult?.riskScore || 0;
 </script>
 
 {#if loading}
@@ -65,7 +66,7 @@
   </div>
 {:else if plannerResult}
   <!-- Risk Score Header -->
-  <div class="mb-6 p-4 rounded-lg border {plannerResult.riskScore > 50 ? 'border-red-200 bg-red-50' : plannerResult.riskScore > 25 ? 'border-yellow-200 bg-yellow-50' : 'border-green-200 bg-green-50'}">
+  <div class="mb-6 p-4 rounded-lg border {riskScore > 50 ? 'border-red-200 bg-red-50' : riskScore > 25 ? 'border-yellow-200 bg-yellow-50' : 'border-green-200 bg-green-50'}">
     <div class="flex items-center justify-between">
       <div>
         <h3 class="text-lg font-semibold">Migration Risk Assessment</h3>
@@ -76,8 +77,8 @@
         </p>
       </div>
       <div class="text-right">
-        <div class="text-3xl font-bold {riskColor(plannerResult.riskScore || 0)}">
-          {Math.round(plannerResult.riskScore || 0)}
+        <div class="text-3xl font-bold {riskColor(riskScore)}">
+          {Math.round(riskScore)}
         </div>
         <div class="text-xs text-gray-500">Risk Score</div>
       </div>

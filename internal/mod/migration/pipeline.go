@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"log"
 	"sort"
+	"strings"
 	"sync"
 	"time"
 
@@ -251,6 +252,11 @@ func (p *Pipeline) Execute(ctx context.Context, migrationID int, onProgress Step
 		if err := ctx.Err(); err != nil {
 			p.interruptPipeline(ctx, sm, migrationID, onProgress)
 			return err
+		}
+		state, stateErr := p.jobRepo.GetMigrationState(migrationID)
+		if stateErr == nil && state == StatePaused {
+			onProgress(WSMessage{Step: "pipeline", Status: "warning", Value: "Migration paused — checkpoint saved"})
+			return nil
 		}
 
 		stageName := string(stage.Name())
@@ -704,7 +710,8 @@ func (p *Pipeline) Rollback(ctx context.Context, migrationID int, onProgress Ste
 	copy(stages, p.stages)
 	p.mu.Unlock()
 
-	// Roll back stages in reverse order
+	rollbackErrors := make([]string, 0)
+
 	// Roll back stages in reverse order
 	for i := len(completedStages) - 1; i >= 0; i-- {
 		stage := completedStages[i]
@@ -717,15 +724,25 @@ func (p *Pipeline) Rollback(ctx context.Context, migrationID int, onProgress Ste
 					Value:  fmt.Sprintf("Rolling back stage: %s", stage.StageName),
 				})
 				if err := handler.Rollback(ctx, pc); err != nil {
+					rollbackErrors = append(rollbackErrors, fmt.Sprintf("%s: %v", stage.StageName, err))
 					onProgress(WSMessage{
 						Step:   stage.StageName,
-						Status: "warning",
-						Value:  fmt.Sprintf("Rollback warning for %s: %v", stage.StageName, err),
+						Status: "error",
+						Error:  fmt.Sprintf("Rollback failed for %s: %v", stage.StageName, err),
 					})
 				}
 				break
 			}
 		}
+	}
+
+	if len(rollbackErrors) > 0 {
+		err := fmt.Errorf("rollback failed: %s", strings.Join(rollbackErrors, "; "))
+		if stateErr := p.jobRepo.SetMigrationStateContext(ctx, migrationID, StateRollbackDegraded); stateErr != nil {
+			onProgress(WSMessage{Step: "rollback", Status: "warning", Value: fmt.Sprintf("Failed to persist rollback failed state: %v", stateErr)})
+		}
+		onProgress(WSMessage{Step: "rollback", Status: "error", Error: err.Error()})
+		return err
 	}
 
 	// Transition to RolledBack
@@ -991,11 +1008,7 @@ func (s *analysisStage) Name() PipelineStageName { return StageAnalysis }
 func (s *analysisStage) Execute(ctx context.Context, pc *PipelineContext) error {
 	pc.OnProgress(WSMessage{Step: "analysis", Status: "progress", Value: "Analyzing discovery data..."})
 
-	// Parse categories from migration
-	var categories []string
-	if err := json.Unmarshal([]byte(pc.Migration.Categories), &categories); err != nil {
-		return fmt.Errorf("failed to parse categories: %w", err)
-	}
+	categories := pc.Migration.Categories
 
 	// Build analysis result
 	analysis := map[string]interface{}{
@@ -1028,11 +1041,7 @@ func (s *planningStage) Name() PipelineStageName { return StagePlanning }
 func (s *planningStage) Execute(ctx context.Context, pc *PipelineContext) error {
 	pc.OnProgress(WSMessage{Step: "planning", Status: "progress", Value: "Collecting data from source..."})
 
-	// Parse categories
-	var categories []string
-	if err := json.Unmarshal([]byte(pc.Migration.Categories), &categories); err != nil {
-		return fmt.Errorf("failed to parse categories: %w", err)
-	}
+	categories := pc.Migration.Categories
 
 	// Collect data for each category from source
 	for _, catName := range categories {
@@ -1115,11 +1124,7 @@ func (s *preparationStage) Name() PipelineStageName { return StagePreparation }
 func (s *preparationStage) Execute(ctx context.Context, pc *PipelineContext) error {
 	pc.OnProgress(WSMessage{Step: "preparation", Status: "progress", Value: "Creating backups on target..."})
 
-	// Parse categories
-	var categories []string
-	if err := json.Unmarshal([]byte(pc.Migration.Categories), &categories); err != nil {
-		return fmt.Errorf("failed to parse categories: %w", err)
-	}
+	categories := pc.Migration.Categories
 
 	// Backup each category on target (MANDATORY — failure is fatal)
 	for _, catName := range categories {
@@ -1174,11 +1179,7 @@ func (s *initialSyncStage) Execute(ctx context.Context, pc *PipelineContext) err
 		return fmt.Errorf("failed to load migration steps: %w", err)
 	}
 
-	// Parse categories
-	var categories []string
-	if err := json.Unmarshal([]byte(pc.Migration.Categories), &categories); err != nil {
-		return fmt.Errorf("failed to parse categories: %w", err)
-	}
+	categories := pc.Migration.Categories
 	_ = categories
 
 	appliedOrder := make([]string, 0)
@@ -1383,14 +1384,11 @@ func (s *healthVerificationStage) Execute(ctx context.Context, pc *PipelineConte
 	}
 
 	// Check Docker containers if docker category is included
-	var categories []string
-	if err := json.Unmarshal([]byte(pc.Migration.Categories), &categories); err == nil {
-		for _, cat := range categories {
-			if cat == "docker" {
-				dockerOutput, _, _, err := pc.TargetSSH.ExecContext(ctx, "docker ps --format '{{.Names}} {{.Status}}' 2>/dev/null")
-				if err == nil && dockerOutput != "" {
-					pc.OnProgress(WSMessage{Step: "health_verification", Status: "progress", Value: fmt.Sprintf("Docker containers: %s", dockerOutput)})
-				}
+	for _, cat := range pc.Migration.Categories {
+		if cat == "docker" {
+			dockerOutput, _, _, err := pc.TargetSSH.ExecContext(ctx, "docker ps --format '{{.Names}} {{.Status}}' 2>/dev/null")
+			if err == nil && dockerOutput != "" {
+				pc.OnProgress(WSMessage{Step: "health_verification", Status: "progress", Value: fmt.Sprintf("Docker containers: %s", dockerOutput)})
 			}
 		}
 	}

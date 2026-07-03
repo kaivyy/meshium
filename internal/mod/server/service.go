@@ -139,6 +139,9 @@ func (s *Service) List(filter ListFilter) ([]Server, error) {
 	if err != nil {
 		return nil, err
 	}
+	if servers == nil {
+		return []Server{}, nil
+	}
 	for i := range servers {
 		servers[i].Password = ""
 		servers[i].SSHKey = ""
@@ -310,7 +313,12 @@ func (s *Service) GetAuthStatus(serverID int) (*AuthStatus, error) {
 
 // RecordConnectionHistory records a connection attempt in the history.
 func (s *Service) RecordConnectionHistory(entry ConnectionHistoryEntry) error {
-	return s.repo.RecordConnection(entry)
+	return s.RecordConnection(entry.ServerID, entry.Success, entry.DurationMs, entry.Reason, entry.RemoteIP, entry.Fingerprint, entry.AuthMethod)
+}
+
+// RecordConnection records a connection attempt and updates server counters.
+func (s *Service) RecordConnection(serverID int, success bool, durationMs int, reason string, remoteIP string, fingerprint string, authMethod string) error {
+	return s.repo.RecordConnection(serverID, success, durationMs, reason, remoteIP, fingerprint, authMethod)
 }
 
 // GetConnectionHistory returns connection history for a server.
@@ -394,28 +402,46 @@ func (s *Service) GetCredentialHealthScore(serverID int) (*CredentialHealthScore
 	}
 
 	return &CredentialHealthScore{
-		Score:              score,
-		Grade:              grade,
-		PasswordExists:     passwordExists,
-		KeyInstalled:       keyInstalled,
+		Score:               score,
+		Grade:               grade,
+		PasswordExists:      passwordExists,
+		KeyInstalled:        keyInstalled,
 		FingerprintVerified: fingerprintVerified,
-		KnownHost:          knownHost,
-		RecentSuccess:      recentSuccess,
-		RecentFailure:      recentFailure,
-		PassphraseEnabled:  passphraseEnabled,
-		BastionHealthy:     bastionHealthy,
-		AgentHealthy:       agentHealthy,
+		KnownHost:           knownHost,
+		RecentSuccess:       recentSuccess,
+		RecentFailure:       recentFailure,
+		PassphraseEnabled:   passphraseEnabled,
+		BastionHealthy:      bastionHealthy,
+		AgentHealthy:        agentHealthy,
 	}, nil
 }
 
 // UpdateCredentialStatus updates the credential status for a server.
 func (s *Service) UpdateCredentialStatus(serverID int, status string) error {
-	return s.repo.UpdateAuthStatus(serverID, status, false)
+	return s.repo.UpdateAuthStatus(serverID, "", status, "")
+}
+
+// UpdateAuthStatus updates auth metadata for a server.
+func (s *Service) UpdateAuthStatus(serverID int, authMethod string, credentialStatus string, fingerprint string) error {
+	return s.repo.UpdateAuthStatus(serverID, authMethod, credentialStatus, fingerprint)
 }
 
 // UpdateServerStats updates the success/failure stats for a server.
 func (s *Service) UpdateServerStats(serverID int, success bool) error {
-	return s.repo.UpdateAuthStatus(serverID, "", success)
+	if success {
+		return s.repo.UpdateAuthStatus(serverID, "", "valid", "")
+	}
+	return s.repo.UpdateAuthStatus(serverID, "", "auth_failed", "")
+}
+
+// RemovePassword removes the stored password for a server.
+func (s *Service) RemovePassword(serverID int) error {
+	return s.repo.RemovePassword(serverID)
+}
+
+// ClearSSHKey removes the stored SSH key and passphrase for a server.
+func (s *Service) ClearSSHKey(serverID int) error {
+	return s.repo.ClearSSHKey(serverID)
 }
 
 // GetServerKeys returns all SSH keys for a server.
@@ -449,14 +475,14 @@ func (s *Service) AddServerKey(serverID int, label, keyType, privateKey, passphr
 	// (In production, we'd parse the private key to get the public key and fingerprint)
 	// For now, we store what we can
 	id, err := s.repo.StoreServerKey(ServerKey{
-		ServerID:   serverID,
-		Label:      label,
-		KeyType:    keyType,
-		PublicKey:  "",
+		ServerID:    serverID,
+		Label:       label,
+		KeyType:     keyType,
+		PublicKey:   "",
 		Fingerprint: "",
-		Notes:      notes,
-		Enabled:    true,
-		Priority:   0,
+		Notes:       notes,
+		Enabled:     true,
+		Priority:    0,
 	})
 	if err != nil {
 		return nil, err
@@ -589,11 +615,11 @@ func (s *Service) ExportData() (map[string]interface{}, error) {
 	}
 
 	return map[string]interface{}{
-		"servers":       servers,
-		"knownHosts":    knownHosts,
-		"profiles":      profiles,
-		"authPriority":  authPriority,
-		"version":       "1.0",
-		"exportedAt":    "CURRENT_TIMESTAMP",
+		"servers":      servers,
+		"knownHosts":   knownHosts,
+		"profiles":     profiles,
+		"authPriority": authPriority,
+		"version":      "1.0",
+		"exportedAt":   "CURRENT_TIMESTAMP",
 	}, nil
 }

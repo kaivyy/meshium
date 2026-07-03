@@ -343,6 +343,22 @@ func (h *PipelineHandler) handlePipelineMigrationByID(w http.ResponseWriter, r *
 			return
 		}
 		h.handleGetCompatibility(w, r, id)
+	case "risk":
+		h.handleRiskByID(w, r, id)
+	case "health":
+		h.handleHealthByID(w, r, id)
+	case "replication":
+		h.handleReplicationByID(w, r, id)
+	case "traffic":
+		h.handleTrafficByID(w, r, id)
+	case "metrics":
+		h.handleMetricsByID(w, r, id)
+	case "audit":
+		h.handleAuditByID(w, r, id)
+	case "queue":
+		h.handleQueueByID(w, r, id)
+	case "provision":
+		h.handleProvisionByID(w, r, id)
 	case "strategy":
 		if r.Method != http.MethodGet {
 			shared.WriteError(w, http.StatusMethodNotAllowed, "method not allowed", "METHOD_NOT_ALLOWED")
@@ -496,7 +512,10 @@ func (h *PipelineHandler) handleRisk(w http.ResponseWriter, r *http.Request) {
 		shared.WriteError(w, http.StatusBadRequest, "invalid migration ID", "VALIDATION_ERROR")
 		return
 	}
+	h.handleRiskByID(w, r, id)
+}
 
+func (h *PipelineHandler) handleRiskByID(w http.ResponseWriter, r *http.Request, id int) {
 	if r.Method == http.MethodGet {
 		report, err := h.repo.GetRiskReport(id)
 		if err != nil {
@@ -574,7 +593,10 @@ func (h *PipelineHandler) handleHealth(w http.ResponseWriter, r *http.Request) {
 		shared.WriteError(w, http.StatusBadRequest, "invalid migration ID", "VALIDATION_ERROR")
 		return
 	}
+	h.handleHealthByID(w, r, id)
+}
 
+func (h *PipelineHandler) handleHealthByID(w http.ResponseWriter, r *http.Request, id int) {
 	if r.Method == http.MethodGet {
 		limit := 50
 		if l := r.URL.Query().Get("limit"); l != "" {
@@ -597,15 +619,18 @@ func (h *PipelineHandler) handleHealth(w http.ResponseWriter, r *http.Request) {
 // --- REST: Replication ---
 
 func (h *PipelineHandler) handleReplication(w http.ResponseWriter, r *http.Request) {
-	if r.Method != http.MethodGet {
-		shared.WriteError(w, http.StatusMethodNotAllowed, "method not allowed", "METHOD_NOT_ALLOWED")
-		return
-	}
-
 	path := strings.TrimPrefix(r.URL.Path, "/api/pipeline/replication/")
 	id, err := strconv.Atoi(strings.TrimSpace(path))
 	if err != nil {
 		shared.WriteError(w, http.StatusBadRequest, "invalid migration ID", "VALIDATION_ERROR")
+		return
+	}
+	h.handleReplicationByID(w, r, id)
+}
+
+func (h *PipelineHandler) handleReplicationByID(w http.ResponseWriter, r *http.Request, id int) {
+	if r.Method != http.MethodGet {
+		shared.WriteError(w, http.StatusMethodNotAllowed, "method not allowed", "METHOD_NOT_ALLOWED")
 		return
 	}
 
@@ -626,7 +651,10 @@ func (h *PipelineHandler) handleTraffic(w http.ResponseWriter, r *http.Request) 
 		shared.WriteError(w, http.StatusBadRequest, "invalid migration ID", "VALIDATION_ERROR")
 		return
 	}
+	h.handleTrafficByID(w, r, id)
+}
 
+func (h *PipelineHandler) handleTrafficByID(w http.ResponseWriter, r *http.Request, id int) {
 	if r.Method == http.MethodGet {
 		cfg, err := h.repo.GetTrafficSwitchConfig(id)
 		if err != nil {
@@ -647,15 +675,18 @@ func (h *PipelineHandler) handleTraffic(w http.ResponseWriter, r *http.Request) 
 // --- REST: Metrics ---
 
 func (h *PipelineHandler) handleMetrics(w http.ResponseWriter, r *http.Request) {
-	if r.Method != http.MethodGet {
-		shared.WriteError(w, http.StatusMethodNotAllowed, "method not allowed", "METHOD_NOT_ALLOWED")
-		return
-	}
-
 	path := strings.TrimPrefix(r.URL.Path, "/api/pipeline/metrics/")
 	id, err := strconv.Atoi(strings.TrimSpace(path))
 	if err != nil {
 		shared.WriteError(w, http.StatusBadRequest, "invalid migration ID", "VALIDATION_ERROR")
+		return
+	}
+	h.handleMetricsByID(w, r, id)
+}
+
+func (h *PipelineHandler) handleMetricsByID(w http.ResponseWriter, r *http.Request, id int) {
+	if r.Method != http.MethodGet {
+		shared.WriteError(w, http.StatusMethodNotAllowed, "method not allowed", "METHOD_NOT_ALLOWED")
 		return
 	}
 
@@ -677,15 +708,18 @@ func (h *PipelineHandler) handleMetrics(w http.ResponseWriter, r *http.Request) 
 // --- REST: Audit ---
 
 func (h *PipelineHandler) handleAudit(w http.ResponseWriter, r *http.Request) {
-	if r.Method != http.MethodGet {
-		shared.WriteError(w, http.StatusMethodNotAllowed, "method not allowed", "METHOD_NOT_ALLOWED")
-		return
-	}
-
 	path := strings.TrimPrefix(r.URL.Path, "/api/pipeline/audit/")
 	id, err := strconv.Atoi(strings.TrimSpace(path))
 	if err != nil {
 		shared.WriteError(w, http.StatusBadRequest, "invalid migration ID", "VALIDATION_ERROR")
+		return
+	}
+	h.handleAuditByID(w, r, id)
+}
+
+func (h *PipelineHandler) handleAuditByID(w http.ResponseWriter, r *http.Request, id int) {
+	if r.Method != http.MethodGet {
+		shared.WriteError(w, http.StatusMethodNotAllowed, "method not allowed", "METHOD_NOT_ALLOWED")
 		return
 	}
 
@@ -702,6 +736,33 @@ func (h *PipelineHandler) handleAudit(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	shared.WriteJSON(w, http.StatusOK, trail)
+}
+
+func (h *PipelineHandler) handleQueueByID(w http.ResponseWriter, r *http.Request, id int) {
+	if r.Method != http.MethodGet {
+		shared.WriteError(w, http.StatusMethodNotAllowed, "method not allowed", "METHOD_NOT_ALLOWED")
+		return
+	}
+	states, err := h.repo.GetQueueStates(id)
+	if err != nil {
+		shared.WriteError(w, http.StatusInternalServerError, "failed to get queue states", "INTERNAL")
+		return
+	}
+	shared.WriteJSON(w, http.StatusOK, states)
+}
+
+func (h *PipelineHandler) handleProvisionByID(w http.ResponseWriter, r *http.Request, id int) {
+	switch r.Method {
+	case http.MethodGet, http.MethodPost:
+		states, err := h.repo.GetProvisionStates(id)
+		if err != nil {
+			shared.WriteError(w, http.StatusInternalServerError, "failed to get provision states", "INTERNAL")
+			return
+		}
+		shared.WriteJSON(w, http.StatusOK, states)
+	default:
+		shared.WriteError(w, http.StatusMethodNotAllowed, "method not allowed", "METHOD_NOT_ALLOWED")
+	}
 }
 
 // --- REST: Event Replay ---

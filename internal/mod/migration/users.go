@@ -5,16 +5,17 @@ import (
 	"encoding/json"
 	"fmt"
 	"strings"
+	"time"
 
 	"meshium/internal/shared"
 )
 
 // UsersData holds collected users, groups, cron jobs, and firewall rules.
 type UsersData struct {
-	Users     []UserData        `json:"users"`
-	Groups    []GroupData       `json:"groups"`
-	CronJobs  map[string]string `json:"cronJobs"`  // user -> crontab content
-	Firewall  string            `json:"firewall"`
+	Users    []UserData        `json:"users"`
+	Groups   []GroupData       `json:"groups"`
+	CronJobs map[string]string `json:"cronJobs"` // user -> crontab content
+	Firewall string            `json:"firewall"`
 }
 
 // UsersBackup holds the target's original user/group/firewall state.
@@ -192,9 +193,12 @@ func (a *UsersApplier) Apply(ctx context.Context, ssh SSHExecuter, data Category
 
 	// Install cron jobs
 	for user, crontab := range ud.CronJobs {
-		// Use base64 encoding to safely transfer crontab content without injection risk
-		ssh.ExecContext(ctx, fmt.Sprintf("%s | crontab -u %s - 2>/dev/null",
-			shared.Base64EncodeForShell([]byte(crontab)), shared.ShellQuote(user)))
+		tmpPath := fmt.Sprintf("/tmp/meshium-crontab-%d", time.Now().UnixNano())
+		if err := ssh.Upload(strings.NewReader(crontab), tmpPath); err != nil {
+			return err
+		}
+		ssh.ExecContext(ctx, fmt.Sprintf("crontab -u %s %s 2>/dev/null && rm -f %s",
+			shared.ShellQuote(user), shared.ShellQuote(tmpPath), shared.ShellQuote(tmpPath)))
 	}
 
 	// Apply firewall rules

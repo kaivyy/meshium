@@ -79,7 +79,7 @@ func TestServicesApplierRollbackQuotesServiceNames(t *testing.T) {
 
 	applier := &ServicesApplier{}
 	backup, _ := json.Marshal(ServicesBackup{Services: []string{}})
-	if err := applier.Rollback(ssh, BackupData{Type: "services", Data: backup}); err != nil {
+	if err := applier.Rollback(context.Background(), ssh, BackupData{Type: "services", Data: backup}); err != nil {
 		t.Fatalf("Rollback failed: %v", err)
 	}
 	if !containsCommand(ssh.commands, "systemctl disable --now 'nginx' 2>/dev/null") {

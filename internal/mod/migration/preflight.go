@@ -123,8 +123,7 @@ func (e *Executor) PreFlight(ctx context.Context, migrationID int, onProgress St
 	}
 
 	// If Docker is part of the migration, ensure it exists on target.
-	var categories []string
-	if err := json.Unmarshal([]byte(migration.Categories), &categories); err == nil && contains(categories, "docker") {
+	if contains(migration.Categories, "docker") {
 		onProgress(WSMessage{Step: "preflight:docker", Status: "progress", Value: "Checking Docker availability..."})
 		stdout, stderr, exitCode, err = targetSSH.ExecContext(ctx, "which docker")
 		if err != nil || exitCode != 0 || strings.TrimSpace(stdout) == "" {
@@ -154,8 +153,8 @@ func (e *Executor) PreFlight(ctx context.Context, migrationID int, onProgress St
 }
 
 func (e *Executor) loadStoredDistroInfo(serverID int, migration *Migration, steps []MigrationStepRecord, side string) (DistroInfo, bool) {
-	if migration != nil && migration.Plan != "" {
-		if info, ok := distroInfoFromPlanJSON(migration.Plan, side); ok {
+	if migration != nil && migration.Plan != nil {
+		if info, ok := distroInfoFromPlan(*migration.Plan, side); ok {
 			return info, true
 		}
 	}
@@ -186,7 +185,10 @@ func distroInfoFromPlanJSON(planJSON, side string) (DistroInfo, bool) {
 	if err := json.Unmarshal([]byte(planJSON), &plan); err != nil {
 		return DistroInfo{}, false
 	}
+	return distroInfoFromPlan(plan, side)
+}
 
+func distroInfoFromPlan(plan MigrationPlan, side string) (DistroInfo, bool) {
 	switch side {
 	case "source":
 		if plan.Source.OS != "" {

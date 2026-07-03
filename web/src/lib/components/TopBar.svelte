@@ -34,7 +34,7 @@
   <!-- Right side -->
   <div class="flex items-center gap-3">
     <!-- Global search (placeholder) -->
-    <div class="hidden sm:flex items-center gap-2 rounded-lg border border-slate-200 bg-slate-50 px-3 py-1.5 text-sm text-slate-400 cursor-pointer hover:bg-slate-100 transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500" role="search" tabindex="0" aria-label="Search">
+    <div class="hidden sm:flex items-center gap-2 rounded-lg border border-slate-200 bg-slate-50 px-3 py-1.5 text-sm text-slate-400 cursor-pointer hover:bg-slate-100 transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500" role="search" aria-label="Search">
       <Search size={14} aria-hidden="true" />
       <span>Search...</span>
       <kbd class="ml-4 hidden lg:inline-flex h-5 items-center rounded border border-slate-300 bg-white px-1.5 text-[10px] font-medium text-slate-500" aria-hidden="true">⌘K</kbd>

@@ -293,12 +293,12 @@
         </div>
       {/if}
 
-      {#if !planning && planMessages.length === 0}
+      {#if !planning}
         <button
           on:click={startPlanning}
           class="w-full px-4 py-3 bg-blue-600 text-white rounded-lg font-medium hover:bg-blue-700"
         >
-          Create Migration Plan
+          {planMessages.length > 0 ? 'Retry Migration Plan' : 'Create Migration Plan'}
         </button>
       {:else if planning}
         <div class="flex items-center justify-center gap-2 text-sm text-slate-500">

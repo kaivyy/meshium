@@ -25,7 +25,7 @@ func (r *recordingSSH) ExecContext(ctx context.Context, cmd string) (string, str
 	return r.mockSSH.Exec(cmd)
 }
 
-func containsCommand(commands []string, want string) bool {
+func containsRecordedCommand(commands []string, want string) bool {
 	for _, cmd := range commands {
 		if cmd == want {
 			return true
@@ -58,16 +58,17 @@ func TestFreezeManager_FreezeMySQL(t *testing.T) {
 	if result.Method != "database_readonly" {
 		t.Fatalf("FreezeWrites() method = %q, want database_readonly", result.Method)
 	}
-	if !containsCommand(source.commands, `mysql -e "FLUSH TABLES WITH READ LOCK; SET GLOBAL read_only = ON;" 2>&1`) {
+	if !containsRecordedCommand(source.commands, `mysql -e "FLUSH TABLES WITH READ LOCK; SET GLOBAL read_only = ON;" 2>&1`) {
 		t.Fatalf("mysql freeze command not recorded: %#v", source.commands)
 	}
-	if !containsCommand(source.commands, `mysql -e "SHOW VARIABLES LIKE 'read_only'" -s -N 2>&1`) {
+	if !containsRecordedCommand(source.commands, `mysql -e "SHOW VARIABLES LIKE 'read_only'" -s -N 2>&1`) {
 		t.Fatalf("mysql verification command not recorded: %#v", source.commands)
 	}
 }
 
 func TestFreezeManager_FreezePostgreSQL(t *testing.T) {
 	source := newRecordingSSH()
+	source.execOutput[`sudo -u postgres psql -t -c "SHOW default_transaction_read_only;" 2>&1`] = "on\n"
 	mgr := NewFreezeManager(source, nil)
 
 	result, err := mgr.FreezeWrites(context.Background(), []DatabaseInfo{{Type: "postgresql", Port: 5432}})
@@ -77,8 +78,11 @@ func TestFreezeManager_FreezePostgreSQL(t *testing.T) {
 	if result == nil || !result.Success {
 		t.Fatalf("FreezeWrites() result = %+v, want success", result)
 	}
-	if !containsCommand(source.commands, `psql -c "ALTER DATABASE current_database() SET default_transaction_read_only = on;" 2>&1`) {
+	if !containsRecordedCommand(source.commands, `sudo -u postgres psql -c "ALTER SYSTEM SET default_transaction_read_only = on;" -c "SELECT pg_reload_conf();" 2>&1`) {
 		t.Fatalf("postgres freeze command not recorded: %#v", source.commands)
+	}
+	if !containsRecordedCommand(source.commands, `sudo -u postgres psql -t -c "SHOW default_transaction_read_only;" 2>&1`) {
+		t.Fatalf("postgres freeze verification command not recorded: %#v", source.commands)
 	}
 }
 
@@ -94,7 +98,7 @@ func TestFreezeManager_UnfreezeReverses(t *testing.T) {
 	if err := mgr.UnfreezeWrites(context.Background(), result); err != nil {
 		t.Fatalf("UnfreezeWrites() error = %v", err)
 	}
-	if !containsCommand(source.commands, `mysql -e "SET GLOBAL read_only = OFF; UNLOCK TABLES;" 2>&1`) {
+	if !containsRecordedCommand(source.commands, `mysql -e "SET GLOBAL read_only = OFF; UNLOCK TABLES;" 2>&1`) {
 		t.Fatalf("mysql unfreeze command not recorded: %#v", source.commands)
 	}
 }

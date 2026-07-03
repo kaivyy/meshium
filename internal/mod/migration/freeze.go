@@ -140,8 +140,7 @@ func (m *FreezeManager) freezePostgreSQL(ctx context.Context, db DatabaseInfo) e
 		return fmt.Errorf("source ssh not configured")
 	}
 
-	// SET default_transaction_read_only = on; — this affects new transactions.
-	cmd := `psql -c "ALTER DATABASE current_database() SET default_transaction_read_only = on;" 2>&1`
+	cmd := `sudo -u postgres psql -c "ALTER SYSTEM SET default_transaction_read_only = on;" -c "SELECT pg_reload_conf();" 2>&1`
 	_, _, exitCode, err := m.sourceSSH.ExecContext(ctx, cmd)
 	if err != nil || exitCode != 0 {
 		primaryErr := err
@@ -149,7 +148,7 @@ func (m *FreezeManager) freezePostgreSQL(ctx context.Context, db DatabaseInfo) e
 			primaryErr = fmt.Errorf("exit code %d", exitCode)
 		}
 
-		// Fallback: set the transaction default directly.
+		// Fallback: set the transaction default directly for the current session.
 		fallbackCmd := `psql -c "SET default_transaction_read_only = on;" 2>&1`
 		_, _, exitCode2, err2 := m.sourceSSH.ExecContext(ctx, fallbackCmd)
 		if err2 != nil || exitCode2 != 0 {
@@ -159,6 +158,12 @@ func (m *FreezeManager) freezePostgreSQL(ctx context.Context, db DatabaseInfo) e
 			return fmt.Errorf("postgresql freeze failed: %w (fallback also failed: %v)", primaryErr, err2)
 		}
 	}
+
+	verifyCmd := `sudo -u postgres psql -t -c "SHOW default_transaction_read_only;" 2>&1`
+	out, _, _, _ := m.sourceSSH.ExecContext(ctx, verifyCmd)
+	if strings.TrimSpace(strings.ToLower(out)) != "on" {
+		return fmt.Errorf("postgresql freeze verification failed: default_transaction_read_only not on")
+	}
 	return nil
 }
 
@@ -167,7 +172,7 @@ func (m *FreezeManager) unfreezePostgreSQL(ctx context.Context) error {
 		return fmt.Errorf("source ssh not configured")
 	}
 
-	cmd := `psql -c "ALTER DATABASE current_database() SET default_transaction_read_only = off;" 2>&1`
+	cmd := `sudo -u postgres psql -c "ALTER SYSTEM SET default_transaction_read_only = off;" -c "SELECT pg_reload_conf();" 2>&1`
 	_, _, exitCode, err := m.sourceSSH.ExecContext(ctx, cmd)
 	if err != nil || exitCode != 0 {
 		if err == nil {

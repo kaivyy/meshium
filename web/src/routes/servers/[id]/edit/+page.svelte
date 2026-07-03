@@ -28,7 +28,7 @@
   let loading = false;
   let loadingServer = true;
 
-  const serverId = parseInt($page.params.id, 10);
+  const serverId = parseInt($page.params.id ?? '0', 10);
 
   onMount(async () => {
     try {

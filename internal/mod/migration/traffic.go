@@ -45,28 +45,46 @@ func (e *TrafficSwitchEngine) Switch(ctx context.Context, migrationID int, cfg T
 	cfg.OriginalConfig = original
 
 	// Store in database
-	if _, err := e.repo.CreateTrafficSwitchConfig(ctx, cfg); err != nil {
+	configID, err := e.repo.CreateTrafficSwitchConfig(ctx, cfg)
+	if err != nil {
 		return fmt.Errorf("save traffic switch config: %w", err)
 	}
+	cfg.ID = configID
 
+	var switchErr error
 	switch cfg.Provider {
 	case TrafficProviderCloudflare:
-		return e.switchCloudflare(ctx, &cfg)
+		switchErr = e.switchCloudflare(ctx, &cfg)
 	case TrafficProviderNginx:
-		return e.switchNginx(ctx, &cfg)
+		switchErr = e.switchNginx(ctx, &cfg)
 	case TrafficProviderTraefik:
-		return e.switchTraefik(ctx, &cfg)
+		switchErr = e.switchTraefik(ctx, &cfg)
 	case TrafficProviderHAProxy:
-		return e.switchHAProxy(ctx, &cfg)
+		switchErr = e.switchHAProxy(ctx, &cfg)
 	case TrafficProviderCaddy:
-		return e.switchCaddy(ctx, &cfg)
+		switchErr = e.switchCaddy(ctx, &cfg)
 	case TrafficProviderDocker:
-		return e.switchDocker(ctx, &cfg)
+		switchErr = e.switchDocker(ctx, &cfg)
 	case TrafficProviderDNS:
-		return e.switchDNS(ctx, &cfg)
+		switchErr = e.switchDNS(ctx, &cfg)
 	default:
 		return fmt.Errorf("unsupported traffic provider: %s", cfg.Provider)
 	}
+
+	if switchErr != nil {
+		_ = e.repo.UpdateTrafficSwitchState(ctx, configID, "failed")
+		return switchErr
+	}
+
+	cfg.SwitchState = "switched"
+	if updater, ok := e.repo.(interface {
+		UpdateTrafficSwitchConfig(context.Context, TrafficSwitchConfig) error
+	}); ok {
+		if err := updater.UpdateTrafficSwitchConfig(ctx, cfg); err != nil {
+			return fmt.Errorf("persist traffic switch config: %w", err)
+		}
+	}
+	return nil
 }
 
 // Rollback reverts traffic back to the source server.
@@ -265,7 +283,7 @@ func (e *TrafficSwitchEngine) createCloudflareRecord(ctx context.Context, apiTok
 
 func (e *TrafficSwitchEngine) rollbackCloudflare(ctx context.Context, cfg *TrafficSwitchConfig) error {
 	var rollback struct {
-		RecordID       string `json:"record_id"`
+		RecordID        string `json:"record_id"`
 		OriginalContent string `json:"original_content"`
 	}
 	if err := json.Unmarshal([]byte(cfg.RollbackConfig), &rollback); err != nil {
@@ -354,6 +372,14 @@ func (e *TrafficSwitchEngine) rollbackNginx(ctx context.Context, cfg *TrafficSwi
 		return nil
 	}
 	configPath := "/etc/nginx/nginx.conf"
+	if cfg.NewConfig != "" {
+		var nc struct {
+			ConfigPath string `json:"configPath"`
+		}
+		if err := json.Unmarshal([]byte(cfg.NewConfig), &nc); err == nil && nc.ConfigPath != "" {
+			configPath = nc.ConfigPath
+		}
+	}
 	if err := e.targetSSH.Upload(bytes.NewReader([]byte(cfg.OriginalConfig)), configPath); err != nil {
 		return fmt.Errorf("restore nginx config: %w", err)
 	}
@@ -465,7 +491,15 @@ func (e *TrafficSwitchEngine) getHAProxyConfig(ctx context.Context) (string, err
 // --- Traefik ---
 
 func (e *TrafficSwitchEngine) switchTraefik(ctx context.Context, cfg *TrafficSwitchConfig) error {
-	configPath := "/etc/traefik/traefik.yml"
+	configPath := "/etc/traefik/dynamic.yml"
+	if cfg.NewConfig != "" {
+		var tc struct {
+			DynamicPath string `json:"dynamicPath"`
+		}
+		if err := json.Unmarshal([]byte(cfg.NewConfig), &tc); err == nil && tc.DynamicPath != "" {
+			configPath = tc.DynamicPath
+		}
+	}
 	currentConfig, _, _, err := e.targetSSH.ExecContext(ctx, fmt.Sprintf("cat %s 2>/dev/null || echo ''", shared.ShellQuote(configPath)))
 	if err != nil {
 		return fmt.Errorf("read traefik config: %w", err)
@@ -473,9 +507,8 @@ func (e *TrafficSwitchEngine) switchTraefik(ctx context.Context, cfg *TrafficSwi
 	cfg.OriginalConfig = currentConfig
 
 	// Update the dynamic config file
-	dynamicPath := "/etc/traefik/dynamic.yml"
 	if cfg.NewConfig != "" {
-		if err := e.targetSSH.Upload(bytes.NewReader([]byte(cfg.NewConfig)), dynamicPath); err != nil {
+		if err := e.targetSSH.Upload(bytes.NewReader([]byte(cfg.NewConfig)), configPath); err != nil {
 			return fmt.Errorf("upload traefik dynamic config: %w", err)
 		}
 	}
@@ -489,7 +522,17 @@ func (e *TrafficSwitchEngine) rollbackTraefik(ctx context.Context, cfg *TrafficS
 		return nil
 	}
 	dynamicPath := "/etc/traefik/dynamic.yml"
-	e.targetSSH.Upload(bytes.NewReader([]byte(cfg.OriginalConfig)), dynamicPath)
+	if cfg.NewConfig != "" {
+		var tc struct {
+			DynamicPath string `json:"dynamicPath"`
+		}
+		if err := json.Unmarshal([]byte(cfg.NewConfig), &tc); err == nil && tc.DynamicPath != "" {
+			dynamicPath = tc.DynamicPath
+		}
+	}
+	if err := e.targetSSH.Upload(bytes.NewReader([]byte(cfg.OriginalConfig)), dynamicPath); err != nil {
+		return fmt.Errorf("restore traefik dynamic config: %w", err)
+	}
 	return nil
 }
 
@@ -535,6 +578,14 @@ func (e *TrafficSwitchEngine) rollbackDocker(ctx context.Context, cfg *TrafficSw
 	}
 	// Restore and restart
 	composePath := "docker-compose.yml"
+	if cfg.NewConfig != "" {
+		var dc struct {
+			ComposePath string `json:"composePath"`
+		}
+		if err := json.Unmarshal([]byte(cfg.NewConfig), &dc); err == nil && dc.ComposePath != "" {
+			composePath = dc.ComposePath
+		}
+	}
 	if err := e.targetSSH.Upload(bytes.NewReader([]byte(cfg.OriginalConfig)), composePath); err != nil {
 		return fmt.Errorf("restore docker-compose.yml: %w", err)
 	}

@@ -7,6 +7,7 @@ import (
 	"strings"
 	"time"
 
+	"meshium/internal/mod/auth"
 	"meshium/internal/shared"
 
 	"github.com/gorilla/websocket"
@@ -49,7 +50,11 @@ func (h *Handler) handleConnect(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	conn, err := upgrader.Upgrade(w, r, nil)
+	responseHeader := http.Header{}
+	if proto := auth.WebSocketSubprotocolToken(r); proto != "" {
+		responseHeader.Set("Sec-WebSocket-Protocol", proto)
+	}
+	conn, err := upgrader.Upgrade(w, r, responseHeader)
 	if err != nil {
 		shared.Log.Error("websocket upgrade failed", "error", err, "path", r.URL.Path)
 		return
@@ -64,7 +69,19 @@ func (h *Handler) handleConnect(w http.ResponseWriter, r *http.Request) {
 	ctx, cancel := context.WithCancel(r.Context())
 	defer cancel()
 
+	go func() {
+		for {
+			if _, _, err := conn.NextReader(); err != nil {
+				cancel()
+				return
+			}
+		}
+	}()
+
 	if err := h.svc.RunConnectionTest(ctx, serverID, func(msg WSMessage) {
+		if ctx.Err() != nil {
+			return
+		}
 		if err := writeJSONWithDeadline(conn, msg); err != nil {
 			shared.Log.Error("websocket write failed", "error", err, "serverID", serverID)
 			_ = conn.Close()

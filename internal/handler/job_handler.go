@@ -261,7 +261,7 @@ func (h *JobHandler) handleJobProgressWS(w http.ResponseWriter, r *http.Request)
 	parts := strings.Split(path, "/")
 	jobID := parts[0]
 
-	conn, err := h.upgrader.Upgrade(w, r, nil)
+	conn, err := upgradeWebSocket(h.upgrader, w, r)
 	if err != nil {
 		log.Printf("websocket upgrade failed: %v", err)
 		return

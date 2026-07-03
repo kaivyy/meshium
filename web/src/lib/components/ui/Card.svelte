@@ -1,7 +1,7 @@
 <script lang="ts">
   import type { Snippet } from 'svelte';
 
-  type Padding = 'sm' | 'md' | 'lg';
+  type Padding = 'none' | 'sm' | 'md' | 'lg';
 
   interface Props {
     padding?: Padding;
@@ -12,7 +12,7 @@
   let { padding = 'md', hoverable = false, children }: Props = $props();
 
   const paddingClass = $derived(
-    padding === 'sm' ? 'p-3' : padding === 'lg' ? 'p-6' : 'p-4 sm:p-5'
+    padding === 'none' ? '' : padding === 'sm' ? 'p-3' : padding === 'lg' ? 'p-6' : 'p-4 sm:p-5'
   );
 
   const interactiveClass = $derived(

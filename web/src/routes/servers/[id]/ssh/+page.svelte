@@ -68,7 +68,7 @@
     status?: string;
   }
 
-  const serverId = parseInt($page.params.id, 10);
+  const serverId = parseInt($page.params.id ?? '0', 10);
 
   let server: Server | null = null;
   let authStatus: AuthStatus | null = null;
@@ -108,12 +108,12 @@
 
     try {
       const [serverData, statusData, healthData, keysData, retryData, agentData] = await Promise.all([
-        api.get<Server>(`/servers/${serverId}`),
-        api.get<AuthStatus>(`/servers/${serverId}/auth-status`),
-        api.get<CredentialHealthScore>(`/servers/${serverId}/credential-health`),
-        api.get(`/servers/${serverId}/keys`).catch(() => [] as Array<ServerKey>),
-        api.get<RetryConfig>(`/servers/${serverId}/retry-config`).catch(() => null),
-        api.get<AgentConfig>(`/servers/${serverId}/agent-config`).catch(() => null)
+        api.get(`/servers/${serverId}`) as Promise<Server>,
+        api.get(`/servers/${serverId}/auth-status`) as Promise<AuthStatus>,
+        api.get(`/servers/${serverId}/credential-health`) as Promise<CredentialHealthScore>,
+        (api.get(`/servers/${serverId}/keys`) as Promise<ServerKey[]>).catch(() => [] as Array<ServerKey>),
+        (api.get(`/servers/${serverId}/retry-config`) as Promise<RetryConfig>).catch(() => null),
+        (api.get(`/servers/${serverId}/agent-config`) as Promise<AgentConfig>).catch(() => null)
       ]);
 
       server = serverData;
@@ -167,12 +167,12 @@
 
     try {
       if (method === 'PUT') {
-        return body ? await api.put<T>(path, body) : await api.put<T>(path);
+        return body ? await api.put(path, body) as T : await api.put(path) as T;
       }
       if (method === 'DELETE') {
-        return await api.delete<T>(path);
+        return await api.delete(path) as T;
       }
-      return body ? await api.post<T>(path, body) : await api.post<T>(path);
+      return body ? await api.post(path, body) as T : await api.post(path) as T;
     } catch (e) {
       error = e instanceof Error ? e.message : 'Request failed';
       return null;
@@ -403,8 +403,8 @@
               <p class="text-xs font-semibold uppercase tracking-wide text-slate-500">Server Stats</p>
               <p class="mt-2 text-sm text-slate-700">Successes: {server.successCount}</p>
               <p class="mt-1 text-sm text-slate-700">Failures: {server.failureCount}</p>
-              <p class="mt-1 text-sm text-slate-700">Last success: {formatDate(server.lastSuccess)}</p>
-              <p class="mt-1 text-sm text-slate-700">Last failure: {formatDate(server.lastFailure)}</p>
+              <p class="mt-1 text-sm text-slate-700">Last success: {formatDate(server.lastSuccess || '')}</p>
+              <p class="mt-1 text-sm text-slate-700">Last failure: {formatDate(server.lastFailure || '')}</p>
             </div>
           </div>
         </div>
@@ -469,28 +469,28 @@
             <div class="mb-5 rounded-2xl border border-slate-200 bg-slate-50 p-4">
               <div class="grid gap-4 md:grid-cols-2">
                 <div>
-                  <label class="mb-1 block text-sm font-medium text-slate-700">Label *</label>
-                  <input bind:value={newKeyLabel} class="w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-slate-900 shadow-sm outline-none transition focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20" placeholder="Production deploy key" />
+                  <label for="server-key-label" class="mb-1 block text-sm font-medium text-slate-700">Label *</label>
+                  <input id="server-key-label" bind:value={newKeyLabel} class="w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-slate-900 shadow-sm outline-none transition focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20" placeholder="Production deploy key" />
                 </div>
                 <div>
-                  <label class="mb-1 block text-sm font-medium text-slate-700">Key Type</label>
-                  <select bind:value={newKeyType} class="w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-slate-900 shadow-sm outline-none transition focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20">
+                  <label for="server-key-type" class="mb-1 block text-sm font-medium text-slate-700">Key Type</label>
+                  <select id="server-key-type" bind:value={newKeyType} class="w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-slate-900 shadow-sm outline-none transition focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20">
                     <option value="ed25519">ed25519</option>
                     <option value="rsa">rsa</option>
                     <option value="ecdsa">ecdsa</option>
                   </select>
                 </div>
                 <div class="md:col-span-2">
-                  <label class="mb-1 block text-sm font-medium text-slate-700">Private Key *</label>
-                  <textarea bind:value={newPrivateKey} rows="6" class="w-full rounded-lg border border-slate-300 bg-white px-3 py-2 font-mono text-sm text-slate-900 shadow-sm outline-none transition focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20" placeholder="-----BEGIN OPENSSH PRIVATE KEY-----"></textarea>
+                  <label for="server-private-key" class="mb-1 block text-sm font-medium text-slate-700">Private Key *</label>
+                  <textarea id="server-private-key" bind:value={newPrivateKey} rows="6" class="w-full rounded-lg border border-slate-300 bg-white px-3 py-2 font-mono text-sm text-slate-900 shadow-sm outline-none transition focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20" placeholder="-----BEGIN OPENSSH PRIVATE KEY-----"></textarea>
                 </div>
                 <div>
-                  <label class="mb-1 block text-sm font-medium text-slate-700">Passphrase</label>
-                  <input type="password" bind:value={newPassphrase} class="w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-slate-900 shadow-sm outline-none transition focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20" placeholder="Optional passphrase" />
+                  <label for="server-key-passphrase" class="mb-1 block text-sm font-medium text-slate-700">Passphrase</label>
+                  <input id="server-key-passphrase" type="password" bind:value={newPassphrase} class="w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-slate-900 shadow-sm outline-none transition focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20" placeholder="Optional passphrase" />
                 </div>
                 <div>
-                  <label class="mb-1 block text-sm font-medium text-slate-700">Notes</label>
-                  <input bind:value={newNotes} class="w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-slate-900 shadow-sm outline-none transition focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20" placeholder="Who uses this key" />
+                  <label for="server-key-notes" class="mb-1 block text-sm font-medium text-slate-700">Notes</label>
+                  <input id="server-key-notes" bind:value={newNotes} class="w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-slate-900 shadow-sm outline-none transition focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20" placeholder="Who uses this key" />
                 </div>
               </div>
               <div class="mt-4 flex flex-wrap gap-3">
@@ -574,36 +574,36 @@
 
             <div class="grid gap-4 md:grid-cols-2">
               <div>
-                <label class="mb-1 block text-sm font-medium text-slate-700">Retry Count</label>
-                <input type="number" bind:value={retryCount} min="0" class="w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-slate-900 shadow-sm outline-none transition focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20" />
+                <label for="server-retry-count" class="mb-1 block text-sm font-medium text-slate-700">Retry Count</label>
+                <input id="server-retry-count" type="number" bind:value={retryCount} min="0" class="w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-slate-900 shadow-sm outline-none transition focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20" />
               </div>
               <div>
-                <label class="mb-1 block text-sm font-medium text-slate-700">Retry Delay (ms)</label>
-                <input type="number" bind:value={retryDelayMs} min="0" class="w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-slate-900 shadow-sm outline-none transition focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20" />
+                <label for="server-retry-delay" class="mb-1 block text-sm font-medium text-slate-700">Retry Delay (ms)</label>
+                <input id="server-retry-delay" type="number" bind:value={retryDelayMs} min="0" class="w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-slate-900 shadow-sm outline-none transition focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20" />
               </div>
               <div>
-                <label class="mb-1 block text-sm font-medium text-slate-700">Backoff Strategy</label>
-                <select bind:value={backoffStrategy} class="w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-slate-900 shadow-sm outline-none transition focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20">
+                <label for="server-backoff-strategy" class="mb-1 block text-sm font-medium text-slate-700">Backoff Strategy</label>
+                <select id="server-backoff-strategy" bind:value={backoffStrategy} class="w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-slate-900 shadow-sm outline-none transition focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20">
                   <option value="exponential">Exponential</option>
                   <option value="linear">Linear</option>
                   <option value="fixed">Fixed</option>
                 </select>
               </div>
               <div>
-                <label class="mb-1 block text-sm font-medium text-slate-700">Jitter (ms)</label>
-                <input type="number" bind:value={jitterMs} min="0" class="w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-slate-900 shadow-sm outline-none transition focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20" />
+                <label for="server-jitter" class="mb-1 block text-sm font-medium text-slate-700">Jitter (ms)</label>
+                <input id="server-jitter" type="number" bind:value={jitterMs} min="0" class="w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-slate-900 shadow-sm outline-none transition focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20" />
               </div>
               <div class="md:col-span-2">
-                <label class="mb-1 block text-sm font-medium text-slate-700">Reconnect Policy</label>
-                <select bind:value={reconnectPolicy} class="w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-slate-900 shadow-sm outline-none transition focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20">
+                <label for="server-reconnect-policy" class="mb-1 block text-sm font-medium text-slate-700">Reconnect Policy</label>
+                <select id="server-reconnect-policy" bind:value={reconnectPolicy} class="w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-slate-900 shadow-sm outline-none transition focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20">
                   <option value="always">Always</option>
                   <option value="on-failure">On failure</option>
                   <option value="never">Never</option>
                 </select>
               </div>
               <div class="md:col-span-2">
-                <label class="mb-1 block text-sm font-medium text-slate-700">Auth Retry Order</label>
-                <input bind:value={authRetryOrder} class="w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-slate-900 shadow-sm outline-none transition focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20" placeholder="agent,ed25519,rsa,password" />
+                <label for="server-auth-retry-order" class="mb-1 block text-sm font-medium text-slate-700">Auth Retry Order</label>
+                <input id="server-auth-retry-order" bind:value={authRetryOrder} class="w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-slate-900 shadow-sm outline-none transition focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20" placeholder="agent,ed25519,rsa,password" />
               </div>
             </div>
 
@@ -628,8 +628,8 @@
                 <input type="checkbox" bind:checked={useAgent} /> Use agent
               </label>
               <div>
-                <label class="mb-1 block text-sm font-medium text-slate-700">Preferred Identity</label>
-                <input bind:value={preferredIdentity} class="w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-slate-900 shadow-sm outline-none transition focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20" placeholder="Fingerprint or comment" />
+                <label for="server-preferred-identity" class="mb-1 block text-sm font-medium text-slate-700">Preferred Identity</label>
+                <input id="server-preferred-identity" bind:value={preferredIdentity} class="w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-slate-900 shadow-sm outline-none transition focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20" placeholder="Fingerprint or comment" />
               </div>
               <label class="flex items-center gap-2 text-sm font-medium text-slate-700">
                 <input type="checkbox" bind:checked={agentForwarding} /> Agent forwarding

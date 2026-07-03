@@ -71,3 +71,124 @@ export const api = {
   delete: <T>(path: string) => request<T>('DELETE', path),
   patch: <T>(path: string, body?: unknown) => request<T>('PATCH', path, body)
 };
+
+export interface AuthDashboard {
+  passwordServers: number;
+  keyServers: number;
+  agentServers: number;
+  bastionServers: number;
+  fingerprintChanged: number;
+  unknownHosts: number;
+  credentialWarnings: number;
+  expiredKeys: number;
+  authFailures: number;
+  authSuccessRate: number;
+  connectionSuccessRate: number;
+  averageLatency: number;
+  medianLatency: number;
+  p95Latency: number;
+  p99Latency: number;
+}
+
+export interface AuthPriorityEntry {
+  method: string;
+  priority: number;
+  enabled: boolean;
+}
+
+export interface ConnectionHistoryEntry {
+  id: number;
+  serverId: number;
+  success: boolean;
+  durationMs: number;
+  reason: string;
+  remoteIp: string;
+  fingerprint: string;
+  authMethod: string;
+  createdAt: string;
+}
+
+export interface ConnectionProfile {
+  id: number;
+  name: string;
+  description: string;
+  timeoutSeconds: number;
+  retryCount: number;
+  retryDelayMs: number;
+  backoffStrategy: string;
+  keepaliveSeconds: number;
+  reconnectEnabled: boolean;
+  bufferSizeKb: number;
+  compression: boolean;
+  parallelism: number;
+  isBuiltin: boolean;
+}
+
+export interface CredentialHealthScore {
+  score: number;
+  grade: string;
+  passwordExists: boolean;
+  keyInstalled: boolean;
+  fingerprintVerified: boolean;
+  knownHost: boolean;
+  recentSuccess: boolean;
+  recentFailure: boolean;
+  keyAge?: string;
+  passphraseEnabled: boolean;
+  bastionHealthy: boolean;
+  agentHealthy: boolean;
+}
+
+export interface HostKeyChange {
+  id: number;
+  host: string;
+  port: number;
+  oldFingerprint: string;
+  newFingerprint: string;
+  riskLevel: string;
+  actionTaken: string;
+  serverId: number;
+  timestamp: string;
+}
+
+export interface KnownHostEntry {
+  host: string;
+  port: number;
+  hostKey: string;
+  fingerprintSha256: string;
+  fingerprintMd5: string;
+  algorithm: string;
+  bits: number;
+  status: string;
+  verified: boolean;
+  serverId: number;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface SSHAgentStatus {
+  available: boolean;
+  socketPath?: string;
+  identities: Array<{ fingerprintSha256: string; type: string; comment?: string }>;
+}
+
+export const sshApi = {
+  listKnownHosts: () => api.get<KnownHostEntry[]>('/known-hosts'),
+  removeKnownHost: (host: string, port: number) => api.delete(`/known-hosts/${encodeURIComponent(host)}/${port}`),
+  listConnectionProfiles: () => api.get<ConnectionProfile[]>('/connection-profiles'),
+  createConnectionProfile: (profile: ConnectionProfile) => api.post<ConnectionProfile>('/connection-profiles', profile),
+  updateConnectionProfile: (id: number, profile: ConnectionProfile) => api.put(`/connection-profiles/${id}`, profile),
+  deleteConnectionProfile: (id: number) => api.delete(`/connection-profiles/${id}`),
+  getAuthPriority: () => api.get<AuthPriorityEntry[]>('/auth-priority'),
+  setAuthPriority: (entries: AuthPriorityEntry[]) => api.put('/auth-priority', entries),
+  getDashboard: () => api.get<AuthDashboard>('/dashboard'),
+  getSSHAgentStatus: () => api.get<SSHAgentStatus>('/ssh-agent/status'),
+  listHostKeyChanges: (limit = 100) => api.get<HostKeyChange[]>(`/host-key-changes?limit=${limit}`)
+};
+
+export const serverApi = {
+  getConnectionHistory: (serverId: number, limit = 100) =>
+    api.get<ConnectionHistoryEntry[]>(`/servers/${serverId}/history?limit=${limit}`),
+  getCredentialHealth: (serverId: number) =>
+    api.get<CredentialHealthScore>(`/servers/${serverId}/credential-health`)
+};

@@ -9,15 +9,20 @@ import (
 )
 
 type Handler struct {
-	svc       *Service
-	limiter   *shared.RateLimiter
+	svc            *Service
+	limiter        *shared.RateLimiter
+	sessionManager *SessionManager
 }
 
-func NewHandler(svc *Service) *Handler {
+func NewHandler(svc *Service, managers ...*SessionManager) *Handler {
 	// 5 attempts per minute for auth endpoints (brute force protection)
 	limiter := shared.NewRateLimiter(5, time.Minute)
 	limiter.StartCleanup(5 * time.Minute)
-	return &Handler{svc: svc, limiter: limiter}
+	var manager *SessionManager
+	if len(managers) > 0 {
+		manager = managers[0]
+	}
+	return &Handler{svc: svc, limiter: limiter, sessionManager: manager}
 }
 
 func (h *Handler) RegisterRoutes(mux *http.ServeMux) {
@@ -72,6 +77,9 @@ func (h *Handler) handleSetup(w http.ResponseWriter, r *http.Request) {
 	}
 
 	token := h.svc.GetSessionToken()
+	if h.sessionManager != nil {
+		h.sessionManager.Set(token)
+	}
 	shared.WriteJSON(w, http.StatusOK, AuthResponse{Status: "ok", SessionToken: token})
 }
 
@@ -103,6 +111,9 @@ func (h *Handler) handleUnlock(w http.ResponseWriter, r *http.Request) {
 		shared.WriteError(w, http.StatusUnauthorized, "invalid password", "AUTH_FAILED")
 		return
 	}
+	if h.sessionManager != nil {
+		h.sessionManager.Set(token)
+	}
 
 	shared.WriteJSON(w, http.StatusOK, AuthResponse{Status: "ok", SessionToken: token})
 }
@@ -114,6 +125,9 @@ func (h *Handler) handleLock(w http.ResponseWriter, r *http.Request) {
 	}
 
 	h.svc.Lock()
+	if h.sessionManager != nil {
+		h.sessionManager.Clear()
+	}
 	shared.WriteJSON(w, http.StatusOK, map[string]string{"status": "ok"})
 }
 

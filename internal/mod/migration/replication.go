@@ -29,15 +29,15 @@ func NewReplicationEngine(sourceSSH, targetSSH SSHExecuter, repo PipelineRepo) *
 
 // ReplicationConfig configures database replication.
 type ReplicationConfig struct {
-	DatabaseType   string `json:"databaseType"`
-	DatabaseName   string `json:"databaseName,omitempty"`
-	SourceHost     string `json:"sourceHost"`
-	SourcePort     int    `json:"sourcePort"`
-	TargetHost     string `json:"targetHost"`
-	TargetPort     int    `json:"targetPort"`
+	DatabaseType    string `json:"databaseType"`
+	DatabaseName    string `json:"databaseName,omitempty"`
+	SourceHost      string `json:"sourceHost"`
+	SourcePort      int    `json:"sourcePort"`
+	TargetHost      string `json:"targetHost"`
+	TargetPort      int    `json:"targetPort"`
 	ReplicationUser string `json:"replicationUser,omitempty"`
 	ReplicationPass string `json:"replicationPass,omitempty"`
-	MigrationID    int    `json:"migrationId"`
+	MigrationID     int    `json:"migrationId"`
 }
 
 // SetupReplication configures replication from source to target.
@@ -336,8 +336,8 @@ func (e *ReplicationEngine) setupPostgreSQL(ctx context.Context, config Replicat
 }
 
 func (e *ReplicationEngine) postgresLag(ctx context.Context, config ReplicationConfig) (int64, error) {
-	output, _, _, err := e.sourceSSH.ExecContext(ctx,
-		`sudo -u postgres psql -t -c "SELECT COALESCE(EXTRACT(EPOCH FROM now() - pg_last_xact_replay_timestamp())::bigint, 0) FROM pg_stat_replication LIMIT 1;" 2>&1`)
+	output, _, _, err := e.targetSSH.ExecContext(ctx,
+		`sudo -u postgres psql -t -c "SELECT COALESCE(EXTRACT(EPOCH FROM now() - pg_last_xact_replay_timestamp())::bigint, 0);" 2>&1`)
 	if err != nil {
 		return -1, err
 	}

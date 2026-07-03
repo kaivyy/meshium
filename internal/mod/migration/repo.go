@@ -78,9 +78,15 @@ func (r *sqliteRepo) GetMigration(id int) (*Migration, error) {
 	if err != nil {
 		return nil, err
 	}
-	m.Categories = categoriesJSON
+	if err := json.Unmarshal([]byte(categoriesJSON), &m.Categories); err != nil {
+		return nil, fmt.Errorf("unmarshal migration categories: %w", err)
+	}
 	if planJSON.Valid {
-		m.Plan = planJSON.String
+		var plan MigrationPlan
+		if err := json.Unmarshal([]byte(planJSON.String), &plan); err != nil {
+			return nil, fmt.Errorf("unmarshal migration plan: %w", err)
+		}
+		m.Plan = &plan
 	}
 	if errStr.Valid {
 		m.Error = errStr.String

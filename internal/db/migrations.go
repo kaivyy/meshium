@@ -19,6 +19,14 @@ func Migrate(db *sql.DB) error {
 			password    TEXT,
 			ssh_key     TEXT,
 			passphrase  TEXT,
+			auth_method TEXT,
+			credential_status TEXT DEFAULT 'unknown',
+			last_success DATETIME,
+			last_failure DATETIME,
+			failure_count INTEGER DEFAULT 0,
+			success_count INTEGER DEFAULT 0,
+			fingerprint TEXT DEFAULT '',
+			key_type TEXT DEFAULT 'rsa',
 			tags        TEXT,
 			environment TEXT,
 			region      TEXT,
@@ -56,8 +64,83 @@ func Migrate(db *sql.DB) error {
 			host       TEXT NOT NULL,
 			port       INTEGER NOT NULL,
 			verified   INTEGER DEFAULT 0,
+			status     TEXT DEFAULT 'unknown',
 			created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+			updated_at DATETIME,
 			UNIQUE(host, port)
+		);`,
+		`CREATE TABLE IF NOT EXISTS server_keys (
+			id INTEGER PRIMARY KEY AUTOINCREMENT,
+			server_id INTEGER NOT NULL REFERENCES servers(id) ON DELETE CASCADE,
+			label TEXT NOT NULL,
+			key_type TEXT DEFAULT '',
+			public_key TEXT DEFAULT '',
+			fingerprint TEXT DEFAULT '',
+			notes TEXT DEFAULT '',
+			enabled INTEGER DEFAULT 1,
+			is_default INTEGER DEFAULT 0,
+			priority INTEGER DEFAULT 0,
+			last_used DATETIME,
+			created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+			updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
+		);`,
+		`CREATE TABLE IF NOT EXISTS auth_priority (
+			method TEXT PRIMARY KEY,
+			priority INTEGER NOT NULL,
+			enabled INTEGER DEFAULT 1
+		);`,
+		`CREATE TABLE IF NOT EXISTS connection_profiles (
+			id INTEGER PRIMARY KEY AUTOINCREMENT,
+			name TEXT NOT NULL,
+			description TEXT DEFAULT '',
+			timeout_seconds INTEGER DEFAULT 30,
+			retry_count INTEGER DEFAULT 3,
+			retry_delay_ms INTEGER DEFAULT 1000,
+			backoff_strategy TEXT DEFAULT 'exponential',
+			keepalive_seconds INTEGER DEFAULT 30,
+			reconnect_enabled INTEGER DEFAULT 1,
+			buffer_size_kb INTEGER DEFAULT 64,
+			compression INTEGER DEFAULT 0,
+			parallelism INTEGER DEFAULT 1,
+			is_builtin INTEGER DEFAULT 0,
+			created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+			updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
+		);`,
+		`CREATE TABLE IF NOT EXISTS retry_configs (
+			server_id INTEGER PRIMARY KEY REFERENCES servers(id) ON DELETE CASCADE,
+			retry_count INTEGER DEFAULT 3,
+			retry_delay_ms INTEGER DEFAULT 1000,
+			backoff_strategy TEXT DEFAULT 'exponential',
+			jitter_ms INTEGER DEFAULT 0,
+			reconnect_policy TEXT DEFAULT 'always',
+			auth_retry_order TEXT DEFAULT 'agent,ed25519,rsa,ecdsa,password',
+			updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
+		);`,
+		`CREATE TABLE IF NOT EXISTS host_key_changes (
+			id INTEGER PRIMARY KEY AUTOINCREMENT,
+			host TEXT NOT NULL,
+			port INTEGER NOT NULL,
+			old_fingerprint TEXT DEFAULT '',
+			new_fingerprint TEXT DEFAULT '',
+			risk_level TEXT DEFAULT 'medium',
+			action_taken TEXT DEFAULT '',
+			server_id INTEGER DEFAULT 0,
+			created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+		);`,
+		`CREATE TABLE IF NOT EXISTS credential_audit (
+			id INTEGER PRIMARY KEY AUTOINCREMENT,
+			server_id INTEGER NOT NULL,
+			action TEXT NOT NULL,
+			detail TEXT DEFAULT '',
+			ip TEXT DEFAULT '',
+			created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+		);`,
+		`CREATE TABLE IF NOT EXISTS ssh_agent_configs (
+			server_id INTEGER PRIMARY KEY REFERENCES servers(id) ON DELETE CASCADE,
+			use_agent INTEGER DEFAULT 0,
+			preferred_identity TEXT DEFAULT '',
+			agent_forwarding INTEGER DEFAULT 0,
+			updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
 		);`,
 		`CREATE TABLE IF NOT EXISTS migrations (
 			id           INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -402,11 +485,21 @@ func Migrate(db *sql.DB) error {
 	// Add columns that may not exist in older databases.
 	alterStatements := []string{
 		`ALTER TABLE servers ADD COLUMN bastion_id INTEGER DEFAULT 0`,
+		`ALTER TABLE servers ADD COLUMN auth_method TEXT`,
+		`ALTER TABLE servers ADD COLUMN credential_status TEXT DEFAULT 'unknown'`,
+		`ALTER TABLE servers ADD COLUMN last_success DATETIME`,
+		`ALTER TABLE servers ADD COLUMN last_failure DATETIME`,
+		`ALTER TABLE servers ADD COLUMN failure_count INTEGER DEFAULT 0`,
+		`ALTER TABLE servers ADD COLUMN success_count INTEGER DEFAULT 0`,
+		`ALTER TABLE servers ADD COLUMN fingerprint TEXT DEFAULT ''`,
+		`ALTER TABLE servers ADD COLUMN key_type TEXT DEFAULT 'rsa'`,
 		`ALTER TABLE migrations ADD COLUMN state TEXT DEFAULT ''`,
 		// Add columns for zero-downtime migration metadata.
 		`ALTER TABLE migrations ADD COLUMN config TEXT DEFAULT '{}'`,
 		`ALTER TABLE migrations ADD COLUMN risk_score REAL DEFAULT 0`,
 		`ALTER TABLE migrations ADD COLUMN risk_class TEXT DEFAULT 'low'`,
+		`ALTER TABLE known_hosts ADD COLUMN status TEXT DEFAULT 'unknown'`,
+		`ALTER TABLE known_hosts ADD COLUMN updated_at DATETIME`,
 	}
 
 	for _, stmt := range alterStatements {

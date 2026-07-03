@@ -3,6 +3,7 @@ package migration
 import (
 	"context"
 	"database/sql"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"time"
@@ -377,7 +378,9 @@ func (r *sqliteRepo) GetInterruptedMigrations() ([]Migration, error) {
 		if err := rows.Scan(&m.ID, &m.SourceID, &m.TargetID, &categoriesJSON, &m.Status, &errStr, &m.CreatedAt, &completedAt); err != nil {
 			return nil, err
 		}
-		m.Categories = categoriesJSON
+		if err := json.Unmarshal([]byte(categoriesJSON), &m.Categories); err != nil {
+			return nil, fmt.Errorf("unmarshal migration categories: %w", err)
+		}
 		if errStr.Valid {
 			m.Error = errStr.String
 		}

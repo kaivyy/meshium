@@ -282,6 +282,9 @@
   <div
     class="md:hidden fixed inset-0 z-30 bg-black/30 backdrop-blur-sm transition-opacity"
     onclick={closeDrawer}
+    onkeydown={(event) => {
+      if (event.key === 'Enter' || event.key === ' ') closeDrawer();
+    }}
     role="button"
     tabindex="0"
     aria-label="Close menu"

@@ -27,7 +27,7 @@
 
   type StepWithEstimate = MigrationPlan['steps'][number];
 
-  const planId = $derived(page.params.id);
+  const planId = $derived(page.params.id ?? '');
   const servers = $derived($serverStore.servers);
 
   let plan = $state<MigrationPlan | null>(null);

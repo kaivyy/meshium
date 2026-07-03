@@ -529,8 +529,9 @@
       <Card padding="lg">
         <div class="space-y-5">
           <div>
-            <label class="mb-2 block text-xs font-semibold uppercase tracking-wide text-slate-500">Server</label>
+            <label for="logs-server" class="mb-2 block text-xs font-semibold uppercase tracking-wide text-slate-500">Server</label>
             <select
+              id="logs-server"
               value={selectedServerId}
               onchange={changeServer}
               class="w-full rounded-xl border border-slate-300 bg-white px-3 py-2 text-sm text-slate-900 outline-none transition focus:border-blue-500"
@@ -542,7 +543,7 @@
           </div>
 
           <div>
-            <label class="mb-2 block text-xs font-semibold uppercase tracking-wide text-slate-500">View</label>
+            <div class="mb-2 block text-xs font-semibold uppercase tracking-wide text-slate-500">View</div>
             <div class="grid grid-cols-2 gap-2">
               <button type="button" onclick={() => changeTab('file')} class={`rounded-lg border px-3 py-2 text-sm font-medium transition ${activeTab === 'file' ? 'border-blue-500 bg-blue-50 text-blue-700' : 'border-slate-300 bg-white text-slate-700 hover:bg-slate-50'}`}>
                 <FileText size={16} class="mr-2 inline-block" />Files
@@ -562,8 +563,9 @@
           {#if activeTab === 'file'}
             <div class="space-y-3">
               <div>
-                <label class="mb-2 block text-xs font-semibold uppercase tracking-wide text-slate-500">Log file list</label>
+                <label for="logs-file-list" class="mb-2 block text-xs font-semibold uppercase tracking-wide text-slate-500">Log file list</label>
                 <select
+                  id="logs-file-list"
                   value={selectedFilePath}
                   onchange={changeFile}
                   class="w-full rounded-xl border border-slate-300 bg-white px-3 py-2 text-sm text-slate-900 outline-none transition focus:border-blue-500"
@@ -579,8 +581,9 @@
               </div>
 
               <div>
-                <label class="mb-2 block text-xs font-semibold uppercase tracking-wide text-slate-500">Custom file path</label>
+                <label for="logs-custom-file-path" class="mb-2 block text-xs font-semibold uppercase tracking-wide text-slate-500">Custom file path</label>
                 <input
+                  id="logs-custom-file-path"
                   value={customFilePath}
                   oninput={(event) => {
                     customFilePath = (event.currentTarget as HTMLInputElement).value;
@@ -593,8 +596,9 @@
             </div>
           {:else if activeTab === 'service'}
             <div>
-              <label class="mb-2 block text-xs font-semibold uppercase tracking-wide text-slate-500">Service</label>
+              <label for="logs-service" class="mb-2 block text-xs font-semibold uppercase tracking-wide text-slate-500">Service</label>
               <select
+                id="logs-service"
                 value={selectedServiceName}
                 onchange={changeService}
                 class="w-full rounded-xl border border-slate-300 bg-white px-3 py-2 text-sm text-slate-900 outline-none transition focus:border-blue-500"
@@ -611,8 +615,9 @@
           {:else if activeTab === 'search'}
             <div class="space-y-3">
               <div>
-                <label class="mb-2 block text-xs font-semibold uppercase tracking-wide text-slate-500">Search file</label>
+                <label for="logs-search-file" class="mb-2 block text-xs font-semibold uppercase tracking-wide text-slate-500">Search file</label>
                 <input
+                  id="logs-search-file"
                   value={searchFilePath}
                   oninput={(event) => {
                     searchFilePath = (event.currentTarget as HTMLInputElement).value;
@@ -623,8 +628,9 @@
               </div>
 
               <div>
-                <label class="mb-2 block text-xs font-semibold uppercase tracking-wide text-slate-500">Pattern</label>
+                <label for="logs-search-pattern" class="mb-2 block text-xs font-semibold uppercase tracking-wide text-slate-500">Pattern</label>
                 <input
+                  id="logs-search-pattern"
                   value={searchPattern}
                   oninput={(event) => {
                     searchPattern = (event.currentTarget as HTMLInputElement).value;
@@ -638,8 +644,9 @@
 
           <div class="space-y-3 border-t border-slate-200 pt-5">
             <div>
-              <label class="mb-2 block text-xs font-semibold uppercase tracking-wide text-slate-500">Lines</label>
+              <label for="logs-line-count" class="mb-2 block text-xs font-semibold uppercase tracking-wide text-slate-500">Lines</label>
               <select
+                id="logs-line-count"
                 value={selectedLineCount}
                 onchange={changeLineCount}
                 class="w-full rounded-xl border border-slate-300 bg-white px-3 py-2 text-sm text-slate-900 outline-none transition focus:border-blue-500"
@@ -653,8 +660,9 @@
             </div>
 
             <div>
-              <label class="mb-2 block text-xs font-semibold uppercase tracking-wide text-slate-500">Filter</label>
+              <label for="logs-filter" class="mb-2 block text-xs font-semibold uppercase tracking-wide text-slate-500">Filter</label>
               <input
+                id="logs-filter"
                 value={filterText}
                 oninput={(event) => {
                   filterText = (event.currentTarget as HTMLInputElement).value;

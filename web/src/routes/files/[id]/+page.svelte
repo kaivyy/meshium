@@ -2,7 +2,7 @@
   import { onMount } from 'svelte';
   import { page } from '$app/stores';
   import {
-    Folder, FolderOpen, FileText, File, FileCode, FileImage, FileArchive,
+    Folder, FolderOpen, FileText, File as FileIcon, FileCode, FileImage, FileArchive,
     FileTerminal, Link, ChevronRight, Home, RefreshCw, Upload, Download,
     Trash2, Edit3, FolderPlus, Search, ArrowLeft, Eye, X, Check, AlertCircle,
     ChevronUp, ChevronDown, MoreVertical, Copy, Move, Save
@@ -17,8 +17,8 @@
   } from '$lib/api/files';
 
   // Route params
-  let serverId = parseInt($page.params.id);
-  let server: Server | null = null;
+  let serverId = parseInt($page.params.id ?? '0', 10);
+  let server = $state<Server | null>(null);
 
   // State
   let currentPath = $state('/');
@@ -332,7 +332,7 @@
     if (['zip', 'tar', 'gz', 'bz2', 'xz', '7z', 'rar'].includes(ext)) return FileArchive;
     if (['sh', 'bash', 'zsh', 'exe', 'bat', 'cmd'].includes(ext)) return FileTerminal;
     if (['md', 'txt', 'rst', 'pdf', 'doc', 'docx'].includes(ext)) return FileText;
-    return File;
+    return FileIcon;
   }
 
   function formatDate(dateStr: string): string {
@@ -495,11 +495,11 @@
       </div>
       <div class="flex items-center gap-2">
         {#if fileContent && !fileContent.isBinary}
-          <button type="button" onclick={() => { const f = selectedFile; showPreview = false; selectedFile = null; fileContent = null; openEditor(f); }} class="inline-flex items-center gap-2 rounded-lg bg-green-600 px-3 py-1.5 text-sm font-medium text-white hover:bg-green-700">
+          <button type="button" onclick={() => { if (!selectedFile) return; const f = selectedFile; showPreview = false; selectedFile = null; fileContent = null; openEditor(f); }} class="inline-flex items-center gap-2 rounded-lg bg-green-600 px-3 py-1.5 text-sm font-medium text-white hover:bg-green-700">
             <Edit3 size={14} /> Edit
           </button>
         {/if}
-        <button type="button" onclick={() => handleDownload(selectedFile)} class="inline-flex items-center gap-2 rounded-lg border border-slate-300 bg-white px-3 py-1.5 text-sm font-medium text-slate-700 hover:bg-slate-50">
+        <button type="button" onclick={() => { if (selectedFile) handleDownload(selectedFile); }} class="inline-flex items-center gap-2 rounded-lg border border-slate-300 bg-white px-3 py-1.5 text-sm font-medium text-slate-700 hover:bg-slate-50">
           <Download size={14} /> Download
         </button>
         <button type="button" onclick={() => { showPreview = false; selectedFile = null; fileContent = null; }} class="inline-flex items-center gap-2 rounded-lg bg-slate-900 px-3 py-1.5 text-sm font-medium text-white hover:bg-slate-800">
@@ -515,14 +515,14 @@
   <Modal open={true} title="Upload File" onClose={() => { showUploadModal = false; uploadFile_input = null; uploadPath = ''; }}>
     <div class="space-y-4">
       <div>
-        <label class="mb-1 block text-sm font-medium text-slate-700">File</label>
-        <input type="file" onchange={(e) => { const target = e.target as HTMLInputElement; uploadFile_input = target.files?.[0] || null; if (uploadFile_input && !uploadPath) uploadPath = uploadFile_input.name; }} class="block w-full text-sm text-slate-500" />
+        <label for="upload-file" class="mb-1 block text-sm font-medium text-slate-700">File</label>
+        <input id="upload-file" type="file" onchange={(e) => { const target = e.target as HTMLInputElement; uploadFile_input = target.files?.[0] || null; if (uploadFile_input && !uploadPath) uploadPath = uploadFile_input.name; }} class="block w-full text-sm text-slate-500" />
       </div>
       <div>
-        <label class="mb-1 block text-sm font-medium text-slate-700">Remote Path</label>
+        <label for="upload-path" class="mb-1 block text-sm font-medium text-slate-700">Remote Path</label>
         <div class="flex items-center gap-2">
           <span class="text-sm text-slate-500">{currentPath === '/' ? '/' : currentPath + '/'}</span>
-          <input type="text" bind:value={uploadPath} placeholder="filename" class="flex-1 rounded-lg border border-slate-300 px-3 py-2 text-sm outline-none focus:border-blue-500" />
+          <input id="upload-path" type="text" bind:value={uploadPath} placeholder="filename" class="flex-1 rounded-lg border border-slate-300 px-3 py-2 text-sm outline-none focus:border-blue-500" />
         </div>
       </div>
       <label class="flex items-center gap-2 text-sm text-slate-600">
@@ -545,10 +545,10 @@
   <Modal open={true} title="New Folder" onClose={() => { showMkdirModal = false; mkdirPath = ''; }}>
     <div class="space-y-4">
       <div>
-        <label class="mb-1 block text-sm font-medium text-slate-700">Folder Name</label>
+        <label for="mkdir-path" class="mb-1 block text-sm font-medium text-slate-700">Folder Name</label>
         <div class="flex items-center gap-2">
           <span class="text-sm text-slate-500">{currentPath === '/' ? '/' : currentPath + '/'}</span>
-          <input type="text" bind:value={mkdirPath} placeholder="folder-name" class="flex-1 rounded-lg border border-slate-300 px-3 py-2 text-sm outline-none focus:border-blue-500" onkeydown={(e) => { if (e.key === 'Enter') handleMkdir(); }} />
+          <input id="mkdir-path" type="text" bind:value={mkdirPath} placeholder="folder-name" class="flex-1 rounded-lg border border-slate-300 px-3 py-2 text-sm outline-none focus:border-blue-500" onkeydown={(e) => { if (e.key === 'Enter') handleMkdir(); }} />
         </div>
       </div>
     </div>
@@ -566,8 +566,8 @@
   <Modal open={true} title="Rename / Move" onClose={() => { showRenameModal = false; actionTarget = null; renameNewPath = ''; }}>
     <div class="space-y-4">
       <div>
-        <label class="mb-1 block text-sm font-medium text-slate-700">New Path</label>
-        <input type="text" bind:value={renameNewPath} class="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm outline-none focus:border-blue-500" onkeydown={(e) => { if (e.key === 'Enter') handleRename(); }} />
+        <label for="rename-new-path" class="mb-1 block text-sm font-medium text-slate-700">New Path</label>
+        <input id="rename-new-path" type="text" bind:value={renameNewPath} class="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm outline-none focus:border-blue-500" onkeydown={(e) => { if (e.key === 'Enter') handleRename(); }} />
       </div>
       <p class="text-xs text-slate-500">Current: {actionTarget.path}</p>
     </div>
@@ -669,7 +669,6 @@
               style="max-height: 60vh; min-height: 300px;"
               spellcheck="false"
               autocomplete="off"
-              autocorrect="off"
               autocapitalize="off"
               placeholder="File content..."
             ></textarea>

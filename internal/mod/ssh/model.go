@@ -117,6 +117,7 @@ type BastionConfig struct {
 const (
 	AuthMethodPassword            = "password"
 	AuthMethodKey                 = "key"
+	AuthMethodPublicKey           = AuthMethodKey
 	AuthMethodAgent               = "agent"
 	AuthMethodKeyboardInteractive = "keyboard-interactive"
 )
@@ -133,6 +134,13 @@ const (
 	CredentialStatusFingerprintChanged = "fingerprint_changed"
 )
 
+// Host key verification status values.
+const (
+	HostStatusUnknown  = "unknown"
+	HostStatusVerified = "verified"
+	HostStatusChanged  = "changed"
+)
+
 // ConnectResult holds the result of a connection attempt.
 type ConnectResult struct {
 	Success     bool
@@ -144,7 +152,133 @@ type ConnectResult struct {
 
 // HostKeyResult holds the result of a host key check.
 type HostKeyResult struct {
-	Known  bool
-	Match  bool
-	Key    string
+	Known bool
+	Match bool
+	Key   string
+}
+
+// WizardStep describes one connection-wizard diagnostic step.
+type WizardStep struct {
+	Name     string `json:"name"`
+	Status   string `json:"status"`
+	Message  string `json:"message,omitempty"`
+	Duration int64  `json:"duration,omitempty"`
+}
+
+// WizardResult is returned by the interactive SSH connection wizard.
+type WizardResult struct {
+	Success       bool         `json:"success"`
+	Error         string       `json:"error,omitempty"`
+	Steps         []WizardStep `json:"steps"`
+	ServerInfo    *ServerInfo  `json:"serverInfo,omitempty"`
+	TotalDuration int64        `json:"totalDuration,omitempty"`
+}
+
+// ServerInfo holds lightweight remote host facts collected by the SSH wizard.
+type ServerInfo struct {
+	SSHStatus      string  `json:"sshStatus"`
+	LatencyMs      int     `json:"latencyMs"`
+	Hostname       string  `json:"hostname"`
+	OS             string  `json:"os"`
+	Kernel         string  `json:"kernel"`
+	Architecture   string  `json:"architecture"`
+	CPUModel       string  `json:"cpuModel"`
+	CPUCores       int     `json:"cpuCores"`
+	RAMTotalMB     int     `json:"ramTotalMb"`
+	DiskTotalGB    float64 `json:"diskTotalGb"`
+	Virtualization string  `json:"virtualization"`
+	Provider       string  `json:"provider"`
+	PublicIP       string  `json:"publicIp"`
+	PrivateIP      string  `json:"privateIp"`
+	Timezone       string  `json:"timezone"`
+}
+
+// DiagnosticsResult groups SSH connectivity diagnostics by subsystem.
+type DiagnosticsResult struct {
+	DNS     *DNSDiag     `json:"dns,omitempty"`
+	TCP     *TCPDiag     `json:"tcp,omitempty"`
+	SSH     *SSHDiag     `json:"ssh,omitempty"`
+	Auth    *AuthDiag    `json:"auth,omitempty"`
+	HostKey *HostKeyDiag `json:"hostKey,omitempty"`
+	Network *NetworkDiag `json:"network,omitempty"`
+}
+
+type DNSDiag struct {
+	Resolved   bool     `json:"resolved"`
+	Hostname   string   `json:"hostname"`
+	Addresses  []string `json:"addresses"`
+	Error      string   `json:"error,omitempty"`
+	DurationMs int64    `json:"durationMs"`
+}
+
+type TCPDiag struct {
+	Reachable  bool   `json:"reachable"`
+	Host       string `json:"host"`
+	Port       int    `json:"port"`
+	Error      string `json:"error,omitempty"`
+	DurationMs int64  `json:"durationMs"`
+}
+
+type SSHDiag struct {
+	Reachable     bool     `json:"reachable"`
+	Banner        string   `json:"banner,omitempty"`
+	Ciphers       []string `json:"ciphers,omitempty"`
+	KEXAlgorithms []string `json:"kexAlgorithms,omitempty"`
+	Error         string   `json:"error,omitempty"`
+	DurationMs    int64    `json:"durationMs"`
+}
+
+type AuthDiag struct {
+	Success    bool   `json:"success"`
+	Method     string `json:"method,omitempty"`
+	Error      string `json:"error,omitempty"`
+	DurationMs int64  `json:"durationMs"`
+}
+
+type HostKeyDiag struct {
+	Status            string `json:"status"`
+	FingerprintSHA256 string `json:"fingerprintSha256,omitempty"`
+	FingerprintMD5    string `json:"fingerprintMd5,omitempty"`
+	Algorithm         string `json:"algorithm,omitempty"`
+	Bits              int    `json:"bits,omitempty"`
+}
+
+type NetworkDiag struct {
+	LatencyMs int64 `json:"latencyMs"`
+}
+
+// AgentIdentity describes one identity exposed by SSH_AUTH_SOCK.
+type AgentIdentity struct {
+	FingerprintSHA256 string `json:"fingerprintSha256"`
+	Type              string `json:"type"`
+	Comment           string `json:"comment,omitempty"`
+}
+
+// SSHAgentStatus holds local SSH agent availability and loaded identities.
+type SSHAgentStatus struct {
+	Available  bool            `json:"available"`
+	SocketPath string          `json:"socketPath,omitempty"`
+	Identities []AgentIdentity `json:"identities"`
+}
+
+// CredentialHealthScore summarizes credential posture for a server.
+type CredentialHealthScore struct {
+	Score               int    `json:"score"`
+	Grade               string `json:"grade"`
+	PasswordExists      bool   `json:"passwordExists"`
+	KeyInstalled        bool   `json:"keyInstalled"`
+	FingerprintVerified bool   `json:"fingerprintVerified"`
+	KnownHost           bool   `json:"knownHost"`
+	RecentSuccess       bool   `json:"recentSuccess"`
+	RecentFailure       bool   `json:"recentFailure"`
+	PassphraseEnabled   bool   `json:"passphraseEnabled"`
+	BastionHealthy      bool   `json:"bastionHealthy"`
+	AgentHealthy        bool   `json:"agentHealthy"`
+}
+
+// AuthPriorityEntry configures preferred authentication-method ordering.
+type AuthPriorityEntry struct {
+	Method   string `json:"method"`
+	Priority int    `json:"priority"`
+	Enabled  bool   `json:"enabled"`
 }

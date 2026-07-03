@@ -186,7 +186,7 @@ func (w *WizardRunner) Run(ctx context.Context, cfg ServerConfig, onStep WizardS
 	step = WizardStep{Name: "Running Validation Command", Status: "running"}
 	addStep(step)
 	// Try to run a simple command to validate
-	client, err := connect(cfg, w.getHostKeyCallback())
+	client, err := connect(cfg, w.getHostKeyCallback(cfg.ID))
 	if err == nil {
 		stdout, _, exitCode, execErr := client.Exec("echo ok")
 		if execErr == nil && exitCode == 0 && strings.TrimSpace(stdout) == "ok" {
@@ -334,14 +334,14 @@ func (w *WizardRunner) negotiateSSH(cfg ServerConfig) *sshNegotiateResult {
 
 // Host key verification step
 type hostKeyResult struct {
-	Known            bool
-	Match            bool
+	Known             bool
+	Match             bool
 	FingerprintSHA256 string
-	FingerprintMD5   string
-	Algorithm        string
-	Bits             int
-	Status           string
-	DurationMs       int64
+	FingerprintMD5    string
+	Algorithm         string
+	Bits              int
+	Status            string
+	DurationMs        int64
 }
 
 func (w *WizardRunner) verifyHostKey(cfg ServerConfig, hostKey ssh.PublicKey) *hostKeyResult {
@@ -357,35 +357,35 @@ func (w *WizardRunner) verifyHostKey(cfg ServerConfig, hostKey ssh.PublicKey) *h
 	if w.knownHosts == nil {
 		return &hostKeyResult{
 			FingerprintSHA256: sha256,
-			FingerprintMD5:   md5,
-			Algorithm:        algorithm,
-			Status:           HostStatusUnknown,
-			DurationMs:       time.Since(start).Milliseconds(),
+			FingerprintMD5:    md5,
+			Algorithm:         algorithm,
+			Status:            HostStatusUnknown,
+			DurationMs:        time.Since(start).Milliseconds(),
 		}
 	}
 
 	stored, known, err := w.knownHosts.Get(cfg.Host, cfg.Port)
 	if err != nil || !known {
 		return &hostKeyResult{
-			Known:            false,
+			Known:             false,
 			FingerprintSHA256: sha256,
-			FingerprintMD5:   md5,
-			Algorithm:        algorithm,
-			Status:           HostStatusUnknown,
-			DurationMs:       time.Since(start).Milliseconds(),
+			FingerprintMD5:    md5,
+			Algorithm:         algorithm,
+			Status:            HostStatusUnknown,
+			DurationMs:        time.Since(start).Milliseconds(),
 		}
 	}
 
 	storedPubKey, _, _, _, err := ssh.ParseAuthorizedKey([]byte(stored))
 	if err != nil {
 		return &hostKeyResult{
-			Known:            true,
-			Match:            false,
+			Known:             true,
+			Match:             false,
 			FingerprintSHA256: sha256,
-			FingerprintMD5:   md5,
-			Algorithm:        algorithm,
-			Status:           HostStatusChanged,
-			DurationMs:       time.Since(start).Milliseconds(),
+			FingerprintMD5:    md5,
+			Algorithm:         algorithm,
+			Status:            HostStatusChanged,
+			DurationMs:        time.Since(start).Milliseconds(),
 		}
 	}
 
@@ -396,13 +396,13 @@ func (w *WizardRunner) verifyHostKey(cfg ServerConfig, hostKey ssh.PublicKey) *h
 	}
 
 	return &hostKeyResult{
-		Known:            true,
-		Match:            match,
+		Known:             true,
+		Match:             match,
 		FingerprintSHA256: sha256,
-		FingerprintMD5:   md5,
-		Algorithm:        algorithm,
-		Status:           status,
-		DurationMs:       time.Since(start).Milliseconds(),
+		FingerprintMD5:    md5,
+		Algorithm:         algorithm,
+		Status:            status,
+		DurationMs:        time.Since(start).Milliseconds(),
 	}
 }
 
@@ -420,7 +420,7 @@ func (w *WizardRunner) authenticate(cfg ServerConfig) *authResult {
 	// If the host is unknown, the key is trusted on first use and saved.
 	// If the host is known and the key matches, auth proceeds.
 	// If the host is known and the key differs, the connection is rejected (MITM protection).
-	hostKeyCallback := w.getHostKeyCallback()
+	hostKeyCallback := w.getHostKeyCallback(cfg.ID)
 	if hostKeyCallback == nil {
 		hostKeyCallback = ssh.InsecureIgnoreHostKey()
 	}
@@ -458,7 +458,7 @@ func (w *WizardRunner) authenticate(cfg ServerConfig) *authResult {
 func (w *WizardRunner) collectSystemInfo(cfg ServerConfig) *ServerInfo {
 	sshConfig := &ssh.ClientConfig{
 		User:            cfg.Username,
-		HostKeyCallback: w.getHostKeyCallback(),
+		HostKeyCallback: w.getHostKeyCallback(cfg.ID),
 		Timeout:         10 * time.Second,
 	}
 
@@ -524,7 +524,7 @@ func (w *WizardRunner) testLatency(host string, port int) int64 {
 func (w *WizardRunner) testRoundTrip(cfg ServerConfig) int64 {
 	sshConfig := &ssh.ClientConfig{
 		User:            cfg.Username,
-		HostKeyCallback: w.getHostKeyCallback(),
+		HostKeyCallback: w.getHostKeyCallback(cfg.ID),
 		Timeout:         10 * time.Second,
 	}
 
@@ -547,9 +547,9 @@ func (w *WizardRunner) testRoundTrip(cfg ServerConfig) int64 {
 }
 
 // getHostKeyCallback returns the known hosts callback for the wizard.
-func (w *WizardRunner) getHostKeyCallback() ssh.HostKeyCallback {
+func (w *WizardRunner) getHostKeyCallback(serverID int) ssh.HostKeyCallback {
 	if w.knownHosts != nil {
-		return w.knownHosts.MakeHostKeyCallback()
+		return w.knownHosts.MakeHostKeyCallback(serverID)
 	}
 	return ssh.InsecureIgnoreHostKey()
 }
@@ -581,12 +581,12 @@ func (w *WizardRunner) RunDiagnostics(ctx context.Context, cfg ServerConfig) *Di
 	// SSH diagnostics
 	sshRes := w.negotiateSSH(cfg)
 	result.SSH = &SSHDiag{
-		Reachable:    sshRes.Reachable,
-		Banner:       sshRes.Banner,
-		Ciphers:      sshRes.Ciphers,
+		Reachable:     sshRes.Reachable,
+		Banner:        sshRes.Banner,
+		Ciphers:       sshRes.Ciphers,
 		KEXAlgorithms: sshRes.KEXAlgos,
-		Error:        sshRes.Error,
-		DurationMs:   sshRes.DurationMs,
+		Error:         sshRes.Error,
+		DurationMs:    sshRes.DurationMs,
 	}
 
 	// Auth diagnostics
@@ -601,7 +601,7 @@ func (w *WizardRunner) RunDiagnostics(ctx context.Context, cfg ServerConfig) *Di
 	// Host key diagnostics
 	sshConfig := &ssh.ClientConfig{
 		User:            cfg.Username,
-		HostKeyCallback: w.getHostKeyCallback(),
+		HostKeyCallback: w.getHostKeyCallback(cfg.ID),
 		Timeout:         10 * time.Second,
 	}
 	authMethods, _ := buildAuthMethods(cfg)
@@ -650,7 +650,7 @@ func GetSSHAgentStatus() *SSHAgentStatus {
 		pubKey := signer.PublicKey()
 		identities = append(identities, AgentIdentity{
 			FingerprintSHA256: ssh.FingerprintSHA256(pubKey),
-			Type:             pubKey.Type(),
+			Type:              pubKey.Type(),
 		})
 	}
 
@@ -721,17 +721,17 @@ func ComputeCredentialHealthScore(
 	}
 
 	return &CredentialHealthScore{
-		Score:              score,
-		Grade:              grade,
-		PasswordExists:     passwordExists,
-		KeyInstalled:       keyInstalled,
+		Score:               score,
+		Grade:               grade,
+		PasswordExists:      passwordExists,
+		KeyInstalled:        keyInstalled,
 		FingerprintVerified: fingerprintVerified,
-		KnownHost:          knownHost,
-		RecentSuccess:      recentSuccess,
-		RecentFailure:      recentFailure,
-		PassphraseEnabled:  passphraseEnabled,
-		BastionHealthy:     bastionHealthy,
-		AgentHealthy:       agentHealthy,
+		KnownHost:           knownHost,
+		RecentSuccess:       recentSuccess,
+		RecentFailure:       recentFailure,
+		PassphraseEnabled:   passphraseEnabled,
+		BastionHealthy:      bastionHealthy,
+		AgentHealthy:        agentHealthy,
 	}
 }
 

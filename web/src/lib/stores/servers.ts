@@ -116,7 +116,8 @@ export async function fetchServers() {
   updateState((state) => ({ ...state, loading: true, error: null }));
 
   try {
-    const servers = await api.get<Server[]>('/servers');
+    const response = await api.get<Server[] | null>('/servers');
+    const servers = Array.isArray(response) ? response : [];
     updateState((state) => ({
       ...state,
       servers,

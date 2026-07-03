@@ -5,9 +5,9 @@ import (
 	"encoding/json"
 	"fmt"
 	"log"
+	"meshium/internal/mod/server"
 	"sync"
 	"time"
-	"meshium/internal/mod/server"
 
 	xssh "golang.org/x/crypto/ssh"
 )
@@ -236,11 +236,7 @@ func (e *Executor) executeWithSkip(ctx context.Context, migrationID int, onProgr
 		return err
 	}
 
-	// Parse categories from migration
-	var categories []string
-	if err := json.Unmarshal([]byte(migration.Categories), &categories); err != nil {
-		return fmt.Errorf("failed to parse migration categories: %w", err)
-	}
+	categories := migration.Categories
 
 	// 5. Backup phase: backup each category on target (MANDATORY)
 	//    If any backup fails, the migration is aborted — no apply without backup.

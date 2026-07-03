@@ -496,7 +496,7 @@ export const pipelineApi = {
   assessRisk: (id: number) => api.post(`/pipeline/migrations/${id}/risk`, {}) as Promise<RiskReport>,
 
   // Compatibility
-  getCompatibility: (id: number) => api.get(`/pipeline/migrations/${id}/compatibility`) as Promise<CompatibilityCheckResult[]>,
+  getCompatibilityChecks: (id: number) => api.get(`/pipeline/migrations/${id}/compatibility`) as Promise<CompatibilityCheckResult[]>,
   checkCompatibility: (id: number) => api.post(`/pipeline/migrations/${id}/compatibility`, {}) as Promise<CompatibilityCheckResult[]>,
 
   // Health
@@ -706,21 +706,6 @@ async function replayEvents(migrationId: number, afterSequence: number): Promise
   } catch {
     return [];
   }
-}
-
-// MigrationEvent type for replay
-interface MigrationEvent {
-  id: number;
-  migrationId: number;
-  sequence: number;
-  timestamp: string;
-  level: string;
-  stage: string;
-  type: string;
-  message: string;
-  details?: string;
-  source: string;
-  correlationId?: string;
 }
 
 /**

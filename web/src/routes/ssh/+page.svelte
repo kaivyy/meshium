@@ -65,9 +65,9 @@
 
     try {
       const [dashboardData, agentData, changesData] = await Promise.all([
-        api.get<AuthDashboard>('/dashboard'),
-        api.get<SSHAgentStatus>('/ssh-agent/status').catch(() => null),
-        api.get('/host-key-changes?limit=8').catch(() => [] as Array<HostKeyChange>)
+        api.get('/dashboard') as Promise<AuthDashboard>,
+        (api.get('/ssh-agent/status') as Promise<SSHAgentStatus>).catch(() => null),
+        (api.get('/host-key-changes?limit=8') as Promise<HostKeyChange[]>).catch(() => [] as Array<HostKeyChange>)
       ]);
 
       dashboard = dashboardData;

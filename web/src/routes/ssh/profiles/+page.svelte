@@ -121,7 +121,7 @@
     try {
       let savedId = profileId;
       if (mode === 'new') {
-        const created = await api.post<ConnectionProfile>('/connection-profiles', payload);
+        const created = await api.post('/connection-profiles', payload) as ConnectionProfile;
         savedId = created.id;
       } else {
         await api.put('/connection-profiles/' + profileId, payload);
@@ -346,8 +346,9 @@
 
           <div class="space-y-4">
             <div>
-              <label class="mb-1 block text-sm font-medium text-slate-700">Name *</label>
+              <label for="profile-name" class="mb-1 block text-sm font-medium text-slate-700">Name *</label>
               <input
+                id="profile-name"
                 bind:value={name}
                 disabled={mode === 'view'}
                 class="w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-slate-900 shadow-sm outline-none transition focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20 disabled:bg-slate-50 disabled:text-slate-500"
@@ -356,8 +357,9 @@
             </div>
 
             <div>
-              <label class="mb-1 block text-sm font-medium text-slate-700">Description</label>
+              <label for="profile-description" class="mb-1 block text-sm font-medium text-slate-700">Description</label>
               <textarea
+                id="profile-description"
                 bind:value={description}
                 disabled={mode === 'view'}
                 rows="3"
@@ -368,36 +370,36 @@
 
             <div class="grid gap-4 md:grid-cols-2">
               <div>
-                <label class="mb-1 block text-sm font-medium text-slate-700">Timeout (s)</label>
-                <input type="number" bind:value={timeoutSeconds} min="1" disabled={mode === 'view'} class="w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-slate-900 shadow-sm outline-none transition focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20 disabled:bg-slate-50 disabled:text-slate-500" />
+                <label for="profile-timeout" class="mb-1 block text-sm font-medium text-slate-700">Timeout (s)</label>
+                <input id="profile-timeout" type="number" bind:value={timeoutSeconds} min="1" disabled={mode === 'view'} class="w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-slate-900 shadow-sm outline-none transition focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20 disabled:bg-slate-50 disabled:text-slate-500" />
               </div>
               <div>
-                <label class="mb-1 block text-sm font-medium text-slate-700">Retry Count</label>
-                <input type="number" bind:value={retryCount} min="0" disabled={mode === 'view'} class="w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-slate-900 shadow-sm outline-none transition focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20 disabled:bg-slate-50 disabled:text-slate-500" />
+                <label for="profile-retry-count" class="mb-1 block text-sm font-medium text-slate-700">Retry Count</label>
+                <input id="profile-retry-count" type="number" bind:value={retryCount} min="0" disabled={mode === 'view'} class="w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-slate-900 shadow-sm outline-none transition focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20 disabled:bg-slate-50 disabled:text-slate-500" />
               </div>
               <div>
-                <label class="mb-1 block text-sm font-medium text-slate-700">Retry Delay (ms)</label>
-                <input type="number" bind:value={retryDelayMs} min="0" disabled={mode === 'view'} class="w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-slate-900 shadow-sm outline-none transition focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20 disabled:bg-slate-50 disabled:text-slate-500" />
+                <label for="profile-retry-delay" class="mb-1 block text-sm font-medium text-slate-700">Retry Delay (ms)</label>
+                <input id="profile-retry-delay" type="number" bind:value={retryDelayMs} min="0" disabled={mode === 'view'} class="w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-slate-900 shadow-sm outline-none transition focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20 disabled:bg-slate-50 disabled:text-slate-500" />
               </div>
               <div>
-                <label class="mb-1 block text-sm font-medium text-slate-700">Backoff Strategy</label>
-                <select bind:value={backoffStrategy} disabled={mode === 'view'} class="w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-slate-900 shadow-sm outline-none transition focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20 disabled:bg-slate-50 disabled:text-slate-500">
+                <label for="profile-backoff-strategy" class="mb-1 block text-sm font-medium text-slate-700">Backoff Strategy</label>
+                <select id="profile-backoff-strategy" bind:value={backoffStrategy} disabled={mode === 'view'} class="w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-slate-900 shadow-sm outline-none transition focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20 disabled:bg-slate-50 disabled:text-slate-500">
                   <option value="exponential">Exponential</option>
                   <option value="linear">Linear</option>
                   <option value="fixed">Fixed</option>
                 </select>
               </div>
               <div>
-                <label class="mb-1 block text-sm font-medium text-slate-700">Keepalive (s)</label>
-                <input type="number" bind:value={keepaliveSeconds} min="0" disabled={mode === 'view'} class="w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-slate-900 shadow-sm outline-none transition focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20 disabled:bg-slate-50 disabled:text-slate-500" />
+                <label for="profile-keepalive" class="mb-1 block text-sm font-medium text-slate-700">Keepalive (s)</label>
+                <input id="profile-keepalive" type="number" bind:value={keepaliveSeconds} min="0" disabled={mode === 'view'} class="w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-slate-900 shadow-sm outline-none transition focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20 disabled:bg-slate-50 disabled:text-slate-500" />
               </div>
               <div>
-                <label class="mb-1 block text-sm font-medium text-slate-700">Parallelism</label>
-                <input type="number" bind:value={parallelism} min="1" disabled={mode === 'view'} class="w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-slate-900 shadow-sm outline-none transition focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20 disabled:bg-slate-50 disabled:text-slate-500" />
+                <label for="profile-parallelism" class="mb-1 block text-sm font-medium text-slate-700">Parallelism</label>
+                <input id="profile-parallelism" type="number" bind:value={parallelism} min="1" disabled={mode === 'view'} class="w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-slate-900 shadow-sm outline-none transition focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20 disabled:bg-slate-50 disabled:text-slate-500" />
               </div>
               <div>
-                <label class="mb-1 block text-sm font-medium text-slate-700">Buffer Size (KB)</label>
-                <input type="number" bind:value={bufferSizeKb} min="1" disabled={mode === 'view'} class="w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-slate-900 shadow-sm outline-none transition focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20 disabled:bg-slate-50 disabled:text-slate-500" />
+                <label for="profile-buffer-size" class="mb-1 block text-sm font-medium text-slate-700">Buffer Size (KB)</label>
+                <input id="profile-buffer-size" type="number" bind:value={bufferSizeKb} min="1" disabled={mode === 'view'} class="w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-slate-900 shadow-sm outline-none transition focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20 disabled:bg-slate-50 disabled:text-slate-500" />
               </div>
               <div class="space-y-3 rounded-xl border border-slate-200 bg-slate-50 p-4">
                 <label class="flex items-center gap-2 text-sm font-medium text-slate-700">

@@ -23,6 +23,30 @@ type Repo interface {
 	RemovePassword(serverID int) error
 	ClearSSHKey(serverID int) error
 	UpdateFingerprint(serverID int, fingerprint string) error
+	StoreServerKey(key ServerKey) (int, error)
+	GetServerKeys(serverID int) ([]ServerKey, error)
+	GetServerKey(serverID int, keyID int) (*ServerKey, error)
+	UpdateServerKey(key ServerKey) error
+	DeleteServerKey(serverID int, keyID int) error
+	SetDefaultKey(serverID int, keyID int) error
+	GetAuthPriority() ([]AuthPriorityEntry, error)
+	SetAuthPriority(entries []AuthPriorityEntry) error
+	ListConnectionProfiles() ([]ConnectionProfile, error)
+	GetConnectionProfile(id int) (*ConnectionProfile, error)
+	CreateConnectionProfile(profile ConnectionProfile) (int, error)
+	UpdateConnectionProfile(profile ConnectionProfile) error
+	DeleteConnectionProfile(id int) error
+	GetRetryConfig(serverID int) (*RetryConfig, error)
+	SetRetryConfig(config RetryConfig) error
+	ListKnownHosts() ([]KnownHostEntry, error)
+	RemoveKnownHost(host string, port int) error
+	SetHostStatus(host string, port int, status string) error
+	ListHostKeyChanges(limit int) ([]HostKeyChange, error)
+	RecordCredentialAudit(entry CredentialAuditEntry) error
+	ListCredentialAudit(serverID int, limit int) ([]CredentialAuditEntry, error)
+	GetSSHAgentConfig(serverID int) (bool, string, bool, error)
+	SetSSHAgentConfig(serverID int, useAgent bool, preferredIdentity string, agentForwarding bool) error
+	GetAuthDashboard() (*AuthDashboard, error)
 }
 
 type ListFilter struct {
@@ -423,4 +447,3 @@ func boolToInt(v bool) int {
 func normalizeFilterQuery(q string) string {
 	return strings.TrimSpace(q)
 }
-

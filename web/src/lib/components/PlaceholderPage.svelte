@@ -16,13 +16,7 @@
 
 <div class="p-4 sm:p-6">
   <div class="max-w-7xl mx-auto">
-    <PageHeader {title} {subtitle}>
-      {#if action}
-        {#snippet actions()}
-          {@render action()}
-        {/snippet}
-      {/if}
-    </PageHeader>
+    <PageHeader {title} {subtitle} actions={action} />
 
     <Card padding="lg">
       <div class="flex flex-col items-center justify-center py-12 text-center">

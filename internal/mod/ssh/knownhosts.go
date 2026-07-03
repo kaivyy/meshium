@@ -74,7 +74,7 @@ func (s *KnownHostsStore) loadKnownHost(host string, port int) (key string, veri
 // Get returns the stored host key for host:port.
 // If the host is not known, it returns an empty key and false.
 func (s *KnownHostsStore) Get(host string, port int) (string, bool, error) {
-	key, found, _, err := s.loadKnownHost(host, port)
+	key, _, found, err := s.loadKnownHost(host, port)
 	if err != nil {
 		return "", false, err
 	}

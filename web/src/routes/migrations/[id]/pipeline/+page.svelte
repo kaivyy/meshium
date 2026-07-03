@@ -14,7 +14,7 @@
   import { toast } from '$lib/stores/toast';
   import PlannerView from '$lib/components/PlannerView.svelte';
 
-  const migrationId = parseInt($page.params.id);
+  const migrationId = parseInt($page.params.id ?? '0', 10);
 
   // ── Wizard Step State ──
   let currentStep = 0;
@@ -57,7 +57,6 @@
   let networkRxBytesSec = 0;
   let networkTxBytesSec = 0;
   let wsMessages: WSMessageExtended[] = [];
-  let ws: WebSocket | null = null;
   let wsConnectionState: WSConnectionState = 'disconnected';
   let wsControl: { close: () => void } | null = null;
 
@@ -73,13 +72,14 @@
 
   // ── Step Action Loading ──
   let actionLoading = false;
+  type ConfirmationAction = 'cutover' | 'rollback';
+  let confirmationAction: ConfirmationAction | null = null;
 
   onMount(async () => {
     await loadSession().catch(() => {});
   });
 
   onDestroy(() => {
-    ws?.close();
     wsControl?.close();
     if (observationTimer) clearInterval(observationTimer);
   });
@@ -379,15 +379,44 @@
     return ['failed', 'interrupted'].includes(state.toLowerCase());
   }
 
+  function openConfirmation(action: ConfirmationAction) {
+    confirmationAction = action;
+  }
+
+  function closeConfirmation() {
+    if (!actionLoading) confirmationAction = null;
+  }
+
+  function confirmationTitle(): string {
+    return confirmationAction === 'rollback' ? 'Confirm Rollback' : 'Confirm Cutover';
+  }
+
+  function confirmationBody(): string {
+    if (confirmationAction === 'rollback') {
+      return 'This will revert migration changes and restore the last known rollback point. Continue only if you are ready to interrupt the current migration flow.';
+    }
+    return 'This will freeze writes, run the final sync, verify health, and switch traffic from source to target. Continue only when replication and health checks are ready.';
+  }
+
+  async function runConfirmedAction() {
+    if (confirmationAction === 'rollback') {
+      await rollbackPipeline();
+      return;
+    }
+    if (confirmationAction === 'cutover') {
+      await confirmCutover();
+    }
+  }
+
   // Step 8: Cutover
   async function confirmCutover() {
-    if (!confirm('⚠️ CUTOVER: This will switch all traffic from source to target. Make sure replication is caught up and target is healthy. Continue?')) return;
     cutoverConfirmed = true;
     actionLoading = true;
     try {
       await pipelineApi.cutover(migrationId);
       await loadSession().catch(() => {});
       toast.success('Cutover confirmed');
+      confirmationAction = null;
     } catch (err) {
       cutoverConfirmed = false;
       toast.error(actionErrorMessage(err, 'Cutover failed'));
@@ -454,7 +483,6 @@
   }
 
   async function rollbackPipeline() {
-    if (!confirm('⚠️ ROLLBACK: This will revert all changes. Are you sure?')) return;
     actionLoading = true;
     try {
       await pipelineApi.rollbackMigration(migrationId);
@@ -462,6 +490,7 @@
       pipelinePaused = false;
       await loadSession().catch(() => {});
       toast.success('Rollback initiated');
+      confirmationAction = null;
     } catch (err) {
       toast.error(actionErrorMessage(err, 'Rollback failed'));
     } finally {
@@ -592,7 +621,7 @@
   <!-- ═══ HEADER ═══ -->
   <div class="border-b border-gray-800 px-6 py-3 flex items-center justify-between shrink-0">
     <div class="flex items-center gap-4">
-      <a href="/migrations" class="text-gray-400 hover:text-white transition-colors">
+      <a href="/migrations" aria-label="Back to migrations" class="text-gray-400 hover:text-white transition-colors">
         <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m12 19-7-7 7-7"/><path d="M19 12H5"/></svg>
       </a>
       <div>
@@ -625,7 +654,7 @@
         </button>
       {/if}
       {#if !isTerminalState(currentState)}
-        <button on:click={rollbackPipeline} class="flex items-center gap-1.5 px-3 py-1.5 bg-red-600 hover:bg-red-700 rounded-lg text-xs font-medium transition-colors">
+        <button on:click={() => openConfirmation('rollback')} class="flex items-center gap-1.5 px-3 py-1.5 bg-red-600 hover:bg-red-700 rounded-lg text-xs font-medium transition-colors">
           <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 12a9 9 0 1 0 9-9 9.75 9.75 0 0 0-6.74 2.74L3 8"/><path d="M3 3v5h5"/></svg>
           Rollback
         </button>
@@ -890,7 +919,7 @@
                 Refresh Analysis
               </button>
             </div>
-            <PlannerView {plannerResult} {plannerLoading} />
+            <PlannerView {plannerResult} loading={plannerLoading} />
           </div>
         </div>
       </div>
@@ -940,8 +969,8 @@
                 </label>
                 {#if config.replicationEnabled}
                   <div>
-                    <label class="text-xs text-gray-400">Mode</label>
-                    <select bind:value={config.replicationMode} class="w-full mt-1 bg-gray-800 border border-gray-700 rounded-lg px-3 py-2 text-sm">
+                    <label for="replication-mode" class="text-xs text-gray-400">Mode</label>
+                    <select id="replication-mode" bind:value={config.replicationMode} class="w-full mt-1 bg-gray-800 border border-gray-700 rounded-lg px-3 py-2 text-sm">
                       <option value="streaming">Streaming</option>
                       <option value="logical">Logical</option>
                       <option value="snapshot">Snapshot</option>
@@ -966,8 +995,8 @@
             <div>
               <h3 class="text-sm font-medium text-gray-300 mb-3">Traffic</h3>
               <div>
-                <label class="text-xs text-gray-400">Provider</label>
-                <select bind:value={config.trafficProvider} class="w-full mt-1 bg-gray-800 border border-gray-700 rounded-lg px-3 py-2 text-sm">
+                <label for="traffic-provider" class="text-xs text-gray-400">Provider</label>
+                <select id="traffic-provider" bind:value={config.trafficProvider} class="w-full mt-1 bg-gray-800 border border-gray-700 rounded-lg px-3 py-2 text-sm">
                   <option value="">Auto-detect</option>
                   <option value="cloudflare">Cloudflare</option>
                   <option value="nginx">Nginx</option>
@@ -985,12 +1014,12 @@
                   Auto-Rollback on Error
                 </label>
                 <div>
-                  <label class="text-xs text-gray-400">Max Error Rate (%)</label>
-                  <input type="number" bind:value={config.maxErrorRate} min="0" max="100" class="w-full mt-1 bg-gray-800 border border-gray-700 rounded-lg px-3 py-2 text-sm" />
+                  <label for="max-error-rate" class="text-xs text-gray-400">Max Error Rate (%)</label>
+                  <input id="max-error-rate" type="number" bind:value={config.maxErrorRate} min="0" max="100" class="w-full mt-1 bg-gray-800 border border-gray-700 rounded-lg px-3 py-2 text-sm" />
                 </div>
                 <div>
-                  <label class="text-xs text-gray-400">Observation Duration (seconds)</label>
-                  <input type="number" bind:value={config.observationDuration} min="60" max="3600" class="w-full mt-1 bg-gray-800 border border-gray-700 rounded-lg px-3 py-2 text-sm" />
+                  <label for="observation-duration" class="text-xs text-gray-400">Observation Duration (seconds)</label>
+                  <input id="observation-duration" type="number" bind:value={config.observationDuration} min="60" max="3600" class="w-full mt-1 bg-gray-800 border border-gray-700 rounded-lg px-3 py-2 text-sm" />
                 </div>
               </div>
             </div>
@@ -1334,7 +1363,7 @@
                   <li>Resume writes on target</li>
                 </ol>
                 <p class="text-xs text-gray-400 mb-4">Current replication lag: <strong>{replicationLag}s</strong> &middot; Health score: <strong>{healthScore.toFixed(0)}</strong></p>
-                <button on:click={confirmCutover} disabled={actionLoading} class="px-6 py-2.5 bg-yellow-600 hover:bg-yellow-700 rounded-lg font-medium transition-colors disabled:opacity-50 disabled:cursor-not-allowed">
+                <button on:click={() => openConfirmation('cutover')} disabled={actionLoading} class="px-6 py-2.5 bg-yellow-600 hover:bg-yellow-700 rounded-lg font-medium transition-colors disabled:opacity-50 disabled:cursor-not-allowed">
                   Confirm Cutover
                 </button>
               </div>
@@ -1528,5 +1557,51 @@
       {/if}
     </div>
   </div>
-</div>
 
+  {#if confirmationAction}
+    <div
+      class="fixed inset-0 z-50 flex items-center justify-center bg-black/70 px-4"
+      role="presentation"
+    >
+      <div
+        class="w-full max-w-md rounded-xl border border-gray-700 bg-gray-900 p-6 shadow-2xl"
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="pipeline-confirm-title"
+        tabindex="-1"
+      >
+        <div class="flex items-start gap-3">
+          <div class="mt-0.5 flex h-9 w-9 shrink-0 items-center justify-center rounded-lg {confirmationAction === 'rollback' ? 'bg-red-500/20 text-red-400' : 'bg-yellow-500/20 text-yellow-400'}">
+            {#if confirmationAction === 'rollback'}
+              <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 12a9 9 0 1 0 9-9 9.75 9.75 0 0 0-6.74 2.74L3 8"/><path d="M3 3v5h5"/></svg>
+            {:else}
+              <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M13 2 3 14h9l-1 8 10-12h-9l1-8z"/></svg>
+            {/if}
+          </div>
+          <div>
+            <h2 id="pipeline-confirm-title" class="text-lg font-semibold">{confirmationTitle()}</h2>
+            <p class="mt-2 text-sm leading-6 text-gray-300">{confirmationBody()}</p>
+          </div>
+        </div>
+        <div class="mt-6 flex justify-end gap-3">
+          <button
+            type="button"
+            on:click={closeConfirmation}
+            disabled={actionLoading}
+            class="rounded-lg bg-gray-800 px-4 py-2 text-sm font-medium text-gray-200 transition-colors hover:bg-gray-700 disabled:cursor-not-allowed disabled:opacity-50"
+          >
+            Cancel
+          </button>
+          <button
+            type="button"
+            on:click={runConfirmedAction}
+            disabled={actionLoading}
+            class="rounded-lg px-4 py-2 text-sm font-medium text-white transition-colors disabled:cursor-not-allowed disabled:opacity-50 {confirmationAction === 'rollback' ? 'bg-red-600 hover:bg-red-700' : 'bg-yellow-600 hover:bg-yellow-700'}"
+          >
+            {actionLoading ? 'Working...' : confirmationAction === 'rollback' ? 'Rollback' : 'Cutover'}
+          </button>
+        </div>
+      </div>
+    </div>
+  {/if}
+</div>
