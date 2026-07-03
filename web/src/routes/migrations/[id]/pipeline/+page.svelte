@@ -7,11 +7,12 @@
     type CompatibilityCheckResult, type RiskReport, type HealthCheckResult,
     type SyncSession, type ReplicationStatus, type QueueState,
     type ProvisionState, type ContainerHealthInfo, type AuditEntry,
-    type MigrationConfig, type WSConnectionState
+    type MigrationConfig, type WSConnectionState, type PlannerResult
   } from '$lib/api/pipeline';
   import { APIError } from '$lib/api/client';
   import { migrationApi, type DryRunResult } from '$lib/api/migrations';
   import { toast } from '$lib/stores/toast';
+  import PlannerView from '$lib/components/PlannerView.svelte';
 
   const migrationId = parseInt($page.params.id);
 
@@ -35,6 +36,8 @@
   let containerHealth: ContainerHealthInfo[] = [];
   let auditTrail: AuditEntry[] = [];
   let dryRunResult: DryRunResult | null = null;
+  let plannerResult: PlannerResult | null = null;
+  let plannerLoading = false;
 
   // ── Live Metrics (Steps 6-9) ──
   let pipelineRunning = false;
@@ -256,6 +259,19 @@
       toast.error('Dry run failed');
     } finally {
       actionLoading = false;
+    }
+  }
+
+  // Load planner result
+  async function loadPlannerResult() {
+    plannerLoading = true;
+    try {
+      plannerResult = await pipelineApi.getPlannerResult(migrationId);
+    } catch {
+      // Planner result not yet available
+      plannerResult = null;
+    } finally {
+      plannerLoading = false;
     }
   }
 
@@ -865,6 +881,17 @@
               <button on:click={runRiskAssessment} class="mt-4 px-6 py-2 bg-blue-600 hover:bg-blue-700 rounded-lg">Assess Risk</button>
             </div>
           {/if}
+
+          <!-- Planner Result (Batch 2) -->
+          <div class="mt-6">
+            <div class="flex items-center justify-between mb-3">
+              <h3 class="text-sm font-semibold text-gray-400 uppercase">Workload Analysis & Migration Strategy</h3>
+              <button on:click={loadPlannerResult} class="px-3 py-1 text-xs bg-gray-700 hover:bg-gray-600 rounded-lg">
+                Refresh Analysis
+              </button>
+            </div>
+            <PlannerView {plannerResult} {plannerLoading} />
+          </div>
         </div>
       </div>
 

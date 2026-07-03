@@ -84,6 +84,9 @@ func (r *CollectorRunner) Run(ctx context.Context, exec transport.SSHExecuter) (
 			continue
 		}
 		r.applyResult(snapshot, res)
+		if provider, ok := res.Result.(interface{ collectorErrors() []CollectorError }); ok {
+			snapshot.CollectionErrors = append(snapshot.CollectionErrors, provider.collectorErrors()...)
+		}
 	}
 
 	return snapshot, nil
@@ -135,6 +138,58 @@ func (r *CollectorRunner) applyResult(snapshot *ServerSnapshot, res CollectorRes
 		}
 	case *DockerInfo:
 		snapshot.Docker = v
+	case *dockerDetailsResult:
+		if v != nil {
+			snapshot.DockerRoot = v.DockerRoot
+			snapshot.StorageDriver = v.StorageDriver
+			if v.Containerd != nil {
+				snapshot.Containerd = v.Containerd
+			}
+			if v.Podman != nil {
+				snapshot.Podman = v.Podman
+			}
+		}
+	case *systemCollectorResult:
+		if v != nil {
+			snapshot.Swap = v.Swap
+			snapshot.Filesystems = v.Filesystems
+			snapshot.BlockDevices = v.BlockDevices
+			snapshot.Locale = v.Locale
+			snapshot.Users = v.Users
+			snapshot.Groups = v.Groups
+			snapshot.SSHConfig = v.SSHConfig
+			snapshot.DNS = v.DNS
+		}
+	case *securityCollectorResult:
+		if v != nil {
+			snapshot.Firewall = v.Firewall
+			snapshot.SELinux = v.SELinux
+			snapshot.AppArmor = v.AppArmor
+		}
+	case *cronCollectorResult:
+		if v != nil {
+			snapshot.CronJobs = v.CronJobs
+			snapshot.Timers = v.Timers
+		}
+	case *runtimeCollectorResult:
+		if v != nil {
+			snapshot.Runtimes = v.Runtimes
+		}
+	case *ciCollectorResult:
+		if v != nil {
+			snapshot.CI = v.CI
+		}
+	case *sslCollectorResult:
+		if v != nil {
+			snapshot.SSL = v.Certs
+		}
+	case *monitoringCollectorResult:
+		if v != nil {
+			snapshot.ReverseProxies = v.ReverseProxies
+			snapshot.MessageQueues = v.MessageQueues
+			snapshot.Monitoring = v.Monitoring
+			snapshot.ProcessManagers = v.ProcessManagers
+		}
 	case []SystemService:
 		snapshot.Services = v
 	case []DatabaseInfo:
@@ -153,11 +208,19 @@ func DefaultCollectors() []SnapshotCollector {
 	return []SnapshotCollector{
 		&OSCollector{},
 		&HardwareCollector{},
+		&SystemCollector{},
+		&SecurityCollector{},
+		&CronCollector{},
+		&RuntimeCollector{},
 		&DockerCollector{},
+		&DockerDetailsCollector{},
 		&ServiceCollector{},
 		&DatabaseCollector{},
 		&NginxCollector{},
 		&DiskCollector{},
 		&PortCollector{},
+		&CICollector{},
+		&MonitoringCollector{},
+		&SSLCertCollector{},
 	}
 }

@@ -834,6 +834,15 @@ func (m *mockPipelineRepo) GetEvents(ctx context.Context, migrationID int, after
 func (m *mockPipelineRepo) SetMigrationRisk(migrationID int, score float64, class string) error {
 	return nil
 }
+func (m *mockPipelineRepo) GetPlan(ctx context.Context, migrationID int) (map[string]any, error) {
+	return nil, nil
+}
+func (m *mockPipelineRepo) SavePlan(ctx context.Context, migrationID int, plan map[string]any) error {
+	return nil
+}
+func (m *mockPipelineRepo) GetSession(ctx context.Context, id int) (*Migration, error) {
+	return nil, nil
+}
 
 // --- Helpers ---
 

@@ -220,7 +220,15 @@ func (s *Service) compareSnapshots(oldSnap, newSnap *discovery.ServerSnapshot) (
 	summary.PackagesAdded += added
 	summary.PackagesRemoved += removed
 
-	changes, added, removed = appendStringSetChanges(changes, "users", oldSnap.Users, newSnap.Users, severityInfo, severityWarning)
+	oldUsernames := make([]string, 0, len(oldSnap.Users))
+	for _, user := range oldSnap.Users {
+		oldUsernames = append(oldUsernames, user.Username)
+	}
+	newUsernames := make([]string, 0, len(newSnap.Users))
+	for _, user := range newSnap.Users {
+		newUsernames = append(newUsernames, user.Username)
+	}
+	changes, added, removed = appendStringSetChanges(changes, "users", oldUsernames, newUsernames, severityInfo, severityWarning)
 	summary.UsersChanged += added + removed
 
 	serviceChanges := compareServices(oldSnap.Services, newSnap.Services)

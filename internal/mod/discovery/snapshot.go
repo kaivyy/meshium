@@ -15,12 +15,60 @@ type ServerSnapshot struct {
 	// Docker holds Docker container/image information.
 	// nil if Docker is not installed.
 	Docker *DockerInfo `json:"docker,omitempty"`
+	// Swap holds swap space information.
+	Swap *SwapInfo `json:"swap,omitempty"`
+	// Filesystems holds mounted filesystems.
+	Filesystems []FilesystemInfo `json:"filesystems,omitempty"`
+	// BlockDevices holds detected block devices.
+	BlockDevices []BlockDeviceInfo `json:"blockDevices,omitempty"`
+	// Locale holds the default locale string.
+	Locale string `json:"locale,omitempty"`
+	// Users holds local user accounts.
+	Users []UserInfo `json:"users,omitempty"`
+	// Groups holds local groups.
+	Groups []GroupInfo `json:"groups,omitempty"`
+	// SSHConfig holds sshd configuration details.
+	SSHConfig *SSHConfigInfo `json:"sshConfig,omitempty"`
+	// Firewall holds firewall configuration.
+	Firewall *FirewallInfo `json:"firewall,omitempty"`
+	// SELinux holds SELinux status.
+	SELinux *SELinuxInfo `json:"selinux,omitempty"`
+	// AppArmor holds AppArmor status.
+	AppArmor *AppArmorInfo `json:"apparmor,omitempty"`
+	// CronJobs holds detected cron jobs.
+	CronJobs []CronJobInfo `json:"cronJobs,omitempty"`
+	// Timers holds detected systemd timers.
+	Timers []TimerInfo `json:"timers,omitempty"`
+	// Runtimes holds detected language runtimes.
+	Runtimes []RuntimeInfo `json:"runtimes,omitempty"`
+	// ReverseProxies holds detected reverse proxy services.
+	ReverseProxies []ReverseProxyInfo `json:"reverseProxies,omitempty"`
+	// MessageQueues holds detected message queue services.
+	MessageQueues []MessageQueueInfo `json:"messageQueues,omitempty"`
+	// Monitoring holds detected monitoring services.
+	Monitoring []MonitoringServiceInfo `json:"monitoring,omitempty"`
+	// CI holds CI/CD detection information.
+	CI *CIInfo `json:"ci,omitempty"`
+	// SSL holds SSL certificate information.
+	SSL []SSLCertInfo `json:"ssl,omitempty"`
+	// DNS holds DNS resolver configuration.
+	DNS *DNSInfo `json:"dns,omitempty"`
+	// GitRepos holds detected git repositories.
+	GitRepos []GitRepoInfo `json:"gitRepos,omitempty"`
+	// ProcessManagers holds detected process managers.
+	ProcessManagers []ProcessManagerInfo `json:"processManagers,omitempty"`
+	// Containerd holds containerd information.
+	Containerd *ContainerdInfo `json:"containerd,omitempty"`
+	// Podman holds Podman information.
+	Podman *PodmanInfo `json:"podman,omitempty"`
+	// DockerRoot holds the Docker root directory.
+	DockerRoot string `json:"dockerRoot,omitempty"`
+	// StorageDriver holds the Docker storage driver.
+	StorageDriver string `json:"storageDriver,omitempty"`
 	// Services holds systemd services that are active.
 	Services []SystemService `json:"services,omitempty"`
 	// Packages holds installed package names.
 	Packages []string `json:"packages,omitempty"`
-	// Users holds local user account names.
-	Users []string `json:"users,omitempty"`
 	// Databases holds detected database instances.
 	Databases []DatabaseInfo `json:"databases,omitempty"`
 	// Nginx holds Nginx configuration information.
@@ -111,6 +159,20 @@ type ContainerInfo struct {
 	Networks []string `json:"networks,omitempty"`
 	// Labels holds container labels.
 	Labels map[string]string `json:"labels,omitempty"`
+	// RestartPolicy is the container restart policy.
+	RestartPolicy string `json:"restartPolicy,omitempty"`
+	// Healthcheck holds a summary of the healthcheck configuration.
+	Healthcheck string `json:"healthcheck,omitempty"`
+	// Command is the configured container command.
+	Command string `json:"command,omitempty"`
+	// Entrypoint is the configured container entrypoint.
+	Entrypoint string `json:"entrypoint,omitempty"`
+	// EnvVarNames lists environment variable names only.
+	EnvVarNames []string `json:"envVarNames,omitempty"`
+	// ComposeService is the compose service label.
+	ComposeService string `json:"composeService,omitempty"`
+	// ImageDigest is the image digest.
+	ImageDigest string `json:"imageDigest,omitempty"`
 }
 
 // PortMapping represents a Docker port mapping.
@@ -141,8 +203,16 @@ type ComposeProject struct {
 	Name string `json:"name"`
 	// ConfigFiles is the path to the compose file(s).
 	ConfigFiles string `json:"configFiles"`
+	// Contents holds the raw compose file contents.
+	Contents string `json:"contents,omitempty"`
 	// Services lists the service names in the project.
 	Services []string `json:"services,omitempty"`
+	// Networks lists project networks.
+	Networks []string `json:"networks,omitempty"`
+	// Volumes lists project volumes.
+	Volumes []string `json:"volumes,omitempty"`
+	// DependsOn maps service names to their dependencies.
+	DependsOn map[string][]string `json:"dependsOn,omitempty"`
 }
 
 // --- SystemService ---
@@ -177,12 +247,20 @@ type DatabaseInfo struct {
 	Port int `json:"port"`
 	// ProcessName is the process name (e.g., "mysqld", "postgres").
 	ProcessName string `json:"processName"`
+	// Host is the database host.
+	Host string `json:"host,omitempty"`
 	// DataDir is the data directory path.
 	DataDir string `json:"dataDir,omitempty"`
 	// SizeMB is the total database size in MB (if accessible).
 	SizeMB int64 `json:"sizeMb,omitempty"`
 	// Running indicates whether the database process is running.
 	Running bool `json:"running"`
+	// Replication indicates whether replication is enabled.
+	Replication bool `json:"replication,omitempty"`
+	// ReplicaRole is the database replication role.
+	ReplicaRole string `json:"replicaRole,omitempty"`
+	// RedisUsage describes how Redis is used.
+	RedisUsage string `json:"redisUsage,omitempty"`
 }
 
 // --- NginxInfo ---
@@ -275,4 +353,189 @@ type OpenPort struct {
 	PID int `json:"pid,omitempty"`
 	// Address is the bind address (e.g., "0.0.0.0", "127.0.0.1").
 	Address string `json:"address,omitempty"`
+}
+
+// SwapInfo holds swap space information.
+type SwapInfo struct {
+	TotalMB int `json:"totalMb"`
+	UsedMB  int `json:"usedMb"`
+	FreeMB  int `json:"freeMb"`
+}
+
+// FilesystemInfo holds filesystem type and mount information.
+type FilesystemInfo struct {
+	Device       string  `json:"device"`
+	MountPoint   string  `json:"mountPoint"`
+	FSType       string  `json:"fsType"`
+	TotalGB      float64 `json:"totalGb"`
+	UsedGB       float64 `json:"usedGb"`
+	AvailGB      float64 `json:"availGb"`
+	UsePercent   float64 `json:"usePercent"`
+	InodesTotal  int64   `json:"inodesTotal,omitempty"`
+	InodesUsed   int64   `json:"inodesUsed,omitempty"`
+	MountOptions string  `json:"mountOptions,omitempty"`
+}
+
+// BlockDeviceInfo holds block device information.
+type BlockDeviceInfo struct {
+	Name       string  `json:"name"`
+	Type       string  `json:"type"`
+	SizeGB     float64 `json:"sizeGb"`
+	MountPoint string  `json:"mountPoint,omitempty"`
+	FSType     string  `json:"fsType,omitempty"`
+	Model      string  `json:"model,omitempty"`
+	ReadOnly   bool    `json:"readOnly"`
+}
+
+// UserInfo holds local user account information.
+type UserInfo struct {
+	Username string   `json:"username"`
+	UID      int      `json:"uid"`
+	GID      int      `json:"gid"`
+	HomeDir  string   `json:"homeDir,omitempty"`
+	Shell    string   `json:"shell,omitempty"`
+	Groups   []string `json:"groups,omitempty"`
+}
+
+// GroupInfo holds local group information.
+type GroupInfo struct {
+	Name string `json:"name"`
+	GID  int    `json:"gid"`
+}
+
+// SSHConfigInfo holds SSH server configuration.
+type SSHConfigInfo struct {
+	Port           int      `json:"port"`
+	PermitRootLogin string   `json:"permitRootLogin,omitempty"`
+	PasswordAuth   string    `json:"passwordAuth,omitempty"`
+	PubkeyAuth     string    `json:"pubkeyAuth,omitempty"`
+	AuthorizedKeys []string  `json:"authorizedKeys,omitempty"`
+	HostKeys       []string  `json:"hostKeys,omitempty"`
+}
+
+// FirewallInfo holds firewall configuration.
+type FirewallInfo struct {
+	Type       string   `json:"type"`
+	Active     bool     `json:"active"`
+	DefaultIn  string   `json:"defaultIn,omitempty"`
+	DefaultOut string   `json:"defaultOut,omitempty"`
+	Rules      []string `json:"rules,omitempty"`
+}
+
+// SELinuxInfo holds SELinux status.
+type SELinuxInfo struct {
+	Enabled bool   `json:"enabled"`
+	Mode    string `json:"mode,omitempty"`
+	Policy  string `json:"policy,omitempty"`
+}
+
+// AppArmorInfo holds AppArmor status.
+type AppArmorInfo struct {
+	Enabled  bool     `json:"enabled"`
+	Profiles []string `json:"profiles,omitempty"`
+}
+
+// CronJobInfo holds cron job information.
+type CronJobInfo struct {
+	User     string `json:"user"`
+	Schedule string `json:"schedule"`
+	Command  string `json:"command"`
+	Source   string `json:"source"`
+}
+
+// TimerInfo holds systemd timer information.
+type TimerInfo struct {
+	Name     string `json:"name"`
+	Schedule string `json:"schedule,omitempty"`
+	Interval string `json:"interval,omitempty"`
+	Active   bool   `json:"active"`
+	LastRun  string `json:"lastRun,omitempty"`
+	NextRun  string `json:"nextRun,omitempty"`
+	Triggers string `json:"triggers,omitempty"`
+}
+
+// RuntimeInfo holds a detected runtime version.
+type RuntimeInfo struct {
+	Name    string `json:"name"`
+	Version string `json:"version"`
+	Path    string `json:"path,omitempty"`
+}
+
+// ReverseProxyInfo holds reverse proxy detection.
+type ReverseProxyInfo struct {
+	Type       string `json:"type"`
+	Version    string `json:"version,omitempty"`
+	ConfigPath string `json:"configPath,omitempty"`
+	Active     bool   `json:"active"`
+}
+
+// MessageQueueInfo holds message queue detection.
+type MessageQueueInfo struct {
+	Type    string `json:"type"`
+	Version string `json:"version,omitempty"`
+	Port    int    `json:"port,omitempty"`
+	Running bool   `json:"running"`
+}
+
+// MonitoringServiceInfo holds monitoring service detection.
+type MonitoringServiceInfo struct {
+	Type    string `json:"type"`
+	Version string `json:"version,omitempty"`
+	Port    int    `json:"port,omitempty"`
+	Running bool   `json:"running"`
+}
+
+// CIInfo holds CI/CD detection information.
+type CIInfo struct {
+	Type        string   `json:"type"`
+	Workflows   []string `json:"workflows,omitempty"`
+	SelfHosted  bool     `json:"selfHosted"`
+	SecretNames []string `json:"secretNames,omitempty"`
+	DockerBuild bool     `json:"dockerBuild"`
+	DockerPush  bool     `json:"dockerPush"`
+	Registry    string   `json:"registry,omitempty"`
+}
+
+// SSLCertInfo holds SSL certificate information (general).
+type SSLCertInfo struct {
+	Domain        string `json:"domain"`
+	Path          string `json:"path"`
+	Expiry        string `json:"expiry,omitempty"`
+	DaysRemaining int    `json:"daysRemaining,omitempty"`
+	Issuer        string `json:"issuer,omitempty"`
+	AutoRenew     bool   `json:"autoRenew,omitempty"`
+}
+
+// DNSInfo holds DNS configuration.
+type DNSInfo struct {
+	Nameservers  []string `json:"nameservers"`
+	SearchDomain string   `json:"searchDomain,omitempty"`
+}
+
+// GitRepoInfo holds git repository information.
+type GitRepoInfo struct {
+	Path   string `json:"path"`
+	Branch string `json:"branch,omitempty"`
+	Remote string `json:"remote,omitempty"`
+	IsDirty bool   `json:"isDirty"`
+}
+
+// ProcessManagerInfo holds process manager detection.
+type ProcessManagerInfo struct {
+	Type    string   `json:"type"`
+	Version string   `json:"version,omitempty"`
+	Apps    []string `json:"apps,omitempty"`
+	Running bool     `json:"running"`
+}
+
+// ContainerdInfo holds containerd information.
+type ContainerdInfo struct {
+	Version string `json:"version,omitempty"`
+	Running bool   `json:"running"`
+}
+
+// PodmanInfo holds Podman information.
+type PodmanInfo struct {
+	Version    string `json:"version,omitempty"`
+	Containers int    `json:"containers,omitempty"`
 }

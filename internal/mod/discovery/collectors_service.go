@@ -73,7 +73,7 @@ func (c *DockerCollector) Collect(ctx context.Context, exec transport.SSHExecute
 			if projName, ok := c.Labels["com.docker.compose.project"]; ok {
 				proj, exists := projects[projName]
 				if !exists {
-					proj = &ComposeProject{Name: projName}
+					proj = &ComposeProject{Name: projName, DependsOn: make(map[string][]string)}
 					projects[projName] = proj
 				}
 				if svc, ok := c.Labels["com.docker.compose.service"]; ok {
@@ -87,6 +87,13 @@ func (c *DockerCollector) Collect(ctx context.Context, exec transport.SSHExecute
 		for _, proj := range projects {
 			info.ComposeProjects = append(info.ComposeProjects, *proj)
 		}
+	}
+
+	if len(info.Containers) > 0 {
+		info.Containers = enrichDockerContainers(ctx, exec, info.Containers)
+	}
+	if len(info.ComposeProjects) > 0 {
+		info.ComposeProjects = enrichComposeProjects(ctx, exec, info.ComposeProjects)
 	}
 
 	return info, nil
@@ -130,6 +137,7 @@ func (c dockerContainerJSON) toContainerInfo() ContainerInfo {
 				ci.Labels[parts[0]] = parts[1]
 			}
 		}
+		ci.ComposeService = ci.Labels["com.docker.compose.service"]
 	}
 
 	// Parse networks

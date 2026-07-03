@@ -24,6 +24,19 @@ const (
 	EventLevelCritical EventLevel = "critical"
 )
 
+// Event type constants for the migration lifecycle.
+const (
+	EventTypeDiscoveryStarted       = "discovery_started"
+	EventTypeDiscoveryCompleted     = "discovery_completed"
+	EventTypeWorkloadDetected       = "workload_detected"
+	EventTypeClassificationCompleted = "classification_completed"
+	EventTypeCompatibilityCompleted = "compatibility_completed"
+	EventTypeStrategySelected       = "strategy_selected"
+	EventTypePlannerWarning         = "planner_warning"
+	EventTypePlannerCompleted       = "planner_completed"
+	EventTypeUnsupportedWorkload    = "unsupported_workload"
+)
+
 // MigrationEvent represents a single event in the migration lifecycle.
 type MigrationEvent struct {
 	ID            int64           `json:"id"`

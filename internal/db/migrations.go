@@ -436,6 +436,21 @@ func Migrate(db *sql.DB) error {
 		`CREATE INDEX IF NOT EXISTS idx_migration_metrics_migration ON migration_metrics(migration_id, created_at)`,
 		`CREATE INDEX IF NOT EXISTS idx_migration_queue_state_migration ON migration_queue_state(migration_id)`,
 		`CREATE INDEX IF NOT EXISTS idx_migration_provision_state_migration ON migration_provision_state(migration_id)`,
+		`CREATE TABLE IF NOT EXISTS migration_plans (
+			id              INTEGER PRIMARY KEY AUTOINCREMENT,
+			migration_id    INTEGER NOT NULL REFERENCES migrations(id) ON DELETE CASCADE,
+			workloads       TEXT DEFAULT '[]',
+			dependency_graph TEXT DEFAULT '{}',
+			compatibility_issues TEXT DEFAULT '[]',
+			strategy        TEXT DEFAULT '{}',
+			warnings        TEXT DEFAULT '[]',
+			risk_score      REAL DEFAULT 0,
+			blocking_issues INTEGER DEFAULT 0,
+			recommendation_count INTEGER DEFAULT 0,
+			created_at      DATETIME DEFAULT CURRENT_TIMESTAMP,
+			updated_at      DATETIME DEFAULT CURRENT_TIMESTAMP
+		)`,
+		`CREATE INDEX IF NOT EXISTS idx_migration_plans_migration ON migration_plans(migration_id)`,
 	}
 
 	for _, stmt := range indexStatements {

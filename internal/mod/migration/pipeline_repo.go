@@ -83,9 +83,12 @@ type PipelineRepo interface {
 	UpdateProvisionState(ctx context.Context, id int64, installed, configured, verified bool, version, errMsg string) error
 	GetProvisionStates(migrationID int) ([]ProvisionState, error)
 
-	// --- Migration config ---
+	// --- Migration config and planning ---
 	SetMigrationConfig(migrationID int, config *MigrationConfig) error
 	GetMigrationConfig(migrationID int) (*MigrationConfig, error)
+	GetPlan(ctx context.Context, migrationID int) (map[string]any, error)
+	SavePlan(ctx context.Context, migrationID int, plan map[string]any) error
+	GetSession(ctx context.Context, id int) (*Migration, error)
 
 	// --- Events ---
 	CreateEvent(ctx context.Context, event MigrationEvent) error
@@ -1269,4 +1272,141 @@ func boolToInt(b bool) int {
 
 func intToBool(v sql.NullInt64) bool {
 	return v.Valid && v.Int64 != 0
+}
+
+// --- Plan Storage (Batch 2) ---
+
+// GetSession retrieves the underlying migration record for a pipeline session.
+func (r *sqliteRepo) GetSession(ctx context.Context, id int) (*Migration, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+	return r.GetMigration(id)
+}
+
+// GetPlan retrieves the stored plan data for a migration.
+func (r *sqliteRepo) GetPlan(ctx context.Context, migrationID int) (map[string]any, error) {
+	row := r.db.QueryRowContext(ctx,
+		`SELECT workloads, dependency_graph, compatibility_issues, strategy, warnings, risk_score, blocking_issues, recommendation_count
+		 FROM migration_plans WHERE migration_id = ?`, migrationID)
+
+	var workloadsJSON, graphJSON, compatJSON, strategyJSON, warningsJSON string
+	var riskScore float64
+	var blockingIssues, recCount int
+
+	if err := row.Scan(&workloadsJSON, &graphJSON, &compatJSON, &strategyJSON, &warningsJSON, &riskScore, &blockingIssues, &recCount); err != nil {
+		if err == sql.ErrNoRows {
+			return nil, nil
+		}
+		return nil, fmt.Errorf("get plan: %w", err)
+	}
+
+	result := make(map[string]any)
+
+	var workloads any
+	if err := json.Unmarshal([]byte(workloadsJSON), &workloads); err == nil {
+		result["workloads"] = workloads
+	}
+
+	var graph any
+	if err := json.Unmarshal([]byte(graphJSON), &graph); err == nil {
+		result["dependencyGraph"] = graph
+	}
+
+	var compat any
+	if err := json.Unmarshal([]byte(compatJSON), &compat); err == nil {
+		result["compatibilityIssues"] = compat
+	}
+
+	var strategy any
+	if err := json.Unmarshal([]byte(strategyJSON), &strategy); err == nil {
+		result["strategy"] = strategy
+	}
+
+	var warnings any
+	if err := json.Unmarshal([]byte(warningsJSON), &warnings); err == nil {
+		result["warnings"] = warnings
+	}
+
+	result["riskScore"] = riskScore
+	result["blockingIssues"] = blockingIssues
+	result["recommendationCount"] = recCount
+
+	return result, nil
+}
+
+// SavePlan stores the plan data for a migration.
+func (r *sqliteRepo) SavePlan(ctx context.Context, migrationID int, plan map[string]any) error {
+	workloadsJSON := "[]"
+	if v, ok := plan["workloads"]; ok {
+		if b, err := json.Marshal(v); err == nil {
+			workloadsJSON = string(b)
+		}
+	}
+
+	graphJSON := "{}"
+	if v, ok := plan["dependencyGraph"]; ok {
+		if b, err := json.Marshal(v); err == nil {
+			graphJSON = string(b)
+		}
+	}
+
+	compatJSON := "[]"
+	if v, ok := plan["compatibilityIssues"]; ok {
+		if b, err := json.Marshal(v); err == nil {
+			compatJSON = string(b)
+		}
+	}
+
+	strategyJSON := "{}"
+	if v, ok := plan["strategy"]; ok {
+		if b, err := json.Marshal(v); err == nil {
+			strategyJSON = string(b)
+		}
+	}
+
+	warningsJSON := "[]"
+	if v, ok := plan["warnings"]; ok {
+		if b, err := json.Marshal(v); err == nil {
+			warningsJSON = string(b)
+		}
+	}
+
+	riskScore := 0.0
+	if v, ok := plan["riskScore"]; ok {
+		if f, ok := v.(float64); ok {
+			riskScore = f
+		}
+	}
+
+	blockingIssues := 0
+	if v, ok := plan["blockingIssues"]; ok {
+		if i, ok := v.(int); ok {
+			blockingIssues = i
+		}
+	}
+
+	recCount := 0
+	if v, ok := plan["recommendationCount"]; ok {
+		if i, ok := v.(int); ok {
+			recCount = i
+		}
+	}
+
+	_, err := r.db.ExecContext(ctx,
+		`INSERT INTO migration_plans (migration_id, workloads, dependency_graph, compatibility_issues, strategy, warnings, risk_score, blocking_issues, recommendation_count, updated_at)
+		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
+		 ON CONFLICT(migration_id) DO UPDATE SET
+		   workloads = excluded.workloads,
+		   dependency_graph = excluded.dependency_graph,
+		   compatibility_issues = excluded.compatibility_issues,
+		   strategy = excluded.strategy,
+		   warnings = excluded.warnings,
+		   risk_score = excluded.risk_score,
+		   blocking_issues = excluded.blocking_issues,
+		   recommendation_count = excluded.recommendation_count,
+		   updated_at = CURRENT_TIMESTAMP`,
+		migrationID, workloadsJSON, graphJSON, compatJSON, strategyJSON, warningsJSON, riskScore, blockingIssues, recCount)
+
+	return err
 }

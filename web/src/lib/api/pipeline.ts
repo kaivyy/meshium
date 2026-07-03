@@ -367,6 +367,123 @@ export interface MigrationEvent {
   correlationId?: string;
 }
 
+// --- Batch 2: Workload, Dependency, Compatibility, Strategy, Warning Types ---
+
+export type WorkloadType =
+  | 'stateless_application'
+  | 'stateful_application'
+  | 'database'
+  | 'cache'
+  | 'queue'
+  | 'worker'
+  | 'scheduler'
+  | 'reverse_proxy'
+  | 'monitoring'
+  | 'logging'
+  | 'storage'
+  | 'messaging'
+  | 'search'
+  | 'ai_service'
+  | 'object_storage'
+  | 'unknown';
+
+export interface WorkloadClassification {
+  name: string;
+  type: WorkloadType;
+  confidence: number;
+  reasons: string[];
+  source: string;
+  sourceName: string;
+  dependencies?: string[];
+  port?: number;
+}
+
+export interface DependencyNode {
+  id: string;
+  name: string;
+  type: string;
+  workloadType?: WorkloadType;
+  port?: number;
+  metadata?: Record<string, string>;
+}
+
+export interface DependencyEdge {
+  from: string;
+  to: string;
+  reason: string;
+}
+
+export interface DependencyGraph {
+  nodes: DependencyNode[];
+  edges: DependencyEdge[];
+}
+
+export interface CompatibilityIssue {
+  category: string;
+  severity: string;
+  message: string;
+  recommendation?: string;
+  blocking: boolean;
+  riskScore: number;
+  manualAction?: string;
+  sourceValue?: string;
+  targetValue?: string;
+}
+
+export type MigrationStrategy =
+  | 'cold_migration'
+  | 'warm_migration'
+  | 'live_sync'
+  | 'shadow_deployment'
+  | 'blue_green_preparation'
+  | 'manual_cutover'
+  | 'reverse_proxy_cutover'
+  | 'dns_cutover'
+  | 'database_replication'
+  | 'queue_drain';
+
+export interface StrategySelection {
+  strategy: MigrationStrategy;
+  reasoning: string;
+  estimatedDowntime: string;
+  riskLevel: string;
+  rollbackAvailable: boolean;
+  requirements?: string[];
+  prerequisites?: string[];
+}
+
+export type PlannerWarningType =
+  | 'risk'
+  | 'recommendation'
+  | 'blocking'
+  | 'manual_step'
+  | 'verification_step'
+  | 'rollback_note'
+  | 'unsupported_workload';
+
+export interface PlannerWarning {
+  type: PlannerWarningType;
+  severity: string;
+  message: string;
+  recommendation?: string;
+  blocking: boolean;
+  riskScore: number;
+  manualAction?: string;
+  workloadName?: string;
+  category?: string;
+}
+
+export interface PlannerResult {
+  workloads: WorkloadClassification[];
+  dependencyGraph: DependencyGraph;
+  compatibilityIssues: CompatibilityIssue[];
+  strategy: StrategySelection;
+  warnings: PlannerWarning[];
+  riskScore: number;
+  blockingIssues: number;
+  recommendationCount: number;
+}
+
 // --- Pipeline API ---
 
 export const pipelineApi = {
@@ -406,6 +523,14 @@ export const pipelineApi = {
   // Event replay (for WS reconnect)
   getEvents: (id: number, afterSeq: number = 0, limit: number = 200) =>
     api.get(`/pipeline/migrations/${id}/events?after_seq=${afterSeq}&limit=${limit}`) as Promise<MigrationEvent[]>,
+
+  // Planner results (Batch 2)
+  getWorkloads: (id: number) => api.get(`/pipeline/migrations/${id}/workloads`) as Promise<WorkloadClassification[]>,
+  getDependencyGraph: (id: number) => api.get(`/pipeline/migrations/${id}/dependency-graph`) as Promise<DependencyGraph>,
+  getCompatibility: (id: number) => api.get(`/pipeline/migrations/${id}/compatibility`) as Promise<CompatibilityIssue[]>,
+  getStrategy: (id: number) => api.get(`/pipeline/migrations/${id}/strategy`) as Promise<StrategySelection>,
+  getWarnings: (id: number) => api.get(`/pipeline/migrations/${id}/warnings`) as Promise<PlannerWarning[]>,
+  getPlannerResult: (id: number) => api.get(`/pipeline/migrations/${id}/planner-result`) as Promise<PlannerResult>,
 
   // Config
   configure: (id: number, config: MigrationConfig) => api.put(`/pipeline/migrations/${id}/config`, config),
