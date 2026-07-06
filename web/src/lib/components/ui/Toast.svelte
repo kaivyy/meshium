@@ -5,10 +5,10 @@
   import type { Toast as ToastItem } from '$lib/stores/toast';
 
   const variantClasses: Record<ToastItem['variant'], string> = {
-    success: 'bg-green-50 border border-green-200 text-green-800',
-    error: 'bg-red-50 border border-red-200 text-red-800',
-    warning: 'bg-yellow-50 border border-yellow-200 text-yellow-800',
-    info: 'bg-blue-50 border border-blue-200 text-blue-800',
+    success: 'bg-surface border border-success/30 text-success',
+    error: 'bg-surface border border-error/30 text-error',
+    warning: 'bg-surface border border-warning/30 text-warning',
+    info: 'bg-surface border border-info/30 text-info',
   };
 </script>
 
@@ -21,7 +21,7 @@
       <div class="min-w-0 flex-1">{toast.message}</div>
       <button
         type="button"
-        class="rounded-lg p-0.5 transition-colors hover:bg-black/5"
+        class="rounded-lg p-0.5 transition-colors hover:bg-surface-muted"
         aria-label="Dismiss toast"
         onclick={() => dismissToast(toast.id)}
       >

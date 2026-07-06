@@ -7,10 +7,12 @@
   import Sidebar from '$lib/components/Sidebar.svelte';
   import TopBar from '$lib/components/TopBar.svelte';
   import Toast from '$lib/components/ui/Toast.svelte';
+  import { initTheme } from '$lib/stores/theme';
 
   let statusChecked = false;
 
   onMount(async () => {
+    initTheme();
     await checkStatus();
     statusChecked = true;
   });
@@ -39,7 +41,7 @@
     <Sidebar />
     <div class="flex-1 flex flex-col overflow-hidden">
       <TopBar />
-      <main class="flex-1 overflow-auto bg-slate-50 pb-16 md:pb-0">
+      <main class="flex-1 overflow-auto bg-bg pb-16 md:pb-0">
         <slot />
       </main>
     </div>
