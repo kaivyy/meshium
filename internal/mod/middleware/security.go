@@ -36,7 +36,15 @@ func Chain(next http.Handler, middleware ...Middleware) http.Handler {
 }
 
 // SecurityHeaders sets security-related response headers for every request.
-func SecurityHeaders() Middleware {
+// scriptHashes are CSP sha256 source expressions (e.g. "'sha256-...'") for the
+// inline scripts in the served HTML; they are added to script-src so the
+// SvelteKit bootstrap and theme scripts can execute under the policy.
+func SecurityHeaders(scriptHashes ...string) Middleware {
+	scriptSrc := "'self'"
+	if len(scriptHashes) > 0 {
+		scriptSrc += " " + strings.Join(scriptHashes, " ")
+	}
+	csp := "default-src 'self'; script-src " + scriptSrc + "; style-src 'self' 'unsafe-inline'; img-src 'self' data:; connect-src 'self' ws: wss:; font-src 'self'; object-src 'none'; base-uri 'self'"
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			headers := w.Header()
@@ -44,7 +52,7 @@ func SecurityHeaders() Middleware {
 			headers.Set("X-Frame-Options", "DENY")
 			headers.Set("X-XSS-Protection", "1; mode=block")
 			headers.Set("Referrer-Policy", "strict-origin-when-cross-origin")
-			headers.Set("Content-Security-Policy", "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; connect-src 'self' ws: wss:; font-src 'self'; object-src 'none'; base-uri 'self'")
+			headers.Set("Content-Security-Policy", csp)
 			if r.TLS != nil {
 				headers.Set("Strict-Transport-Security", "max-age=31536000; includeSubDomains")
 			}

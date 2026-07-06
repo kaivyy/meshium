@@ -1,14 +1,50 @@
 package main
 
 import (
+	"crypto/sha256"
 	"embed"
+	"encoding/base64"
 	"io/fs"
 	"net/http"
+	"regexp"
 	"strings"
 )
 
 //go:embed all:web/build
 var webFS embed.FS
+
+var inlineScriptRe = regexp.MustCompile(`(?s)<script(?:\s[^>]*)?>(.*?)</script>`)
+
+// inlineScriptHashes scans the embedded index.html for inline <script> blocks
+// (those without a src attribute) and returns their CSP sha256 source
+// expressions. SvelteKit's static build bootstraps the SPA via an inline
+// script whose content changes per build, so the CSP script-src must allow
+// these exact hashes or the app never starts. Computing them from the embedded
+// HTML at startup keeps the CSP correct across rebuilds without hardcoding.
+func inlineScriptHashes() []string {
+	data, err := webFS.ReadFile("web/build/index.html")
+	if err != nil {
+		return nil
+	}
+
+	html := string(data)
+	var hashes []string
+	seen := make(map[string]bool)
+
+	for _, m := range inlineScriptRe.FindAllStringSubmatch(html, -1) {
+		openTag := m[0][:strings.Index(m[0], ">")+1]
+		if strings.Contains(strings.ToLower(openTag), "src=") {
+			continue
+		}
+		sum := sha256.Sum256([]byte(m[1]))
+		expr := "'sha256-" + base64.StdEncoding.EncodeToString(sum[:]) + "'"
+		if !seen[expr] {
+			seen[expr] = true
+			hashes = append(hashes, expr)
+		}
+	}
+	return hashes
+}
 
 func staticHandler() http.Handler {
 	sub, err := fs.Sub(webFS, "web/build")

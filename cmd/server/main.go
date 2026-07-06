@@ -253,7 +253,7 @@ func main() {
 	// 4. Authentication (session token validation)
 	protectedMux := middleware.Chain(
 		shared.CORSMiddleware(shared.CSRFMiddleware(authMiddleware.RequireAuth(mux))),
-		middleware.SecurityHeaders(),
+		middleware.SecurityHeaders(inlineScriptHashes()...),
 		middleware.RateLimit(),
 		middleware.RequestSizeLimit(),
 	)
