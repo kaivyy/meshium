@@ -103,12 +103,16 @@ func (h *PipelineHandler) handleCreatePipelineMigration(w http.ResponseWriter, r
 	if req.Config == nil {
 		req.Config = DefaultMigrationConfig()
 	}
-	req.Config.Categories = req.Categories
+	normalizeMigrationConfig(req.Config, req.Categories)
 
 	// Create migration record directly via base repo
 	migrationID, err := h.baseRepo.CreateMigration(req.SourceID, req.TargetID, req.Categories)
 	if err != nil {
 		shared.WriteError(w, http.StatusInternalServerError, fmt.Sprintf("failed to create migration: %v", err), "INTERNAL")
+		return
+	}
+	if err := h.repo.SetMigrationConfig(migrationID, req.Config); err != nil {
+		shared.WriteError(w, http.StatusInternalServerError, fmt.Sprintf("failed to store migration config: %v", err), "INTERNAL")
 		return
 	}
 
@@ -338,11 +342,9 @@ func (h *PipelineHandler) handlePipelineMigrationByID(w http.ResponseWriter, r *
 		}
 		h.handleGetDependencyGraph(w, r, id)
 	case "compatibility":
-		if r.Method != http.MethodGet {
-			shared.WriteError(w, http.StatusMethodNotAllowed, "method not allowed", "METHOD_NOT_ALLOWED")
-			return
-		}
-		h.handleGetCompatibility(w, r, id)
+		h.handleCompatibilityByID(w, r, id)
+	case "config":
+		h.handleConfigByID(w, r, id)
 	case "risk":
 		h.handleRiskByID(w, r, id)
 	case "health":
@@ -437,6 +439,69 @@ func handlePipelineActionResult(w http.ResponseWriter, fn func() error, status s
 		return
 	}
 	shared.WriteJSON(w, http.StatusOK, map[string]string{"status": status})
+}
+
+func normalizeMigrationConfig(config *MigrationConfig, categories []string) {
+	if config == nil {
+		return
+	}
+	if len(categories) > 0 {
+		config.Categories = categories
+	}
+	if config.ObservationDuration > 0 && config.ObservationDuration < time.Second {
+		config.ObservationDuration *= time.Second
+	}
+	if config.MaxErrorRate > 1 {
+		config.MaxErrorRate = config.MaxErrorRate / 100
+	}
+	if config.MaxRetries == 0 {
+		config.MaxRetries = 3
+	}
+	if config.RetryDelay > 0 && config.RetryDelay < time.Second {
+		config.RetryDelay *= time.Second
+	}
+	if config.ParallelTransfers == 0 {
+		config.ParallelTransfers = 4
+	}
+}
+
+func (h *PipelineHandler) handleConfigByID(w http.ResponseWriter, r *http.Request, id int) {
+	switch r.Method {
+	case http.MethodGet:
+		cfg, err := h.repo.GetMigrationConfig(id)
+		if err != nil {
+			shared.WriteError(w, http.StatusNotFound, "migration config not found", "NOT_FOUND")
+			return
+		}
+		shared.WriteJSON(w, http.StatusOK, cfg)
+	case http.MethodPut:
+		shared.LimitRequestBody(r)
+		var cfg MigrationConfig
+		if err := json.NewDecoder(r.Body).Decode(&cfg); err != nil {
+			shared.WriteError(w, http.StatusBadRequest, "invalid request body", "VALIDATION_ERROR")
+			return
+		}
+		normalizeMigrationConfig(&cfg, cfg.Categories)
+		if len(cfg.Categories) == 0 {
+			shared.WriteError(w, http.StatusBadRequest, "at least one category is required", "VALIDATION_ERROR")
+			return
+		}
+		if err := h.repo.SetMigrationConfig(id, &cfg); err != nil {
+			shared.WriteError(w, http.StatusInternalServerError, fmt.Sprintf("failed to store migration config: %v", err), "INTERNAL")
+			return
+		}
+		if updater, ok := h.baseRepo.(interface {
+			SetMigrationCategories(int, []string) error
+		}); ok {
+			if err := updater.SetMigrationCategories(id, cfg.Categories); err != nil {
+				shared.WriteError(w, http.StatusInternalServerError, fmt.Sprintf("failed to update migration categories: %v", err), "INTERNAL")
+				return
+			}
+		}
+		shared.WriteJSON(w, http.StatusOK, cfg)
+	default:
+		shared.WriteError(w, http.StatusMethodNotAllowed, "method not allowed", "METHOD_NOT_ALLOWED")
+	}
 }
 
 // --- REST: Get Pipeline Session ---
@@ -554,34 +619,168 @@ func (h *PipelineHandler) handleRiskByID(w http.ResponseWriter, r *http.Request,
 // --- REST: Compatibility ---
 
 func (h *PipelineHandler) handleCompatibility(w http.ResponseWriter, r *http.Request) {
-	if r.Method != http.MethodGet {
-		shared.WriteError(w, http.StatusMethodNotAllowed, "method not allowed", "METHOD_NOT_ALLOWED")
-		return
-	}
-
 	path := strings.TrimPrefix(r.URL.Path, "/api/pipeline/compatibility/")
 	id, err := strconv.Atoi(strings.TrimSpace(path))
 	if err != nil {
 		shared.WriteError(w, http.StatusBadRequest, "invalid migration ID", "VALIDATION_ERROR")
 		return
 	}
+	h.handleCompatibilityByID(w, r, id)
+}
 
-	// Get existing results
-	results, err := h.repo.GetVerificationResults(id)
-	if err != nil {
-		shared.WriteError(w, http.StatusInternalServerError, "failed to get compatibility results", "INTERNAL")
-		return
-	}
-
-	// Filter to compatibility results only
-	var compatResults []VerificationResult
-	for _, r := range results {
-		if r.VerificationType == "compatibility" {
-			compatResults = append(compatResults, r)
+func (h *PipelineHandler) handleCompatibilityByID(w http.ResponseWriter, r *http.Request, id int) {
+	switch r.Method {
+	case http.MethodGet:
+		results, err := h.getStoredCompatibilityResults(id)
+		if err != nil {
+			shared.WriteError(w, http.StatusInternalServerError, "failed to get compatibility results", "INTERNAL")
+			return
 		}
+		shared.WriteJSON(w, http.StatusOK, results)
+	case http.MethodPost:
+		if r.URL.Query().Get("refresh") != "true" {
+			stored, err := h.getStoredCompatibilityResults(id)
+			if err != nil {
+				shared.WriteError(w, http.StatusInternalServerError, "failed to get compatibility results", "INTERNAL")
+				return
+			}
+			if len(stored) > 0 {
+				shared.WriteJSON(w, http.StatusOK, stored)
+				return
+			}
+		}
+
+		results := h.runCompatibilityPreflight(r.Context(), id)
+		for _, result := range results {
+			_, _ = h.repo.CreateVerificationResult(r.Context(), VerificationResult{
+				MigrationID:      id,
+				VerificationType: "compatibility",
+				Target:           result.CheckName,
+				Expected:         string(result.Severity),
+				Actual:           result.Message,
+				Passed:           result.Passed,
+				ErrorMessage:     compatibilityErrorMessage(result),
+			})
+		}
+		shared.WriteJSON(w, http.StatusOK, results)
+	default:
+		shared.WriteError(w, http.StatusMethodNotAllowed, "method not allowed", "METHOD_NOT_ALLOWED")
+	}
+}
+
+func compatibilityErrorMessage(result CompatibilityCheckResult) string {
+	if result.Passed {
+		return ""
+	}
+	return result.Message
+}
+
+func (h *PipelineHandler) getStoredCompatibilityResults(id int) ([]CompatibilityCheckResult, error) {
+	verifications, err := h.repo.GetVerificationResults(id)
+	if err != nil {
+		return nil, err
+	}
+	results := make([]CompatibilityCheckResult, 0)
+	for _, result := range verifications {
+		if result.VerificationType != "compatibility" {
+			continue
+		}
+		severity := Severity(result.Expected)
+		if severity != SeverityInfo && severity != SeverityWarning && severity != SeverityHigh && severity != SeverityCritical {
+			severity = SeverityInfo
+		}
+		message := result.Actual
+		if message == "" {
+			message = result.ErrorMessage
+		}
+		results = append(results, CompatibilityCheckResult{
+			CheckName: result.Target,
+			Severity:  severity,
+			Passed:    result.Passed,
+			Message:   message,
+		})
+	}
+	return results, nil
+}
+
+func (h *PipelineHandler) runCompatibilityPreflight(ctx context.Context, id int) []CompatibilityCheckResult {
+	migration, err := h.baseRepo.GetMigration(id)
+	if err != nil || migration == nil {
+		return []CompatibilityCheckResult{{
+			CheckName: "migration",
+			Severity:  SeverityCritical,
+			Passed:    false,
+			Message:   "migration not found",
+		}}
 	}
 
-	shared.WriteJSON(w, http.StatusOK, compatResults)
+	results := []CompatibilityCheckResult{{
+		CheckName: "source_target",
+		Severity:  SeverityCritical,
+		Passed:    migration.SourceID != migration.TargetID,
+		Message:   "source and target are different servers",
+	}}
+	if migration.SourceID == migration.TargetID {
+		results[0].Message = "source and target must be different servers"
+	}
+
+	available := map[string]struct{}{}
+	for _, category := range NewCategoryRegistry().Available() {
+		available[category] = struct{}{}
+	}
+	for _, category := range migration.Categories {
+		_, ok := available[category]
+		message := fmt.Sprintf("category %q is supported by the migration executor", category)
+		if !ok {
+			message = fmt.Sprintf("category %q is not supported by the migration executor", category)
+		}
+		results = append(results, CompatibilityCheckResult{
+			CheckName: "category:" + category,
+			Severity:  SeverityCritical,
+			Passed:    ok,
+			Message:   message,
+		})
+	}
+
+	if h.pipeline == nil {
+		return results
+	}
+
+	sourceServer, sourceErr := h.pipeline.srvRepo.GetByID(migration.SourceID)
+	targetServer, targetErr := h.pipeline.srvRepo.GetByID(migration.TargetID)
+	if sourceErr != nil || targetErr != nil {
+		results = append(results, CompatibilityCheckResult{
+			CheckName: "server_records",
+			Severity:  SeverityCritical,
+			Passed:    false,
+			Message:   fmt.Sprintf("server lookup failed: source=%v target=%v", sourceErr, targetErr),
+		})
+		return results
+	}
+
+	sourceSSH, sourceErr := getSSHClientForServer(migration.SourceID, sourceServer, h.pipeline.srvRepo, h.pipeline.pool, h.pipeline.authSvc, h.pipeline.hosts)
+	targetSSH, targetErr := getSSHClientForServer(migration.TargetID, targetServer, h.pipeline.srvRepo, h.pipeline.pool, h.pipeline.authSvc, h.pipeline.hosts)
+	if sourceErr != nil || targetErr != nil {
+		results = append(results, CompatibilityCheckResult{
+			CheckName: "ssh_connectivity",
+			Severity:  SeverityCritical,
+			Passed:    false,
+			Message:   fmt.Sprintf("ssh connection failed: source=%v target=%v", sourceErr, targetErr),
+		})
+		return results
+	}
+
+	sshResults, err := NewCompatibilityEngine(sourceSSH, targetSSH, h.repo).CheckCompatibility(ctx, id)
+	if err != nil {
+		results = append(results, CompatibilityCheckResult{
+			CheckName: "server_compatibility",
+			Severity:  SeverityCritical,
+			Passed:    false,
+			Message:   err.Error(),
+		})
+		return results
+	}
+	return append(results, sshResults...)
 }
 
 // --- REST: Health ---
@@ -613,7 +812,77 @@ func (h *PipelineHandler) handleHealthByID(w http.ResponseWriter, r *http.Reques
 		return
 	}
 
+	if r.Method == http.MethodPost {
+		results := h.runHealthPreflight(r.Context(), id)
+		for _, result := range results {
+			_, _ = h.repo.CreateHealthCheckResult(r.Context(), result)
+		}
+		shared.WriteJSON(w, http.StatusOK, results)
+		return
+	}
+
 	shared.WriteError(w, http.StatusMethodNotAllowed, "method not allowed", "METHOD_NOT_ALLOWED")
+}
+
+func (h *PipelineHandler) runHealthPreflight(ctx context.Context, id int) []HealthCheckResult {
+	migration, err := h.baseRepo.GetMigration(id)
+	if err != nil || migration == nil {
+		return []HealthCheckResult{{
+			MigrationID:  id,
+			CheckType:    HealthCheckTCP,
+			CheckTarget:  "migration",
+			Status:       "error",
+			ErrorMessage: "migration not found",
+			HealthScore:  0,
+		}}
+	}
+	if h.pipeline == nil {
+		return []HealthCheckResult{}
+	}
+
+	targetServer, err := h.pipeline.srvRepo.GetByID(migration.TargetID)
+	if err != nil {
+		return []HealthCheckResult{{
+			MigrationID:  id,
+			ServerID:     migration.TargetID,
+			CheckType:    HealthCheckTCP,
+			CheckTarget:  "target",
+			Status:       "error",
+			ErrorMessage: err.Error(),
+			HealthScore:  0,
+		}}
+	}
+	targetSSH, err := getSSHClientForServer(migration.TargetID, targetServer, h.pipeline.srvRepo, h.pipeline.pool, h.pipeline.authSvc, h.pipeline.hosts)
+	if err != nil {
+		return []HealthCheckResult{{
+			MigrationID:  id,
+			ServerID:     migration.TargetID,
+			CheckType:    HealthCheckTCP,
+			CheckTarget:  targetServer.Host,
+			Status:       "error",
+			ErrorMessage: err.Error(),
+			HealthScore:  0,
+		}}
+	}
+
+	start := time.Now()
+	_, _, _, err = targetSSH.ExecContext(ctx, "echo ok")
+	result := HealthCheckResult{
+		MigrationID:    id,
+		ServerID:       migration.TargetID,
+		CheckType:      HealthCheckTCP,
+		CheckTarget:    targetServer.Host,
+		ResponseTimeMs: time.Since(start).Milliseconds(),
+	}
+	if err != nil {
+		result.Status = "error"
+		result.ErrorMessage = err.Error()
+		result.HealthScore = 0
+		return []HealthCheckResult{result}
+	}
+	result.Status = "healthy"
+	result.HealthScore = 100
+	return []HealthCheckResult{result}
 }
 
 // --- REST: Replication ---
@@ -912,14 +1181,7 @@ func (h *PipelineHandler) handlePipelineWS(w http.ResponseWriter, r *http.Reques
 	case "execute":
 		runErr = h.pipeline.Execute(ctx, migrationID, func(msg WSMessage) {
 			wsSeq++
-			ext := WSMessageExtended{
-				Step:      msg.Step,
-				Status:    msg.Status,
-				Value:     msg.Value,
-				Error:     msg.Error,
-				Timestamp: time.Now().Format(time.RFC3339),
-				Sequence:  wsSeq,
-			}
+			ext := h.extendWSMessage(migrationID, msg, wsSeq)
 			if writeErr := conn.WriteJSON(ext); writeErr != nil {
 				log.Printf("websocket write failed: %v", writeErr)
 				cancel()
@@ -928,14 +1190,7 @@ func (h *PipelineHandler) handlePipelineWS(w http.ResponseWriter, r *http.Reques
 	case "rollback":
 		runErr = h.pipeline.Rollback(ctx, migrationID, func(msg WSMessage) {
 			wsSeq++
-			ext := WSMessageExtended{
-				Step:      msg.Step,
-				Status:    msg.Status,
-				Value:     msg.Value,
-				Error:     msg.Error,
-				Timestamp: time.Now().Format(time.RFC3339),
-				Sequence:  wsSeq,
-			}
+			ext := h.extendWSMessage(migrationID, msg, wsSeq)
 			if writeErr := conn.WriteJSON(ext); writeErr != nil {
 				log.Printf("websocket write failed: %v", writeErr)
 				cancel()
@@ -947,18 +1202,109 @@ func (h *PipelineHandler) handlePipelineWS(w http.ResponseWriter, r *http.Reques
 	}
 
 	if runErr != nil {
-		conn.WriteJSON(WSMessageExtended{
-			Step:   action,
-			Status: "error",
-			Error:  runErr.Error(),
-		})
+		conn.WriteJSON(h.extendWSMessage(migrationID, WSMessage{Step: action, Status: "error", Error: runErr.Error()}, wsSeq+1))
 		return
 	}
 
-	conn.WriteJSON(WSMessageExtended{Step: action, Status: "complete"})
+	conn.WriteJSON(h.extendWSMessage(migrationID, WSMessage{Step: action, Status: "complete"}, wsSeq+1))
 }
 
 // --- Helpers ---
+
+func (h *PipelineHandler) extendWSMessage(migrationID int, msg WSMessage, sequence int64) WSMessageExtended {
+	ext := WSMessageExtended{
+		Step:      msg.Step,
+		Status:    msg.Status,
+		Value:     msg.Value,
+		Error:     msg.Error,
+		Timestamp: time.Now().Format(time.RFC3339),
+		Sequence:  sequence,
+	}
+
+	stage, stageIndex := pipelineStageFromStep(msg.Step)
+	if stage != "" {
+		total := len(AllStages())
+		ext.Stage = string(stage)
+		ext.StageIndex = stageIndex + 1
+		ext.StageTotal = total
+		ext.Progress = float64(stageIndex+1) / float64(total) * 100
+		ext.CurrentState = stateForPipelineStage(stage).StateString()
+		return ext
+	}
+
+	if state, ok := h.currentMigrationState(migrationID); ok {
+		ext.CurrentState = state.StateString()
+	}
+	return ext
+}
+
+func pipelineStageFromStep(step string) (PipelineStageName, int) {
+	base := step
+	if idx := strings.Index(base, ":"); idx >= 0 {
+		base = base[:idx]
+	}
+	aliases := map[string]PipelineStageName{
+		"pre_cutover": StagePreCutoverValidation,
+		"observation": StagePostCutoverObservation,
+	}
+	if stage, ok := aliases[base]; ok {
+		base = string(stage)
+	}
+	for i, stage := range AllStages() {
+		if string(stage) == base {
+			return stage, i
+		}
+	}
+	return "", -1
+}
+
+func stateForPipelineStage(stage PipelineStageName) MigrationState {
+	switch stage {
+	case StageDiscovery:
+		return StateDiscovery
+	case StageAnalysis:
+		return StateCompatibilityCheck
+	case StagePlanning:
+		return StatePlanning
+	case StageValidation, StageHealthVerification:
+		return StateVerification
+	case StagePreparation:
+		return StateBackup
+	case StageInitialSync:
+		return StateInitialSync
+	case StageLiveReplication:
+		return StateLiveReplication
+	case StagePreCutoverValidation:
+		return StatePreCutover
+	case StageTrafficSwitch:
+		return StateTrafficSwitch
+	case StagePostCutoverObservation:
+		return StateObservation
+	case StageFinalization, StageArchive:
+		return StateCommitted
+	default:
+		return StateCreated
+	}
+}
+
+func (h *PipelineHandler) currentMigrationState(migrationID int) (MigrationState, bool) {
+	if stateRepo, ok := h.baseRepo.(interface {
+		GetMigrationState(int) (MigrationState, error)
+	}); ok {
+		if state, err := stateRepo.GetMigrationState(migrationID); err == nil {
+			return state, true
+		}
+	}
+	if h.baseRepo == nil {
+		return StateCreated, false
+	}
+	migration, err := h.baseRepo.GetMigration(migrationID)
+	if err != nil || migration == nil {
+		return StateCreated, false
+	}
+	state, err := StateFromString(migration.Status)
+	return state, err == nil
+}
 
 // buildSession constructs a full MigrationSession from the database.
 func (h *PipelineHandler) buildSession(ctx context.Context, migrationID int) (*MigrationSession, error) {
@@ -990,12 +1336,16 @@ func (h *PipelineHandler) buildSession(ctx context.Context, migrationID int) (*M
 	session.ReplicationStatus, _ = h.repo.GetReplicationStatus(migrationID)
 	session.TrafficSwitch, _ = h.repo.GetTrafficSwitchConfig(migrationID)
 	session.RiskReport, _ = h.repo.GetRiskReport(migrationID)
+	session.VerificationResults, _ = h.repo.GetVerificationResults(migrationID)
+	session.CompatibilityResults, _ = h.getStoredCompatibilityResults(migrationID)
 	session.HealthHistory, _ = h.repo.GetHealthHistory(migrationID, 50)
 	session.CutoverHistory, _ = h.repo.GetCutoverHistory(migrationID)
 	session.RollbackHistory, _ = h.repo.GetRollbackHistory(migrationID)
 	session.SyncSessions, _ = h.repo.GetSyncSessions(migrationID)
 	session.QueueStates, _ = h.repo.GetQueueStates(migrationID)
 	session.ProvisionStates, _ = h.repo.GetProvisionStates(migrationID)
+	session.AuditTrail, _ = h.repo.GetAuditTrail(migrationID, 200)
+	session.Events, _ = h.repo.GetEvents(ctx, migrationID, 0, 200)
 
 	return session, nil
 }

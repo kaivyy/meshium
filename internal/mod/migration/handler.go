@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"strconv"
 	"strings"
+	"time"
 
 	"meshium/internal/mod/auth"
 	"meshium/internal/shared"
@@ -230,28 +231,13 @@ func (h *Handler) handlePlanWS(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Try query params first (for clients that pass params in URL)
 	var req PlanRequest
-	if r.Method == http.MethodPost {
-		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-			http.Error(w, "invalid request body", http.StatusBadRequest)
-			return
-		}
-	} else {
-		sourceID, _ := strconv.Atoi(r.URL.Query().Get("source"))
-		targetID, _ := strconv.Atoi(r.URL.Query().Get("target"))
-		categories := strings.Split(r.URL.Query().Get("categories"), ",")
-		req = PlanRequest{
-			SourceServerID: sourceID,
-			TargetServerID: targetID,
-			Categories:     categories,
-		}
-	}
+	sourceID, _ := strconv.Atoi(r.URL.Query().Get("source"))
+	targetID, _ := strconv.Atoi(r.URL.Query().Get("target"))
+	categories := strings.Split(r.URL.Query().Get("categories"), ",")
 
-	if req.SourceServerID == 0 || req.TargetServerID == 0 {
-		http.Error(w, "sourceServerId and targetServerId are required", http.StatusBadRequest)
-		return
-	}
-
+	// Upgrade to WebSocket first
 	conn, err := h.upgradeWebSocket(w, r)
 	if err != nil {
 		log.Printf("websocket upgrade failed: %v", err)
@@ -261,6 +247,32 @@ func (h *Handler) handlePlanWS(w http.ResponseWriter, r *http.Request) {
 
 	ctx, cancel := context.WithCancel(r.Context())
 	defer cancel()
+
+	// If source/target not in query params, read from first WebSocket message
+	if sourceID == 0 || targetID == 0 {
+		conn.SetReadDeadline(time.Now().Add(10 * time.Second))
+		_, msgBytes, err := conn.ReadMessage()
+		if err != nil {
+			conn.WriteJSON(WSMessage{Step: "plan", Status: "error", Error: "failed to read plan request: " + err.Error()})
+			return
+		}
+		if err := json.Unmarshal(msgBytes, &req); err != nil {
+			conn.WriteJSON(WSMessage{Step: "plan", Status: "error", Error: "invalid plan request: " + err.Error()})
+			return
+		}
+		conn.SetReadDeadline(time.Time{}) // reset deadline
+	} else {
+		req = PlanRequest{
+			SourceServerID: sourceID,
+			TargetServerID: targetID,
+			Categories:     categories,
+		}
+	}
+
+	if req.SourceServerID == 0 || req.TargetServerID == 0 {
+		conn.WriteJSON(WSMessage{Step: "plan", Status: "error", Error: "sourceServerId and targetServerId are required"})
+		return
+	}
 
 	plan, err := h.runner.Plan(ctx, req, func(msg WSMessage) {
 		if writeErr := conn.WriteJSON(msg); writeErr != nil {
@@ -450,33 +462,17 @@ func (h *Handler) handleDiffWS(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Try query params first
 	var req struct {
 		SourceID   int      `json:"sourceId"`
 		TargetID   int      `json:"targetId"`
 		Categories []string `json:"categories"`
 	}
+	sourceID, _ := strconv.Atoi(r.URL.Query().Get("source"))
+	targetID, _ := strconv.Atoi(r.URL.Query().Get("target"))
+	categories := strings.Split(r.URL.Query().Get("categories"), ",")
 
-	if r.Method == http.MethodPost {
-		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-			http.Error(w, "invalid request body", http.StatusBadRequest)
-			return
-		}
-	} else {
-		sourceID, _ := strconv.Atoi(r.URL.Query().Get("source"))
-		targetID, _ := strconv.Atoi(r.URL.Query().Get("target"))
-		categories := strings.Split(r.URL.Query().Get("categories"), ",")
-		req = struct {
-			SourceID   int      `json:"sourceId"`
-			TargetID   int      `json:"targetId"`
-			Categories []string `json:"categories"`
-		}{SourceID: sourceID, TargetID: targetID, Categories: categories}
-	}
-
-	if req.SourceID == 0 || req.TargetID == 0 {
-		http.Error(w, "sourceId and targetId are required", http.StatusBadRequest)
-		return
-	}
-
+	// Upgrade to WebSocket first
 	conn, err := h.upgradeWebSocket(w, r)
 	if err != nil {
 		log.Printf("websocket upgrade failed: %v", err)
@@ -486,6 +482,32 @@ func (h *Handler) handleDiffWS(w http.ResponseWriter, r *http.Request) {
 
 	ctx, cancel := context.WithCancel(r.Context())
 	defer cancel()
+
+	// If source/target not in query params, read from first WebSocket message
+	if sourceID == 0 || targetID == 0 {
+		conn.SetReadDeadline(time.Now().Add(10 * time.Second))
+		_, msgBytes, err := conn.ReadMessage()
+		if err != nil {
+			conn.WriteJSON(WSMessage{Step: "diff", Status: "error", Error: "failed to read diff request: " + err.Error()})
+			return
+		}
+		if err := json.Unmarshal(msgBytes, &req); err != nil {
+			conn.WriteJSON(WSMessage{Step: "diff", Status: "error", Error: "invalid diff request: " + err.Error()})
+			return
+		}
+		conn.SetReadDeadline(time.Time{})
+	} else {
+		req = struct {
+			SourceID   int      `json:"sourceId"`
+			TargetID   int      `json:"targetId"`
+			Categories []string `json:"categories"`
+		}{SourceID: sourceID, TargetID: targetID, Categories: categories}
+	}
+
+	if req.SourceID == 0 || req.TargetID == 0 {
+		conn.WriteJSON(WSMessage{Step: "diff", Status: "error", Error: "sourceId and targetId are required"})
+		return
+	}
 
 	_, err = h.runner.Diff(ctx, req.SourceID, req.TargetID, req.Categories, func(msg WSMessage) {
 		if writeErr := conn.WriteJSON(msg); writeErr != nil {

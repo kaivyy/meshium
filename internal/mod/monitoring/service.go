@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"meshium/internal/mod/discovery"
@@ -14,12 +15,55 @@ import (
 	"meshium/internal/shared"
 )
 
+// metricsHistory stores recent metrics samples per server in a ring buffer.
+type metricsHistory struct {
+	mu      sync.Mutex
+	samples map[int][]ServerMetrics // serverID → samples (newest last)
+	maxSize int
+}
+
+func newMetricsHistory(maxSize int) *metricsHistory {
+	return &metricsHistory{
+		samples: make(map[int][]ServerMetrics),
+		maxSize: maxSize,
+	}
+}
+
+func (h *metricsHistory) add(serverID int, m ServerMetrics) {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	m.ServerID = serverID
+	s := h.samples[serverID]
+	s = append(s, m)
+	if len(s) > h.maxSize {
+		s = s[len(s)-h.maxSize:]
+	}
+	h.samples[serverID] = s
+}
+
+func (h *metricsHistory) get(serverID, points int) []ServerMetrics {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	s := h.samples[serverID]
+	if len(s) == 0 {
+		return []ServerMetrics{}
+	}
+	if points <= 0 || points > len(s) {
+		points = len(s)
+	}
+	start := len(s) - points
+	result := make([]ServerMetrics, points)
+	copy(result, s[start:])
+	return result
+}
+
 // Service collects real-time monitoring data from remote servers over SSH.
 type Service struct {
 	serverRepo server.Repo
 	pool       *modssh.Pool
 	authSvc    transport.AESKeyProvider
 	knownHosts transport.HostKeyStore
+	history    *metricsHistory
 }
 
 // NewService creates a monitoring service.
@@ -29,6 +73,7 @@ func NewService(serverRepo server.Repo, pool *modssh.Pool, authSvc transport.AES
 		pool:       pool,
 		authSvc:    authSvc,
 		knownHosts: knownHosts,
+		history:    newMetricsHistory(300), // keep up to 300 samples per server
 	}
 }
 
@@ -216,15 +261,15 @@ func (s *Service) GetMetrics(ctx context.Context, serverID int) (*ServerMetrics,
 		metrics.Temperature = temp
 	}
 
+	// Store in history ring buffer
+	s.history.add(serverID, *metrics)
+
 	return metrics, nil
 }
 
 func (s *Service) GetMetricsHistory(ctx context.Context, serverID int, points int) ([]ServerMetrics, error) {
 	_ = ctx
-	_ = serverID
-	_ = points
-
-	return nil, fmt.Errorf("metrics history storage is not yet implemented")
+	return s.history.get(serverID, points), nil
 }
 
 func (s *Service) GetNetworkInterfaces(ctx context.Context, serverID int) ([]NetworkInterface, error) {

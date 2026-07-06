@@ -133,7 +133,7 @@ func (s *RsyncStrategy) transferOnce(ctx context.Context, src, dst TransferTarge
 		// Remote → Local: rsync user@host:remote_path local_path
 		srcSpec = fmt.Sprintf("%s@%s:%s", src.User, src.Host, src.Path)
 		dstSpec = dst.Path
-	} else if !src.IsLocal && !dst.IsRemote(dst) {
+	} else if !src.IsLocal && !dst.IsLocal {
 		// Remote → Remote: run rsync on the source to push to destination
 		return s.remoteToRemote(ctx, src, dst, opts, args, progressParser)
 	} else {
@@ -147,11 +147,6 @@ func (s *RsyncStrategy) transferOnce(ctx context.Context, src, dst TransferTarge
 	// For local execution, we need to run rsync locally
 	// But we don't have a local exec interface... we need to use os/exec
 	return s.runLocalRsync(ctx, cmd, opts, progressParser)
-}
-
-// IsRemote is a helper to check if dst is remote.
-func (TransferTarget) IsRemote(dst TransferTarget) bool {
-	return !dst.IsLocal
 }
 
 // remoteToRemote runs rsync on the source server to push to the destination.

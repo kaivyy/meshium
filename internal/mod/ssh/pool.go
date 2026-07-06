@@ -11,11 +11,11 @@ import (
 
 // PoolConfig controls connection expiry and concurrency behavior for the SSH connection pool.
 type PoolConfig struct {
-	MaxIdle          time.Duration
-	MaxLifetime      time.Duration
-	MaxConcurrent    int
+	MaxIdle           time.Duration
+	MaxLifetime       time.Duration
+	MaxConcurrent     int
 	KeepaliveInterval time.Duration // interval between keepalive probes; 0 = disable
-	MaxRetries       int            // max reconnection attempts on transient failure; 0 = no retry
+	MaxRetries        int           // max reconnection attempts on transient failure; 0 = no retry
 }
 
 // Pool manages SSH connections per server.
@@ -26,8 +26,8 @@ type Pool struct {
 	config      PoolConfig
 	semaphore   chan struct{}
 
-	keepaliveMu     sync.Mutex
-	keepaliveStop   chan struct{}
+	keepaliveMu      sync.Mutex
+	keepaliveStop    chan struct{}
 	keepaliveRunning bool
 }
 
@@ -76,6 +76,10 @@ func (p *Pool) Get(serverID int, cfg ServerConfig, hostKeyCallback func(hostname
 // backoff. If the context is cancelled during a backoff wait, GetContext
 // returns the context error immediately.
 func (p *Pool) GetContext(ctx context.Context, serverID int, cfg ServerConfig, hostKeyCallback func(hostname string, remote net.Addr, key ssh.PublicKey) error) (*Client, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+
 	p.mu.Lock()
 	// Check for a valid cached connection
 	if entry, ok := p.connections[serverID]; ok {
@@ -132,6 +136,9 @@ func (p *Pool) GetContext(ctx context.Context, serverID int, cfg ServerConfig, h
 	maxRetries := p.config.MaxRetries
 	var lastErr error
 	for attempt := 0; attempt <= maxRetries; attempt++ {
+		if err := ctx.Err(); err != nil {
+			return nil, err
+		}
 		if attempt > 0 {
 			// Exponential backoff: 1s, 2s, 4s, ...
 			backoff := time.Duration(1<<uint(attempt-1)) * time.Second

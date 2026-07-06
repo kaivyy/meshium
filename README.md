@@ -298,7 +298,7 @@ make build
 MESHium_PORT=9527 ./bin/meshium
 ```
 
-Then open `http://localhost:8080` (or your custom port) in your browser. On first launch, you'll be prompted to set up a password.
+Then open `http://localhost:9527` (or your custom port) in your browser. On first launch, you'll be prompted to set up a password.
 
 ### Building the Frontend
 
@@ -346,7 +346,7 @@ All configuration is via environment variables:
 
 | Variable | Default | Description |
 |----------|---------|-------------|
-| `MESHium_PORT` | `8080` | HTTP server port |
+| `MESHium_PORT` | `9527` | HTTP server port |
 | `MESHium_DATA_DIR` | `~/.meshium` | Data directory (database, keys) |
 
 Data is stored in `~/.meshium/` by default:

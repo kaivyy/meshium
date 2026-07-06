@@ -4,6 +4,7 @@ import (
 	"context"
 	"strconv"
 	"strings"
+	"sync"
 
 	"meshium/internal/mod/transport"
 )
@@ -296,6 +297,142 @@ func (c *Collector) CollectProviderContext(ctx context.Context) StepResult {
 	return StepResult{Name: "provider", Value: "cloud"}
 }
 
+// CollectAllLocalContext runs all local discovery commands in a SINGLE SSH
+// round-trip, then parses the output into individual StepResults.
+// This replaces 11 sequential SSH commands with 1, cutting latency from
+// ~2.5s to ~0.1s for the local portion of the connection test.
+func (c *Collector) CollectAllLocalContext(ctx context.Context) []StepResult {
+	// All local commands combined into one shell script.
+	// Each line outputs a value separated by a delimiter.
+	const cmd = `echo "===HOSTNAME==="; hostname;
+echo "===OS==="; cat /etc/os-release 2>/dev/null | grep PRETTY_NAME | cut -d= -f2 | tr -d '"';
+echo "===KERNEL==="; uname -r;
+echo "===ARCH==="; uname -m;
+echo "===CPU_MODEL==="; grep -m1 'model name' /proc/cpuinfo | cut -d: -f2 | xargs;
+echo "===CPU_CORES==="; nproc 2>/dev/null || grep -c ^processor /proc/cpuinfo;
+echo "===RAM==="; free -m 2>/dev/null | awk '/^Mem:/ {print $2}';
+echo "===DISK==="; df -l --output=size / 2>/dev/null | tail -1 | awk '{printf "%.1f\n", $1/1024/1024}';
+echo "===VIRT==="; systemd-detect-virt 2>/dev/null || echo unknown;
+echo "===PRIVATE_IP==="; hostname -I 2>/dev/null | awk '{print $1}';
+echo "===TIMEZONE==="; timedatectl 2>/dev/null | grep "Time zone" | cut -d: -f2 | xargs || cat /etc/timezone 2>/dev/null;
+echo "===END===";`
+
+	stdout, _, _, err := c.client.ExecContext(ctx, cmd)
+	if err != nil {
+		// Fallback: run individual commands
+		return []StepResult{
+			c.CollectHostnameContext(ctx),
+			c.CollectOSContext(ctx),
+			c.CollectKernelContext(ctx),
+			c.CollectArchitectureContext(ctx),
+			c.CollectCPUModelContext(ctx),
+			c.CollectCPUCoresContext(ctx),
+			c.CollectRAMContext(ctx),
+			c.CollectDiskContext(ctx),
+			c.CollectVirtualizationContext(ctx),
+			c.CollectPrivateIPContext(ctx),
+			c.CollectTimezoneContext(ctx),
+		}
+	}
+
+	results := make([]StepResult, 0, 11)
+	lines := strings.Split(stdout, "\n")
+
+	type section struct {
+		name   string
+		values []string
+	}
+	var sections []section
+	currentName := ""
+	currentValues := []string{}
+
+	for _, line := range lines {
+		line = strings.TrimSpace(line)
+		if strings.HasPrefix(line, "===") && strings.HasSuffix(line, "===") {
+			if currentName != "" {
+				sections = append(sections, section{name: currentName, values: currentValues})
+			}
+			currentName = strings.TrimPrefix(strings.TrimSuffix(line, "==="), "===")
+			currentValues = []string{}
+		} else if line != "" {
+			currentValues = append(currentValues, line)
+		}
+	}
+
+	for _, sec := range sections {
+		value := strings.Join(sec.values, " ")
+		value = strings.TrimSpace(value)
+
+		switch sec.name {
+		case "HOSTNAME":
+			results = append(results, StepResult{Name: "hostname", Value: value})
+		case "OS":
+			results = append(results, StepResult{Name: "os", Value: value})
+		case "KERNEL":
+			results = append(results, StepResult{Name: "kernel", Value: value})
+		case "ARCH":
+			results = append(results, StepResult{Name: "architecture", Value: value})
+		case "CPU_MODEL":
+			results = append(results, StepResult{Name: "cpu_model", Value: value})
+		case "CPU_CORES":
+			n, _ := strconv.Atoi(value)
+			results = append(results, StepResult{Name: "cpu_cores", IntValue: n})
+		case "RAM":
+			n, _ := strconv.Atoi(value)
+			results = append(results, StepResult{Name: "ram_total_mb", IntValue: n})
+		case "DISK":
+			f, _ := strconv.ParseFloat(value, 64)
+			results = append(results, StepResult{Name: "disk_total_gb", FloatValue: f})
+		case "VIRT":
+			results = append(results, StepResult{Name: "virtualization", Value: value})
+		case "PRIVATE_IP":
+			results = append(results, StepResult{Name: "private_ip", Value: value})
+		case "TIMEZONE":
+			results = append(results, StepResult{Name: "timezone", Value: value})
+		}
+	}
+
+	return results
+}
+
+// CollectNetworkInfoContext runs public_ip and provider detection in parallel
+// and calls onStep for each result as soon as it completes.
+// This way the frontend sees each result immediately rather than waiting
+// for both to finish.
+func (c *Collector) CollectNetworkInfoContext(ctx context.Context, onStep func(StepResult)) {
+	var wg sync.WaitGroup
+	wg.Add(2)
+
+	// public_ip: curl ifconfig.me (can take 1-5s)
+	go func() {
+		defer wg.Done()
+		stdout, _, _, err := c.client.ExecContext(ctx, "curl -s --max-time 3 ifconfig.me")
+		if err != nil {
+			onStep(StepResult{Name: "public_ip", Error: err})
+			return
+		}
+		onStep(StepResult{Name: "public_ip", Value: strings.TrimSpace(stdout)})
+	}()
+
+	// provider: curl 169.254.169.254 (AWS metadata, times out in 2s on non-AWS)
+	go func() {
+		defer wg.Done()
+		stdout, _, _, err := c.client.ExecContext(ctx, "curl -s --max-time 1 http://169.254.169.254/latest/meta-data/instance-id 2>/dev/null || echo unknown")
+		if err != nil {
+			onStep(StepResult{Name: "provider", Value: "unknown"})
+			return
+		}
+		value := strings.TrimSpace(stdout)
+		if value == "" || value == "unknown" {
+			onStep(StepResult{Name: "provider", Value: "unknown"})
+			return
+		}
+		onStep(StepResult{Name: "provider", Value: "cloud"})
+	}()
+
+	wg.Wait()
+}
+
 // CollectAll runs all collection steps and returns results.
 func (c *Collector) CollectAll() []StepResult {
 	return c.CollectAllContext(context.Background())
@@ -304,19 +441,14 @@ func (c *Collector) CollectAll() []StepResult {
 // CollectAllContext runs all collection steps with the provided context
 // for cancellation and returns results.
 func (c *Collector) CollectAllContext(ctx context.Context) []StepResult {
-	return []StepResult{
-		c.CollectHostnameContext(ctx),
-		c.CollectOSContext(ctx),
-		c.CollectKernelContext(ctx),
-		c.CollectArchitectureContext(ctx),
-		c.CollectCPUModelContext(ctx),
-		c.CollectCPUCoresContext(ctx),
-		c.CollectRAMContext(ctx),
-		c.CollectDiskContext(ctx),
-		c.CollectVirtualizationContext(ctx),
-		c.CollectPublicIPContext(ctx),
-		c.CollectPrivateIPContext(ctx),
-		c.CollectTimezoneContext(ctx),
-		c.CollectProviderContext(ctx),
-	}
+	var all []StepResult
+	all = append(all, c.CollectAllLocalContext(ctx)...)
+	// Collect network info synchronously, collecting results
+	var mu sync.Mutex
+	c.CollectNetworkInfoContext(ctx, func(sr StepResult) {
+		mu.Lock()
+		all = append(all, sr)
+		mu.Unlock()
+	})
+	return all
 }

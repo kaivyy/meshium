@@ -58,22 +58,72 @@ export function wsConnectGeneric<T = WSMessage>(
 ): WebSocket {
   const url = wsURL(path);
   const subprotocols = wsSubprotocols();
-  const ws = subprotocols.length > 0
-    ? new WebSocket(url, subprotocols)
-    : new WebSocket(url);
+  let gotMessage = false;
+  let retried = false;
+  let closed = false;
+  let activeSocket: WebSocket;
 
-  ws.onopen = () => onOpen?.();
-  ws.onmessage = (e) => {
-    try {
-      const msg = JSON.parse(e.data) as T;
-      onMessage(msg);
-    } catch {
-      // Ignore non-JSON messages
+  const ws = new Proxy({} as WebSocket, {
+    get(_target, prop) {
+      if (prop === 'close') {
+        return (code?: number, reason?: string) => {
+          closed = true;
+          activeSocket.close(code, reason);
+        };
+      }
+
+      const value = (activeSocket as any)[prop];
+      return typeof value === 'function' ? value.bind(activeSocket) : value;
+    },
+    set(_target, prop, value) {
+      (activeSocket as any)[prop] = value;
+      return true;
     }
-  };
+  });
 
-  ws.onerror = (e) => onError?.(e);
-  ws.onclose = () => onClose?.();
+  function bindSocket(socket: WebSocket, isRetry = false) {
+    activeSocket = socket;
+
+    socket.onopen = () => onOpen?.();
+    socket.onmessage = (e) => {
+      gotMessage = true;
+      try {
+        const msg = JSON.parse(e.data) as T;
+        onMessage(msg);
+      } catch {
+        // Ignore non-JSON messages
+      }
+    };
+
+    // Suppress error during first attempt if we have a token to retry without
+    socket.onerror = (e) => {
+      if (!isRetry && !retried && subprotocols.length > 0) return;
+      onError?.(e);
+    };
+
+    socket.onclose = () => {
+      if (closed) {
+        onClose?.();
+        return;
+      }
+
+      if (!gotMessage && !retried && subprotocols.length > 0) {
+        // First attempt failed with stale token — retry without token
+        retried = true;
+        if (typeof localStorage !== 'undefined') {
+          localStorage.removeItem('meshium_session_token');
+        }
+        bindSocket(new WebSocket(url), true);
+        return;
+      }
+
+      onClose?.();
+    };
+  }
+
+  bindSocket(subprotocols.length > 0
+    ? new WebSocket(url, subprotocols)
+    : new WebSocket(url));
 
   return ws;
 }

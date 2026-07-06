@@ -20,10 +20,7 @@ import (
 // It accepts multiple connections.
 func startExecSSHServer(t *testing.T) string {
 	t.Helper()
-	listener, err := net.Listen("tcp", "127.0.0.1:0")
-	if err != nil {
-		t.Fatalf("listen failed: %v", err)
-	}
+	listener := listenForTest(t)
 	t.Cleanup(func() { _ = listener.Close() })
 
 	config := &ssh.ServerConfig{NoClientAuth: true}
@@ -85,10 +82,7 @@ func startExecSSHServer(t *testing.T) string {
 // It accepts multiple connections.
 func startBastionCapableSSHServer(t *testing.T) string {
 	t.Helper()
-	listener, err := net.Listen("tcp", "127.0.0.1:0")
-	if err != nil {
-		t.Fatalf("listen failed: %v", err)
-	}
+	listener := listenForTest(t)
 	t.Cleanup(func() { _ = listener.Close() })
 
 	config := &ssh.ServerConfig{NoClientAuth: true}

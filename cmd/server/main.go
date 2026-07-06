@@ -19,6 +19,7 @@ import (
 	"meshium/internal/mod/file"
 	"meshium/internal/mod/firewall"
 	"meshium/internal/mod/logview"
+	"meshium/internal/mod/middleware"
 	"meshium/internal/mod/migration"
 	"meshium/internal/mod/monitoring"
 	"meshium/internal/mod/planner"
@@ -185,6 +186,23 @@ func main() {
 	monitoringService := monitoring.NewService(serverRepo, sshPool, authSvc, knownHosts)
 	monitoringHandler := handler.NewMonitoringHandler(monitoringService, authSvc)
 
+	// Pipeline handler (zero-downtime migration pipeline)
+	pipelineRepo := migrationRepo.(migration.PipelineRepo)
+	pipeline, err := migration.NewPipeline(
+		pipelineRepo,
+		migrationRepo.(migration.JobRepository),
+		serverRepo,
+		poolAdapter,
+		authSvc,
+		knownHosts,
+		migrationRegistry,
+	)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Failed to create pipeline: %v\n", err)
+		os.Exit(1)
+	}
+	pipelineHandler := migration.NewPipelineHandler(pipeline, pipelineRepo, migrationRepo)
+
 	// 5. Setup graceful shutdown
 	httpServer := &http.Server{}
 	go func() {
@@ -211,6 +229,7 @@ func main() {
 	serverHandler.RegisterRoutes(mux)
 	discoveryHandler.RegisterRoutes(mux)
 	migrationHandler.RegisterRoutes(mux)
+	pipelineHandler.RegisterRoutes(mux)
 
 	// Register Phase 8 REST handlers
 	jobHTTPHandler.RegisterRoutes(mux)
@@ -228,10 +247,16 @@ func main() {
 	mux.Handle("/", staticHandler())
 
 	// Wrap the mux with middleware layers (outermost to innermost):
-	// 1. CORS + security headers
-	// 2. CSRF (Content-Type validation for state-changing methods)
-	// 3. Authentication (session token validation)
-	protectedMux := shared.CORSMiddleware(shared.CSRFMiddleware(authMiddleware.RequireAuth(mux)))
+	// 1. Security headers + rate limiting + request size cap
+	// 2. CORS
+	// 3. CSRF (Content-Type validation for state-changing methods)
+	// 4. Authentication (session token validation)
+	protectedMux := middleware.Chain(
+		shared.CORSMiddleware(shared.CSRFMiddleware(authMiddleware.RequireAuth(mux))),
+		middleware.SecurityHeaders(),
+		middleware.RateLimit(),
+		middleware.RequestSizeLimit(),
+	)
 
 	addr := ":" + cfg.ServerPort
 	fmt.Printf("Meshium server starting on %s\n", addr)

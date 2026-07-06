@@ -202,6 +202,13 @@ func RequestSizeLimit() Middleware {
 				return
 			}
 
+			// Multipart uploads enforce their own (larger) cap via
+			// http.MaxBytesReader in the handler; don't clamp them to 1 MiB.
+			if strings.HasPrefix(r.Header.Get("Content-Type"), "multipart/form-data") {
+				next.ServeHTTP(w, r)
+				return
+			}
+
 			defer r.Body.Close()
 
 			body, err := io.ReadAll(io.LimitReader(r.Body, requestBodyLimit+1))

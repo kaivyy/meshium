@@ -219,12 +219,11 @@ func TestRunConnectionTestWithMock(t *testing.T) {
 
 	pool := &fakeConnectionPool{client: &mockSSHClient{
 		responses: map[string]string{
-			"hostname":   "test-server\n",
-			"uname -r":   "5.15.0-76-generic\n",
-			"uname -m":   "x86_64\n",
-			"nproc":      "4\n",
-			"free -m":    "              total        used        free\nMem:           8192        2048        6144\n",
-			"os-release": `PRETTY_NAME="Ubuntu 22.04 LTS"`,
+			// Combined local command — match the delimiter marker
+			"===HOSTNAME===": "===HOSTNAME===\ntest-server\n===OS===\nUbuntu 22.04 LTS\n===KERNEL===\n5.15.0-76-generic\n===ARCH===\nx86_64\n===CPU_MODEL===\nIntel Xeon\n===CPU_CORES===\n4\n===RAM===\n8192\n===DISK===\n40.0\n===VIRT===\nkvm\n===PRIVATE_IP===\n10.0.0.1\n===TIMEZONE===\nUTC\n===END===\n",
+			// Network commands (parallel)
+			"ifconfig.me":         "8.215.24.254\n",
+			"169.254.169.254":    "unknown\n",
 		},
 		alive: true,
 	}}
@@ -254,8 +253,26 @@ func TestRunConnectionTestWithMock(t *testing.T) {
 	if messages[0].Step != "ssh" || messages[0].Status != "success" {
 		t.Fatalf("unexpected first message: %+v", messages[0])
 	}
+	// Messages 1-11 are local info (hostname, os, kernel, arch, cpu_model, cpu_cores, ram, disk, virt, private_ip, timezone)
 	if messages[1].Step != "hostname" || messages[1].Value != "test-server" {
 		t.Fatalf("unexpected hostname message: %+v", messages[1])
+	}
+	// Messages 12-13 are network info (public_ip, provider) — order may vary
+	// Find public_ip and provider in messages
+	var foundPublicIP, foundProvider bool
+	for _, m := range messages[12:14] {
+		if m.Step == "public_ip" && m.Value == "8.215.24.254" {
+			foundPublicIP = true
+		}
+		if m.Step == "provider" && m.Value == "unknown" {
+			foundProvider = true
+		}
+	}
+	if !foundPublicIP {
+		t.Fatalf("expected public_ip message with value 8.215.24.254, got: %+v", messages[12:14])
+	}
+	if !foundProvider {
+		t.Fatalf("expected provider message with value unknown, got: %+v", messages[12:14])
 	}
 	if messages[len(messages)-1].Step != "done" || messages[len(messages)-1].Status != "complete" {
 		t.Fatalf("unexpected final message: %+v", messages[len(messages)-1])

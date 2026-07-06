@@ -2,6 +2,7 @@ package migration
 
 import (
 	"context"
+	"errors"
 	"testing"
 	"time"
 
@@ -494,6 +495,42 @@ func TestDefaultMigrationConfig(t *testing.T) {
 	}
 	if config.ObservationDuration < 5*time.Minute {
 		t.Error("expected at least 5 minutes observation duration")
+	}
+}
+
+func TestLiveReplicationStageFailsWhenRequiredSetupFails(t *testing.T) {
+	sourceSSH := newMockSSH()
+	targetSSH := newMockSSH()
+
+	mysqlDetect := "pgrep -x mysqld >/dev/null 2>&1 || pgrep -x mariadbd >/dev/null 2>&1"
+	postgresDetect := "pgrep -x postgres >/dev/null 2>&1"
+	redisDetect := "pgrep -x redis-server >/dev/null 2>&1"
+	mongoDetect := "pgrep -x mongod >/dev/null 2>&1"
+	sourceSSH.execOutput[mysqlDetect] = ""
+	sourceSSH.execOutput[postgresDetect] = ""
+	sourceSSH.execErr[postgresDetect] = errors.New("not running")
+	sourceSSH.execOutput[redisDetect] = ""
+	sourceSSH.execErr[redisDetect] = errors.New("not running")
+	sourceSSH.execOutput[mongoDetect] = ""
+	sourceSSH.execErr[mongoDetect] = errors.New("not running")
+	sourceSSH.execOutput[`mysql -e "CREATE USER`] = ""
+	sourceSSH.execErr[`mysql -e "CREATE USER`] = errors.New("permission denied")
+
+	stage := &liveReplicationStage{repo: &mockPipelineRepo{}}
+	pc := &PipelineContext{
+		MigrationID:  1,
+		Migration:    &Migration{ID: 1, Categories: []string{"docker"}},
+		Config:       &MigrationConfig{ReplicationEnabled: true},
+		SourceSSH:    sourceSSH,
+		TargetSSH:    targetSSH,
+		SourceServer: &server.Server{ID: 1, Host: "source", Port: 22, Username: "user"},
+		TargetServer: &server.Server{ID: 2, Host: "target", Port: 22, Username: "user"},
+		Repo:         &mockPipelineRepo{},
+		OnProgress:   func(WSMessage) {},
+	}
+
+	if err := stage.Execute(context.Background(), pc); err == nil {
+		t.Fatal("Execute() error = nil, want replication setup failure")
 	}
 }
 

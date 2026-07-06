@@ -63,6 +63,15 @@ func (r *sqliteRepo) CreateMigration(sourceID, targetID int, categories []string
 	return int(id), err
 }
 
+func (r *sqliteRepo) SetMigrationCategories(id int, categories []string) error {
+	cats, err := json.Marshal(categories)
+	if err != nil {
+		return fmt.Errorf("marshal categories: %w", err)
+	}
+	_, err = r.db.Exec(`UPDATE migrations SET categories = ? WHERE id = ?`, string(cats), id)
+	return err
+}
+
 func (r *sqliteRepo) GetMigration(id int) (*Migration, error) {
 	var m Migration
 	var categoriesJSON string

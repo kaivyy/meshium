@@ -287,10 +287,14 @@ export interface MigrationSession {
   replicationStatus?: ReplicationStatus[];
   trafficSwitch?: TrafficSwitchConfig;
   riskReport?: RiskReport;
+  compatibilityResults?: CompatibilityCheckResult[];
+  verificationResults?: VerificationResult[];
   healthHistory?: HealthCheckResult[];
   syncSessions?: SyncSession[];
   queueStates?: QueueState[];
   provisionStates?: ProvisionState[];
+  auditTrail?: AuditEntry[];
+  events?: MigrationEvent[];
 }
 
 // --- Extended WebSocket Message ---
@@ -348,6 +352,18 @@ export interface AuditEntry {
   previousState?: string;
   newState?: string;
   actor?: string;
+  createdAt: string;
+}
+
+export interface VerificationResult {
+  id: number;
+  migrationId: number;
+  verificationType: string;
+  target?: string;
+  expected?: string;
+  actual?: string;
+  passed: boolean;
+  errorMessage?: string;
   createdAt: string;
 }
 
@@ -533,7 +549,7 @@ export const pipelineApi = {
   getPlannerResult: (id: number) => api.get(`/pipeline/migrations/${id}/planner-result`) as Promise<PlannerResult>,
 
   // Config
-  configure: (id: number, config: MigrationConfig) => api.put(`/pipeline/migrations/${id}/config`, config),
+  configure: (id: number, config: MigrationConfig) => api.put(`/pipeline/migrations/${id}/config`, config) as Promise<MigrationConfig>,
 
   // Actions
   cutover: (id: number) => api.post(`/pipeline/migrations/${id}/actions/cutover`, {}) as Promise<PipelineActionResponse>,

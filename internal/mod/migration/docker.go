@@ -66,6 +66,7 @@ func (c *DockerCollector) Collect(ctx context.Context, ssh SSHExecuter) (Categor
 	// Collect running containers with JSON format
 	stdout, _, _, err = ssh.ExecContext(ctx, `docker ps -a --format '{{.ID}}|{{.Names}}|{{.Image}}|{{.Status}}|{{.Ports}}' 2>/dev/null`)
 	if err == nil {
+		containerIDs := make([]string, 0)
 		for _, line := range strings.Split(strings.TrimSpace(stdout), "\n") {
 			line = strings.TrimSpace(line)
 			if line == "" {
@@ -82,38 +83,37 @@ func (c *DockerCollector) Collect(ctx context.Context, ssh SSHExecuter) (Categor
 				Status: parts[3],
 				Ports:  parts[4],
 			}
-
-			// Collect env vars for the container
-			envOut, _, _, _ := ssh.ExecContext(ctx, fmt.Sprintf("docker inspect --format '{{range .Config.Env}}{{println .}}{{end}}' %s 2>/dev/null", shared.ShellQuote(container.ID)))
-			if strings.TrimSpace(envOut) != "" {
-				container.Env = make(map[string]string)
-				for _, envLine := range strings.Split(strings.TrimSpace(envOut), "\n") {
-					envLine = strings.TrimSpace(envLine)
-					if envLine == "" {
-						continue
-					}
-					if idx := strings.Index(envLine, "="); idx > 0 {
-						container.Env[envLine[:idx]] = envLine[idx+1:]
-					}
-				}
-			}
-
-			// Collect labels
-			labelOut, _, _, _ := ssh.ExecContext(ctx, fmt.Sprintf("docker inspect --format '{{range $k, $v := .Config.Labels}}{{println $k \"=\" $v}}{{end}}' %s 2>/dev/null", shared.ShellQuote(container.ID)))
-			if strings.TrimSpace(labelOut) != "" {
-				container.Labels = make(map[string]string)
-				for _, labelLine := range strings.Split(strings.TrimSpace(labelOut), "\n") {
-					labelLine = strings.TrimSpace(labelLine)
-					if labelLine == "" {
-						continue
-					}
-					if idx := strings.Index(labelLine, "="); idx > 0 {
-						container.Labels[labelLine[:idx]] = labelLine[idx+1:]
-					}
-				}
-			}
-
 			data.Containers = append(data.Containers, container)
+			containerIDs = append(containerIDs, container.ID)
+		}
+
+		// BATCH: Get env vars and labels for ALL containers in ONE command each
+		if len(containerIDs) > 0 {
+			// Batch env vars: use docker inspect with format that outputs container_id|env_line
+			idList := strings.Join(containerIDs, " ")
+			envOut, _, _, _ := ssh.ExecContext(ctx, fmt.Sprintf(
+				`docker inspect --format '{{.Id}}|{{range .Config.Env}}{{println .}}{{end}}|||' %s 2>/dev/null`, idList))
+			if strings.TrimSpace(envOut) != "" {
+				// Parse batch env output: container_id|env_line\nenv_line\n|||\ncontainer_id|...
+				envMap := parseBatchInspect(envOut)
+				for i := range data.Containers {
+					if envs, ok := envMap[data.Containers[i].ID]; ok {
+						data.Containers[i].Env = envs
+					}
+				}
+			}
+
+			// Batch labels: same approach
+			labelOut, _, _, _ := ssh.ExecContext(ctx, fmt.Sprintf(
+				`docker inspect --format '{{.Id}}|{{range $k, $v := .Config.Labels}}{{println $k "=" $v}}{{end}}|||' %s 2>/dev/null`, idList))
+			if strings.TrimSpace(labelOut) != "" {
+				labelMap := parseBatchInspect(labelOut)
+				for i := range data.Containers {
+					if labels, ok := labelMap[data.Containers[i].ID]; ok {
+						data.Containers[i].Labels = labels
+					}
+				}
+			}
 		}
 	}
 
@@ -163,6 +163,55 @@ func (c *DockerCollector) Collect(ctx context.Context, ssh SSHExecuter) (Categor
 
 	raw, _ := json.Marshal(data)
 	return CategoryData{Type: "docker", Data: raw}, nil
+}
+
+// parseBatchInspect parses the output of batch docker inspect.
+// Format: containerId|key=value\nkey=value\n|||\ncontainerId|key=value\n...
+// Returns map[containerID]map[key]value
+func parseBatchInspect(output string) map[string]map[string]string {
+	result := make(map[string]map[string]string)
+	currentID := ""
+	currentMap := make(map[string]string)
+
+	for _, line := range strings.Split(output, "\n") {
+		line = strings.TrimSpace(line)
+		if line == "" {
+			continue
+		}
+		if line == "|||" {
+			if currentID != "" {
+				result[currentID] = currentMap
+			}
+			currentID = ""
+			currentMap = make(map[string]string)
+			continue
+		}
+		if idx := strings.Index(line, "|"); idx > 0 {
+			// New container section
+			if currentID != "" {
+				result[currentID] = currentMap
+			}
+			currentID = line[:idx]
+			rest := line[idx+1:]
+			if rest != "" {
+				if eqIdx := strings.Index(rest, "="); eqIdx > 0 {
+					currentMap = make(map[string]string)
+					currentMap[rest[:eqIdx]] = rest[eqIdx+1:]
+				}
+			} else {
+				currentMap = make(map[string]string)
+			}
+			continue
+		}
+		// key=value line within current container
+		if idx := strings.Index(line, "="); idx > 0 && currentID != "" {
+			currentMap[line[:idx]] = line[idx+1:]
+		}
+	}
+	if currentID != "" {
+		result[currentID] = currentMap
+	}
+	return result
 }
 
 // DockerApplier applies Docker state to the target server.

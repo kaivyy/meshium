@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"sync"
 
 	"meshium/internal/mod/server"
 
@@ -85,9 +86,17 @@ func (p *Planner) Plan(ctx context.Context, req PlanRequest, onProgress StepCall
 		Categories:     req.Categories,
 	}
 
-	// 4. Collect data for each category
-	collectionErrors := 0
-	for _, catName := range req.Categories {
+	// 4. Collect data for each category IN PARALLEL
+	type collectResult struct {
+		catName string
+		data    CategoryData
+		err     error
+	}
+
+	results := make([]collectResult, len(req.Categories))
+	var wg sync.WaitGroup
+
+	for i, catName := range req.Categories {
 		if ctx.Err() != nil {
 			return nil, ctx.Err()
 		}
@@ -99,8 +108,20 @@ func (p *Planner) Plan(ctx context.Context, req PlanRequest, onProgress StepCall
 				Status: "error",
 				Error:  "unknown category: " + catName,
 			})
-			collectionErrors++
+			results[i] = collectResult{catName: catName, err: fmt.Errorf("unknown category: %s", catName)}
 			continue
+		}
+
+		// For configs, create a per-request copy with the specified paths
+		var collector Collector = mod.Collector
+		if catName == "configs" {
+			if cc, ok := mod.Collector.(*ConfigsCollector); ok {
+				paths := cc.Paths
+				if len(req.ConfigPaths) > 0 {
+					paths = req.ConfigPaths
+				}
+				collector = &ConfigsCollector{Paths: paths}
+			}
 		}
 
 		onProgress(WSMessage{
@@ -109,43 +130,44 @@ func (p *Planner) Plan(ctx context.Context, req PlanRequest, onProgress StepCall
 			Value:  "Collecting " + catName + "...",
 		})
 
-		// For configs, create a per-request copy with the specified paths
-		// to avoid mutating the shared singleton (race condition fix).
-		var collector Collector = mod.Collector
-		if catName == "configs" {
-			if cc, ok := mod.Collector.(*ConfigsCollector); ok {
-				paths := cc.Paths // copy existing paths from the singleton
-				if len(req.ConfigPaths) > 0 {
-					paths = req.ConfigPaths
-				}
-				collector = &ConfigsCollector{Paths: paths}
-			}
-		}
+		wg.Add(1)
+		go func(idx int, name string, coll Collector) {
+			defer wg.Done()
+			data, err := coll.Collect(ctx, sshClient)
+			results[idx] = collectResult{catName: name, data: data, err: err}
+		}(i, catName, collector)
+	}
 
-		data, err := collector.Collect(ctx, sshClient)
-		if err != nil {
+	wg.Wait()
+
+	// Process results
+	collectionErrors := 0
+	for _, res := range results {
+		if res.err != nil {
+			// Check if it was the "unknown category" error
+			if res.data.Type == "" && res.catName != "" {
+				// Already reported above
+				collectionErrors++
+				continue
+			}
 			onProgress(WSMessage{
-				Step:   "plan:" + catName,
+				Step:   "plan:" + res.catName,
 				Status: "error",
-				Error:  fmt.Sprintf("collect failed: %v", err),
+				Error:  fmt.Sprintf("collect failed: %v", res.err),
 			})
-			// Record the failed step with error data so the executor
-			// can detect it and refuse to execute the migration.
-			p.repo.CreateStep(planID, catName, "collect", fmt.Sprintf(`{"error":"collect failed: %s"}`, err.Error()))
-			// Mark the migration as failed — collection errors are fatal.
-			p.repo.UpdateMigrationStatus(planID, StatusFailed, fmt.Sprintf("collection failed for %s: %v", catName, err))
+			p.repo.CreateStep(planID, res.catName, "collect", fmt.Sprintf(`{"error":"collect failed: %s"}`, res.err.Error()))
+			p.repo.UpdateMigrationStatus(planID, StatusFailed, fmt.Sprintf("collection failed for %s: %v", res.catName, res.err))
 			collectionErrors++
 			continue
 		}
 
-		// Save collected data as a step
-		rawData, _ := json.Marshal(data)
-		p.repo.CreateStep(planID, catName, "collect", string(rawData))
+		rawData, _ := json.Marshal(res.data)
+		p.repo.CreateStep(planID, res.catName, "collect", string(rawData))
 
 		onProgress(WSMessage{
-			Step:   "plan:" + catName,
+			Step:   "plan:" + res.catName,
 			Status: "success",
-			Value:  "Collected " + catName,
+			Value:  "Collected " + res.catName,
 		})
 	}
 

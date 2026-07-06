@@ -8,6 +8,7 @@
     ChevronUp, ChevronDown, Keyboard, X
   } from 'lucide-svelte';
   import { api } from '$lib/api/client';
+  import { wsConnectGeneric } from '$lib/api/websocket';
   import { type Server } from '$lib/stores/servers';
   import { Badge, Card, EmptyState, PageHeader, Spinner } from '$lib/components/ui';
   import { toast } from '$lib/stores/toast';
@@ -176,74 +177,62 @@
       resizeObserver.observe(terminalContainer);
     }
 
-    // Connect WebSocket
-    const proto = location.protocol === 'https:' ? 'wss' : 'ws';
-    const token = typeof localStorage !== 'undefined' ? localStorage.getItem('meshium_session_token') : null;
-    const subprotocols = token ? [`meshium-auth.${token}`] : [];
     const cols = term.cols || 80;
     const rows = term.rows || 24;
-    const url = `${proto}://${location.host}/ws/terminal/${selectedServerId}?cols=${cols}&rows=${rows}`;
+    const path = `/ws/terminal/${selectedServerId}?cols=${cols}&rows=${rows}`;
 
     try {
-      wsConnection = subprotocols.length > 0
-        ? new WebSocket(url, subprotocols)
-        : new WebSocket(url);
+      const socket = wsConnectGeneric<WSMessage>(
+        path,
+        (msg) => {
+          if (wsConnection !== socket) return;
+          if (msg.type === 'connected') {
+            connectionStatus = 'connected';
+            hostname = msg.hostname || '';
+            if (term) {
+              term.focus();
+            }
+          } else if (msg.type === 'output') {
+            if (term) {
+              term.write(msg.data);
+            }
+          } else if (msg.type === 'error') {
+            if (term) {
+              term.write(`\r\n\x1b[31m${msg.message}\x1b[0m\r\n`);
+            }
+          } else if (msg.type === 'closed') {
+            if (term) {
+              term.write(`\r\n\x1b[90m${msg.data}\x1b[0m\r\n`);
+            }
+            connectionStatus = 'idle';
+          }
+        },
+        () => {
+          if (wsConnection !== socket) return;
+          connectionStatus = 'failed';
+          if (term) {
+            term.write('\r\n\x1b[31m✗ WebSocket connection error\x1b[0m\r\n');
+          }
+        },
+        () => {
+          if (wsConnection !== socket) return;
+          if (connectionStatus === 'connecting') {
+            connectionStatus = 'failed';
+          } else if (connectionStatus === 'connected') {
+            if (term) {
+              term.write('\r\n\x1b[90m— Connection closed —\x1b[0m\r\n');
+            }
+            connectionStatus = 'idle';
+          }
+          wsConnection = null;
+        }
+      );
+      wsConnection = socket;
     } catch {
       connectionStatus = 'failed';
       toast.error('Failed to open WebSocket connection');
       return;
     }
-
-    wsConnection.onopen = () => {
-      // Connection established, waiting for "connected" message from server
-    };
-
-    wsConnection.onmessage = (event) => {
-      try {
-        const msg = JSON.parse(event.data) as WSMessage;
-        if (msg.type === 'connected') {
-          connectionStatus = 'connected';
-          hostname = msg.hostname || '';
-          if (term) {
-            term.focus();
-          }
-        } else if (msg.type === 'output') {
-          if (term) {
-            term.write(msg.data);
-          }
-        } else if (msg.type === 'error') {
-          if (term) {
-            term.write(`\r\n\x1b[31m${msg.message}\x1b[0m\r\n`);
-          }
-        } else if (msg.type === 'closed') {
-          if (term) {
-            term.write(`\r\n\x1b[90m${msg.data}\x1b[0m\r\n`);
-          }
-          connectionStatus = 'idle';
-        }
-      } catch {
-        // ignore parse errors
-      }
-    };
-
-    wsConnection.onclose = () => {
-      if (connectionStatus === 'connecting') {
-        connectionStatus = 'failed';
-      } else if (connectionStatus === 'connected') {
-        if (term) {
-          term.write('\r\n\x1b[90m— Connection closed —\x1b[0m\r\n');
-        }
-        connectionStatus = 'idle';
-      }
-      wsConnection = null;
-    };
-
-    wsConnection.onerror = () => {
-      connectionStatus = 'failed';
-      if (term) {
-        term.write('\r\n\x1b[31m✗ WebSocket connection error\x1b[0m\r\n');
-      }
-    };
   }
 
   function closeConnection() {

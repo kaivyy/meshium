@@ -192,21 +192,24 @@ func isSSHDisconnectError(err error) bool {
 	return false
 }
 
-func collectorSteps(c *Collector) []func(ctx context.Context) StepResult {
-	return []func(ctx context.Context) StepResult{
-		c.CollectHostnameContext,
-		c.CollectOSContext,
-		c.CollectKernelContext,
-		c.CollectArchitectureContext,
-		c.CollectCPUModelContext,
-		c.CollectCPUCoresContext,
-		c.CollectRAMContext,
-		c.CollectDiskContext,
-		c.CollectVirtualizationContext,
-		c.CollectPublicIPContext,
-		c.CollectPrivateIPContext,
-		c.CollectTimezoneContext,
-		c.CollectProviderContext,
+func collectorSteps(c *Collector) []func(ctx context.Context) []StepResult {
+	return []func(ctx context.Context) []StepResult{
+		// Step 1: All local commands in ONE SSH call
+		c.CollectAllLocalContext,
+	}
+}
+
+// collectorNetworkStep returns the network collection step as a callback
+// that streams results via onStep as they complete.
+func collectorNetworkStep(c *Collector, onStep func(StepResult), isSSHAlive func() bool) func(ctx context.Context) {
+	return func(ctx context.Context) {
+		c.CollectNetworkInfoContext(ctx, func(sr StepResult) {
+			if sr.Error != nil && isSSHAlive() {
+				// Non-fatal: treat as "unknown" rather than killing the connection
+				sr = StepResult{Name: sr.Name, Value: "unknown"}
+			}
+			onStep(sr)
+		})
 	}
 }
 
@@ -325,25 +328,40 @@ func (s *Service) RunConnectionTest(ctx context.Context, serverID int, onStep St
 		LatencyMs: int(latency.Milliseconds()),
 	}
 
+	// Run local steps (single SSH call)
 	for _, collect := range results {
 		if ctx.Err() != nil {
 			return ctx.Err()
 		}
 
-		result := collect(ctx)
-		if result.Error != nil {
-			if client == nil || isSSHDisconnectError(result.Error) || !client.IsAlive() {
-				onStep(WSMessage{Step: "ssh", Status: "error", Error: "SSH connection lost"})
-				return fmt.Errorf("ssh connection lost: %w", result.Error)
+		stepResults := collect(ctx)
+		for _, result := range stepResults {
+			if result.Error != nil {
+				if client == nil || isSSHDisconnectError(result.Error) || !client.IsAlive() {
+					onStep(WSMessage{Step: "ssh", Status: "error", Error: "SSH connection lost"})
+					return fmt.Errorf("ssh connection lost: %w", result.Error)
+				}
 			}
-		}
 
-		onStep(stepMessageFromResult(result))
-		if ctx.Err() != nil {
-			return ctx.Err()
-		}
+			onStep(stepMessageFromResult(result))
+			if ctx.Err() != nil {
+				return ctx.Err()
+			}
 
-		applyResultToSystemInfo(&info, result)
+			applyResultToSystemInfo(&info, result)
+		}
+	}
+
+	// Run network steps in parallel (public_ip + provider)
+	// Results are streamed via onStep as soon as each completes
+	if ctx.Err() == nil {
+		networkStep := collectorNetworkStep(collector, func(sr StepResult) {
+			onStep(stepMessageFromResult(sr))
+			applyResultToSystemInfo(&info, sr)
+		}, func() bool {
+			return client != nil && client.IsAlive()
+		})
+		networkStep(ctx)
 	}
 
 	rawData, err := json.Marshal(info)

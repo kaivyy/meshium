@@ -24,10 +24,7 @@ func parsePort(addr string) int {
 // requests with "mock-output". It accepts a single connection.
 func startMockSSHServer(t *testing.T) (string, *ssh.ServerConfig) {
 	t.Helper()
-	listener, err := net.Listen("tcp", "127.0.0.1:0")
-	if err != nil {
-		t.Fatalf("Failed to listen: %v", err)
-	}
+	listener := listenForTest(t)
 	t.Cleanup(func() { _ = listener.Close() })
 
 	config := &ssh.ServerConfig{
@@ -118,10 +115,7 @@ func TestExecCommand(t *testing.T) {
 // connection and forwards direct-tcpip channels to the target address.
 func startBastionSSHServer(t *testing.T) string {
 	t.Helper()
-	listener, err := net.Listen("tcp", "127.0.0.1:0")
-	if err != nil {
-		t.Fatalf("bastion listen failed: %v", err)
-	}
+	listener := listenForTest(t)
 	t.Cleanup(func() { _ = listener.Close() })
 
 	hostKey, err := rsa.GenerateKey(rand.Reader, 2048)
@@ -199,10 +193,7 @@ func startBastionSSHServer(t *testing.T) string {
 // connections and responds to "exec" requests with "mock-output".
 func startMultiConnSSHServer(t *testing.T) string {
 	t.Helper()
-	listener, err := net.Listen("tcp", "127.0.0.1:0")
-	if err != nil {
-		t.Fatalf("listen failed: %v", err)
-	}
+	listener := listenForTest(t)
 	t.Cleanup(func() { _ = listener.Close() })
 
 	hostKey, err := rsa.GenerateKey(rand.Reader, 2048)

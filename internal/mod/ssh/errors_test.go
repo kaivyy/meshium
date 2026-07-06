@@ -49,10 +49,7 @@ func TestIsTransientErrorTyped(t *testing.T) {
 // detected as transient.
 func TestIsTransientErrorNetTimeout(t *testing.T) {
 	// Create a timeout error
-	ln, err := net.Listen("tcp", "127.0.0.1:0")
-	if err != nil {
-		t.Fatalf("listen failed: %v", err)
-	}
+	ln := listenForTest(t)
 	defer ln.Close()
 
 	conn, err := net.Dial("tcp", ln.Addr().String())
@@ -150,6 +147,8 @@ func TestGetContextCancellation(t *testing.T) {
 // TestGetContextCancelledDuringRetry verifies that the retry loop
 // respects context cancellation during backoff.
 func TestGetContextCancelledDuringRetry(t *testing.T) {
+	requireSocketForTest(t)
+
 	pool := NewPool(PoolConfig{
 		MaxIdle:     time.Minute,
 		MaxLifetime: 5 * time.Minute,

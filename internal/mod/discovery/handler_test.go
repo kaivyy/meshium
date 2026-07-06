@@ -2,6 +2,7 @@ package discovery
 
 import (
 	"context"
+	"net"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -61,6 +62,12 @@ func (r *blockingConnectionRunner) RunConnectionTest(ctx context.Context, server
 }
 
 func TestWSHandlerStopsOnWriteFailure(t *testing.T) {
+	listener, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Skipf("socket listen unavailable in this environment: %v", err)
+	}
+	listener.Close()
+
 	runner := &blockingConnectionRunner{
 		continueCh: make(chan struct{}),
 		doneCh:     make(chan struct{}),

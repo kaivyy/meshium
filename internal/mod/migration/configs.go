@@ -1,10 +1,14 @@
 package migration
 
 import (
+	"archive/tar"
 	"bytes"
 	"context"
+	"encoding/base64"
 	"encoding/json"
 	"fmt"
+	"io"
+	"path/filepath"
 	"strings"
 
 	"meshium/internal/shared"
@@ -69,7 +73,8 @@ type ConfigsCollector struct {
 	Paths []string // paths to collect (default: /etc/)
 }
 
-// Collect downloads config files from the source server.
+// Collect downloads config files from the source server using tar streaming
+// for maximum performance (single SSH round-trip instead of hundreds of SFTP reads).
 func (c *ConfigsCollector) Collect(ctx context.Context, ssh SSHExecuter) (CategoryData, error) {
 	paths := c.Paths
 	if len(paths) == 0 {
@@ -81,29 +86,45 @@ func (c *ConfigsCollector) Collect(ctx context.Context, ssh SSHExecuter) (Catego
 	}
 
 	for _, path := range paths {
-		// List files in the directory
-		stdout, _, _, err := ssh.ExecContext(ctx, fmt.Sprintf("find %s -type f 2>/dev/null", shared.ShellQuote(strings.TrimRight(path, "/"))))
-		if err != nil {
-			continue // non-fatal
+		cleanPath := strings.TrimRight(path, "/")
+		if cleanPath == "" {
+			cleanPath = "/etc"
 		}
 
-		for _, file := range strings.Split(strings.TrimSpace(stdout), "\n") {
-			file = strings.TrimSpace(file)
-			if file == "" {
+		// Build a find command that excludes OS-critical files, then tar the result.
+		// This downloads ALL files in a single SSH round-trip via tar stream.
+		excludeArgs := buildExcludeArgs()
+		cmd := fmt.Sprintf(
+			`find %s -type f %s 2>/dev/null | tar -cf - -T - 2>/dev/null | base64`,
+			shared.ShellQuote(cleanPath), excludeArgs,
+		)
+
+		stdout, _, _, err := ssh.ExecContext(ctx, cmd)
+		if err != nil {
+			// Fallback: try individual file download (old method)
+			c.collectSlow(ctx, ssh, cleanPath, &data)
+			continue
+		}
+
+		// Decode base64 and parse tar archive
+		tarData, err := base64Decode(stdout)
+		if err != nil {
+			c.collectSlow(ctx, ssh, cleanPath, &data)
+			continue
+		}
+
+		// Parse tar archive in memory
+		files, err := parseTarArchive(tarData)
+		if err != nil {
+			c.collectSlow(ctx, ssh, cleanPath, &data)
+			continue
+		}
+
+		for path, content := range files {
+			if isExcluded(path) {
 				continue
 			}
-
-			// Skip OS-critical files
-			if isExcluded(file) {
-				continue
-			}
-
-			// Download the file content
-			buf := new(bytes.Buffer)
-			if err := ssh.Download(file, buf); err != nil {
-				continue // non-fatal
-			}
-			data.Files[file] = buf.Bytes()
+			data.Files[path] = content
 		}
 	}
 
@@ -111,6 +132,72 @@ func (c *ConfigsCollector) Collect(ctx context.Context, ssh SSHExecuter) (Catego
 
 	raw, _ := json.Marshal(data)
 	return CategoryData{Type: "configs", Data: raw}, nil
+}
+
+// collectSlow is the fallback method that downloads files one-by-one via SFTP.
+func (c *ConfigsCollector) collectSlow(ctx context.Context, ssh SSHExecuter, path string, data *ConfigsData) {
+	stdout, _, _, err := ssh.ExecContext(ctx, fmt.Sprintf("find %s -type f 2>/dev/null", shared.ShellQuote(path)))
+	if err != nil {
+		return
+	}
+
+	for _, file := range strings.Split(strings.TrimSpace(stdout), "\n") {
+		file = strings.TrimSpace(file)
+		if file == "" || isExcluded(file) {
+			continue
+		}
+		buf := new(bytes.Buffer)
+		if err := ssh.Download(file, buf); err != nil {
+			continue
+		}
+		data.Files[file] = buf.Bytes()
+	}
+}
+
+// buildExcludeArgs builds find exclude arguments for OS-critical files.
+func buildExcludeArgs() string {
+	var args []string
+	for _, excl := range configExclusions {
+		if strings.HasSuffix(excl, "/") {
+			args = append(args, fmt.Sprintf("-not -path '%s*'", excl))
+		} else {
+			args = append(args, fmt.Sprintf("-not -name '%s'", filepath.Base(excl)))
+		}
+	}
+	return strings.Join(args, " ")
+}
+
+// base64Decode decodes base64 encoded data, trimming whitespace.
+func base64Decode(s string) ([]byte, error) {
+	s = strings.TrimSpace(s)
+	if s == "" {
+		return nil, fmt.Errorf("empty base64 input")
+	}
+	return base64.StdEncoding.DecodeString(s)
+}
+
+// parseTarArchive parses a tar archive in memory and returns map[path]content.
+func parseTarArchive(data []byte) (map[string][]byte, error) {
+	files := make(map[string][]byte)
+	r := tar.NewReader(bytes.NewReader(data))
+	for {
+		header, err := r.Next()
+		if err == io.EOF {
+			break
+		}
+		if err != nil {
+			return files, err
+		}
+		if header.Typeflag != tar.TypeReg {
+			continue
+		}
+		content, err := io.ReadAll(r)
+		if err != nil {
+			continue
+		}
+		files[header.Name] = content
+	}
+	return files, nil
 }
 
 // ConfigsApplier uploads config files to the target server.

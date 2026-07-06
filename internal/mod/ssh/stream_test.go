@@ -4,7 +4,6 @@ import (
 	"context"
 	"crypto/rand"
 	"crypto/rsa"
-	"net"
 	"strings"
 	"sync"
 	"testing"
@@ -16,10 +15,7 @@ import (
 // stdout and stderr in response to exec requests.
 func startMockSSHServerWithStderr(t *testing.T) string {
 	t.Helper()
-	listener, err := net.Listen("tcp", "127.0.0.1:0")
-	if err != nil {
-		t.Fatalf("Failed to listen: %v", err)
-	}
+	listener := listenForTest(t)
 	t.Cleanup(func() { _ = listener.Close() })
 
 	config := &ssh.ServerConfig{NoClientAuth: true}
