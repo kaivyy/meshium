@@ -79,20 +79,20 @@
   }
 </script>
 
-<div class="overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm">
-  <table class="min-w-full divide-y divide-slate-200">
-    <thead class="bg-slate-50">
+<div class="overflow-hidden rounded-2xl border border-border bg-surface shadow-sm">
+  <table class="min-w-full divide-y divide-border">
+    <thead class="bg-surface-muted">
       <tr>
         {#each columns as column}
           <th
             scope="col"
-            class={`px-4 py-3 text-xs font-semibold uppercase tracking-wide text-slate-500 ${alignClass(column.align)}`}
+            class={`px-4 py-3 text-xs font-semibold uppercase tracking-wide text-fg-subtle ${alignClass(column.align)}`}
             style={column.width ? `width: ${column.width};` : undefined}
           >
             {#if column.sortable}
               <button
                 type="button"
-                class="inline-flex items-center gap-1 rounded-lg transition-colors hover:text-slate-900"
+                class="inline-flex items-center gap-1 rounded-lg transition-colors hover:text-fg"
                 onclick={() => handleSort(column)}
               >
                 <span>{column.label}</span>
@@ -112,10 +112,10 @@
       </tr>
     </thead>
 
-    <tbody class="divide-y divide-slate-100">
+    <tbody class="divide-y divide-border">
       {#if loading}
         <tr>
-          <td class="px-4 py-8 text-center text-slate-500" colspan={columns.length}>
+          <td class="px-4 py-8 text-center text-fg-subtle" colspan={columns.length}>
             <div class="flex items-center justify-center gap-2">
               <Loader2 size={18} class="animate-spin" />
               <span>Loading...</span>
@@ -124,7 +124,7 @@
         </tr>
       {:else if sortedData.length === 0}
         <tr>
-          <td class="px-4 py-8 text-center text-sm text-slate-500" colspan={columns.length}>
+          <td class="px-4 py-8 text-center text-sm text-fg-subtle" colspan={columns.length}>
             {#if empty}
               {@render empty()}
             {:else}
@@ -135,7 +135,7 @@
       {:else}
         {#each sortedData as row (row[rowKey] as string | number)}
           <tr
-            class={onRowClick ? 'cursor-pointer hover:bg-slate-50' : ''}
+            class={onRowClick ? 'cursor-pointer hover:bg-surface-muted' : ''}
             role={onRowClick ? 'button' : undefined}
             tabindex={onRowClick ? 0 : undefined}
             onclick={() => onRowClick?.(row)}
@@ -148,7 +148,7 @@
           >
             {#each columns as column}
               {@const value = getCellValue(row, column.key)}
-              <td class={`px-4 py-4 text-sm text-slate-700 ${alignClass(column.align)}`}>
+              <td class={`px-4 py-4 text-sm text-fg-muted ${alignClass(column.align)}`}>
                 {#if cell}
                   {@render cell({ column, row, value })}
                 {:else}

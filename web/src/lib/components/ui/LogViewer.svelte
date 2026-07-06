@@ -31,9 +31,9 @@
   }
 
   const levelClasses: Record<LogEntry['level'], string> = {
-    info: 'text-slate-400',
-    warn: 'text-yellow-400',
-    error: 'text-red-400',
+    info: 'text-fg-subtle',
+    warn: 'text-warning',
+    error: 'text-error',
   };
 
   $effect(() => {
@@ -55,24 +55,24 @@
   });
 </script>
 
-<div bind:this={container} class="max-h-96 overflow-auto rounded-lg bg-slate-900 p-4">
+<div bind:this={container} class="max-h-96 overflow-auto rounded-lg bg-surface-muted p-4">
   {#if streaming}
-    <div class="mb-3 flex items-center gap-2 text-xs font-medium text-slate-400">
-      <span class="h-2 w-2 rounded-full bg-blue-400 animate-pulse"></span>
+    <div class="mb-3 flex items-center gap-2 text-xs font-medium text-fg-subtle">
+      <span class="h-2 w-2 rounded-full bg-accent animate-pulse"></span>
       <span>Live</span>
     </div>
   {/if}
 
   {#if logs.length === 0}
-    <div class="py-8 text-center text-sm text-slate-500">No logs yet</div>
+    <div class="py-8 text-center text-sm text-fg-subtle">No logs yet</div>
   {:else}
     <div class="space-y-1 font-mono text-xs break-all">
       {#each logs as log}
         <div class="flex items-start gap-3">
-          <span class="shrink-0 text-slate-500">{formatTimestamp(log.timestamp)}</span>
+          <span class="shrink-0 text-fg-subtle">{formatTimestamp(log.timestamp)}</span>
           <span class={`shrink-0 ${levelClasses[log.level]}`}>[{log.level}]</span>
-          <span class="shrink-0 text-slate-300">{log.step}</span>
-          <span class="min-w-0 flex-1 text-slate-200">{log.message}</span>
+          <span class="shrink-0 text-fg-muted">{log.step}</span>
+          <span class="min-w-0 flex-1 text-fg">{log.message}</span>
         </div>
       {/each}
     </div>

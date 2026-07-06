@@ -12,10 +12,10 @@
   let { value, label, sublabel, variant = 'default', animated = false }: ProgressBarProps = $props();
 
   const variantClasses: Record<ProgressVariant, string> = {
-    default: 'bg-blue-600',
-    success: 'bg-green-500',
-    warning: 'bg-yellow-500',
-    error: 'bg-red-500',
+    default: 'bg-accent',
+    success: 'bg-success',
+    warning: 'bg-warning',
+    error: 'bg-error',
   };
 
   const percentage = $derived.by(() => Math.max(0, Math.min(100, value)));
@@ -23,13 +23,13 @@
 
 <div class="w-full">
   {#if label}
-    <div class="mb-1 flex justify-between text-sm text-slate-600">
+    <div class="mb-1 flex justify-between text-sm text-fg-muted">
       <span>{label}</span>
       <span>{percentage}%</span>
     </div>
   {/if}
 
-  <div class="w-full overflow-hidden rounded-full bg-slate-200 h-2" role="progressbar" aria-valuemin="0" aria-valuemax="100" aria-valuenow={percentage} aria-label={label || 'Progress'}>
+  <div class="w-full overflow-hidden rounded-full bg-surface-muted h-2" role="progressbar" aria-valuemin="0" aria-valuemax="100" aria-valuenow={percentage} aria-label={label || 'Progress'}>
     <div
       class={`h-2 rounded-full transition-all duration-300 ${variantClasses[variant]} ${animated ? 'animate-pulse' : ''}`}
       style={`width: ${percentage}%`}
@@ -37,6 +37,6 @@
   </div>
 
   {#if sublabel}
-    <p class="mt-1 text-xs text-slate-400">{sublabel}</p>
+    <p class="mt-1 text-xs text-fg-subtle">{sublabel}</p>
   {/if}
 </div>

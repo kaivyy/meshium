@@ -49,17 +49,17 @@
     ></button>
 
     <div
-      class={`relative z-10 w-full ${sizeClasses[size]} overflow-hidden rounded-2xl bg-white shadow-xl max-h-[90vh] flex flex-col`}
+      class={`relative z-10 w-full ${sizeClasses[size]} overflow-hidden rounded-2xl bg-surface shadow-xl max-h-[90vh] flex flex-col`}
       role="dialog"
       aria-modal="true"
       aria-labelledby="modal-title"
       tabindex="-1"
     >
-      <div class="flex items-start justify-between border-b border-slate-200 px-6 py-4 shrink-0">
-        <h2 id="modal-title" class="text-lg font-semibold text-slate-900">{title}</h2>
+      <div class="flex items-start justify-between border-b border-border px-6 py-4 shrink-0">
+        <h2 id="modal-title" class="text-lg font-semibold text-fg">{title}</h2>
         <button
           type="button"
-          class="rounded-lg p-1.5 text-slate-500 transition-colors hover:bg-slate-100 hover:text-slate-700 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500"
+          class="rounded-lg p-1.5 text-fg-subtle transition-colors hover:bg-surface-muted hover:text-fg focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent"
           aria-label="Close modal"
           onclick={closeModal}
         >
@@ -74,7 +74,7 @@
       </div>
 
       {#if footer}
-        <div class="border-t border-slate-200 px-6 py-4">
+        <div class="border-t border-border px-6 py-4">
           {@render footer()}
         </div>
       {/if}

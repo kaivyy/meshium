@@ -30,12 +30,12 @@
 
   const variantClass = $derived(
     variant === 'primary'
-      ? 'bg-blue-600 text-white hover:bg-blue-700 focus-visible:ring-blue-500'
+      ? 'bg-accent text-accent-fg hover:bg-accent-hover focus-visible:ring-accent'
       : variant === 'secondary'
-        ? 'border border-slate-300 bg-white text-slate-700 hover:bg-slate-50 focus-visible:ring-blue-500'
+        ? 'border border-border-strong bg-surface text-fg-muted hover:bg-surface-muted focus-visible:ring-accent'
         : variant === 'danger'
-          ? 'bg-red-600 text-white hover:bg-red-700 focus-visible:ring-red-500'
-          : 'text-slate-600 hover:bg-slate-100 focus-visible:ring-blue-500'
+          ? 'bg-error text-white hover:opacity-90 focus-visible:ring-error'
+          : 'text-fg-muted hover:bg-surface-muted focus-visible:ring-accent'
   );
 
   const sizeClass = $derived(

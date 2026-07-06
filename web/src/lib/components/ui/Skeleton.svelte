@@ -12,7 +12,7 @@
 </script>
 
 <div
-  class={`animate-pulse bg-slate-200 ${radius} ${className}`}
+  class={`animate-pulse bg-surface-muted ${radius} ${className}`}
   style={`width: ${width}; height: ${height};`}
   aria-hidden="true"
 ></div>

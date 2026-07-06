@@ -58,7 +58,7 @@
     onclick={toggle}
     aria-label={label}
     aria-expanded={open}
-    class="inline-flex items-center justify-center rounded-lg p-1.5 text-slate-400 transition-colors hover:bg-slate-100 hover:text-slate-700"
+    class="inline-flex items-center justify-center rounded-lg p-1.5 text-fg-subtle transition-colors hover:bg-surface-muted hover:text-fg"
   >
     {#if trigger}
       {@render trigger()}
@@ -69,21 +69,21 @@
 
   {#if open}
     <div
-      class={`absolute z-50 mt-1 min-w-48 rounded-lg border border-slate-200 bg-white py-1 shadow-lg ${align === 'right' ? 'right-0' : 'left-0'}`}
+      class={`absolute z-50 mt-1 min-w-48 rounded-lg border border-border bg-surface py-1 shadow-lg ${align === 'right' ? 'right-0' : 'left-0'}`}
       role="menu"
     >
       {#each items as item, i}
         {#if item.divider}
-          <div class="my-1 border-t border-slate-100"></div>
+          <div class="my-1 border-t border-border"></div>
         {:else if item.href}
           <a
             href={item.href}
             role="menuitem"
-            class={`flex items-center gap-2.5 px-4 py-2 text-sm transition-colors hover:bg-slate-50 ${item.danger ? 'text-red-600 hover:bg-red-50' : 'text-slate-700'}`}
+            class={`flex items-center gap-2.5 px-4 py-2 text-sm transition-colors hover:bg-surface-muted ${item.danger ? 'text-error hover:bg-error/10' : 'text-fg-muted'}`}
             onclick={() => { open = false; }}
           >
             {#if item.icon}
-              <span class="shrink-0 text-slate-400">
+              <span class="shrink-0 text-fg-subtle">
                 {@render item.icon()}
               </span>
             {/if}
@@ -93,11 +93,11 @@
           <button
             type="button"
             role="menuitem"
-            class={`flex w-full items-center gap-2.5 px-4 py-2 text-left text-sm transition-colors hover:bg-slate-50 ${item.danger ? 'text-red-600 hover:bg-red-50' : 'text-slate-700'}`}
+            class={`flex w-full items-center gap-2.5 px-4 py-2 text-left text-sm transition-colors hover:bg-surface-muted ${item.danger ? 'text-error hover:bg-error/10' : 'text-fg-muted'}`}
             onclick={() => { open = false; item.onclick?.(); }}
           >
             {#if item.icon}
-              <span class="shrink-0 text-slate-400">
+              <span class="shrink-0 text-fg-subtle">
                 {@render item.icon()}
               </span>
             {/if}

@@ -16,7 +16,7 @@
   {#if backHref}
     <a
       href={backHref}
-      class="mb-3 inline-flex items-center gap-1.5 text-sm text-slate-500 transition-colors hover:text-slate-900 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 focus-visible:ring-offset-2 rounded-lg"
+      class="mb-3 inline-flex items-center gap-1.5 text-sm text-fg-subtle transition-colors hover:text-fg focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent focus-visible:ring-offset-2 rounded-lg"
     >
       <ArrowLeft size={16} aria-hidden="true" />
       Back
@@ -25,9 +25,9 @@
 
   <div class="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
     <div>
-      <h1 class="text-xl font-bold text-slate-900 tracking-tight">{title}</h1>
+      <h1 class="text-xl font-bold text-fg tracking-tight">{title}</h1>
       {#if subtitle}
-        <p class="mt-1 text-sm text-slate-500">{subtitle}</p>
+        <p class="mt-1 text-sm text-fg-muted">{subtitle}</p>
       {/if}
     </div>
 

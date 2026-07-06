@@ -14,14 +14,14 @@
 
   const variantClass = $derived(
     variant === 'success'
-      ? 'bg-green-100 text-green-800 border border-green-200'
+      ? 'bg-success/15 text-success border border-success/30'
       : variant === 'warning'
-        ? 'bg-yellow-100 text-yellow-800 border border-yellow-200'
+        ? 'bg-warning/15 text-warning border border-warning/30'
         : variant === 'error'
-          ? 'bg-red-100 text-red-800 border border-red-200'
+          ? 'bg-error/15 text-error border border-error/30'
           : variant === 'info'
-            ? 'bg-blue-100 text-blue-800 border border-blue-200'
-            : 'bg-slate-100 text-slate-700 border border-slate-200'
+            ? 'bg-info/15 text-info border border-info/30'
+            : 'bg-surface-muted text-fg-muted border border-border'
   );
 
   const sizeClass = $derived(size === 'sm' ? 'px-2 py-0.5' : 'px-2.5 py-1');
