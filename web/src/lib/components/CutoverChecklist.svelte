@@ -33,30 +33,30 @@
   ];
 </script>
 
-<div class="bg-gray-900 rounded-xl p-6 border border-gray-800">
+<div class="bg-surface rounded-xl p-6 border border-border">
   <div class="flex items-center gap-3 mb-5">
-    <div class="w-10 h-10 rounded-lg bg-yellow-500/20 flex items-center justify-center">
-      <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" class="text-yellow-400"><path d="M13 2 3 14h9l-1 8 10-12h-9l1-8z"/></svg>
+    <div class="w-10 h-10 rounded-lg bg-warning/20 flex items-center justify-center">
+      <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" class="text-warning"><path d="M13 2 3 14h9l-1 8 10-12h-9l1-8z"/></svg>
     </div>
     <div>
-      <h2 class="text-lg font-semibold">Cutover Readiness</h2>
-      <p class="text-sm text-gray-400">All checks must pass before cutover can start</p>
+      <h2 class="text-lg font-semibold text-fg">Cutover Readiness</h2>
+      <p class="text-sm text-fg-muted">All checks must pass before cutover can start</p>
     </div>
   </div>
 
   <div class="space-y-2.5 mb-6">
     {#each checks as check}
       <div class="flex items-center gap-3">
-        <div class="w-6 h-6 rounded-full flex items-center justify-center {check.done ? 'bg-green-500/20' : 'bg-gray-800'}">
+        <div class="w-6 h-6 rounded-full flex items-center justify-center {check.done ? 'bg-success/20' : 'bg-surface-muted'}">
           {#if check.done}
-            <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" class="text-green-400"><polyline points="20 6 9 17 4 12"/></svg>
+            <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" class="text-success"><polyline points="20 6 9 17 4 12"/></svg>
           {:else}
-            <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" class="text-gray-500"><circle cx="12" cy="12" r="10"/></svg>
+            <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" class="text-fg-subtle"><circle cx="12" cy="12" r="10"/></svg>
           {/if}
         </div>
-        <span class="text-sm {check.done ? 'text-gray-300' : 'text-gray-500'}">{check.label}</span>
+        <span class="text-sm {check.done ? 'text-fg-muted' : 'text-fg-subtle'}">{check.label}</span>
         {#if !check.done}
-          <span class="ml-auto text-xs text-yellow-400">Pending</span>
+          <span class="ml-auto text-xs text-warning">Pending</span>
         {/if}
       </div>
     {/each}
@@ -66,12 +66,12 @@
     <button
       on:click={onCutover}
       disabled={!allChecksPassed || actionLoading}
-      class="px-6 py-2.5 bg-yellow-600 hover:bg-yellow-700 disabled:opacity-40 disabled:cursor-not-allowed rounded-lg font-medium transition-colors"
+      class="px-6 py-2.5 bg-warning text-accent-fg hover:bg-warning/90 disabled:opacity-40 disabled:cursor-not-allowed rounded-lg font-medium transition-colors"
     >
       {actionLoading ? 'Cutover in progress...' : 'Start Cutover'}
     </button>
     {#if !allChecksPassed}
-      <span class="text-xs text-gray-500">{checks.filter((c) => !c.done).length} checks remaining</span>
+      <span class="text-xs text-fg-subtle">{checks.filter((c) => !c.done).length} checks remaining</span>
     {/if}
   </div>
 </div>

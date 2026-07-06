@@ -18,12 +18,12 @@
 
   function nodeColor(type: string): string {
     switch (type) {
-      case 'reverse_proxy': return 'border-blue-500/50 bg-blue-500/10 text-blue-300';
-      case 'database': return 'border-purple-500/50 bg-purple-500/10 text-purple-300';
-      case 'cache': return 'border-red-500/50 bg-red-500/10 text-red-300';
-      case 'queue': return 'border-yellow-500/50 bg-yellow-500/10 text-yellow-300';
-      case 'worker': return 'border-orange-500/50 bg-orange-500/10 text-orange-300';
-      default: return 'border-gray-600 bg-gray-800 text-gray-300';
+      case 'reverse_proxy': return 'border-info/50 bg-info/10 text-info';
+      case 'database': return 'border-accent/50 bg-accent/10 text-accent';
+      case 'cache': return 'border-error/50 bg-error/10 text-error';
+      case 'queue': return 'border-warning/50 bg-warning/10 text-warning';
+      case 'worker': return 'border-success/50 bg-success/10 text-success';
+      default: return 'border-border bg-surface-muted text-fg-muted';
     }
   }
 
@@ -56,7 +56,7 @@
   }
 </script>
 
-<div class="bg-gray-900 rounded-xl p-4 border border-gray-800">
+<div class="bg-surface rounded-xl p-4 border border-border">
   {#if graph && graph.nodes.length > 0}
     <div class="space-y-3">
       {#each layers as layer, li}
@@ -67,7 +67,7 @@
               <div>
                 <div class="text-sm font-medium">{node.name}</div>
                 {#if node.port}
-                  <div class="text-xs text-gray-500">:{node.port}</div>
+                  <div class="text-xs text-fg-subtle">:{node.port}</div>
                 {/if}
               </div>
             </div>
@@ -75,7 +75,7 @@
         </div>
         {#if li < layers.length - 1}
           <div class="flex justify-center">
-            <svg width="16" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" class="text-gray-600">
+            <svg width="16" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" class="text-fg-subtle">
               <path d="M12 5v14M19 12l-7 7-7-7"/>
             </svg>
           </div>
@@ -83,7 +83,7 @@
       {/each}
     </div>
   {:else}
-    <div class="text-center py-8 text-gray-500">
+    <div class="text-center py-8 text-fg-subtle">
       <p class="text-sm">No dependency graph available.</p>
       <p class="text-xs mt-1">Run discovery and planner to see the dependency graph.</p>
     </div>

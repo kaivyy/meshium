@@ -20,22 +20,22 @@
 
     <Card padding="lg">
       <div class="flex flex-col items-center justify-center py-12 text-center">
-        <div class="inline-flex items-center justify-center rounded-2xl bg-slate-100 p-4 text-slate-400">
+        <div class="inline-flex items-center justify-center rounded-2xl bg-surface-muted p-4 text-fg-subtle">
           <icon size={32}></icon>
         </div>
-        <h3 class="mt-4 text-base font-semibold text-slate-900">{title} — Coming Soon</h3>
-        <p class="mt-1 max-w-md text-sm text-slate-500">
+        <h3 class="mt-4 text-base font-semibold text-fg">{title} — Coming Soon</h3>
+        <p class="mt-1 max-w-md text-sm text-fg-muted">
           This module is part of the Meshium roadmap. The backend API is ready —
           the UI is under active development.
         </p>
 
         {#if features.length > 0}
           <div class="mt-6 w-full max-w-md">
-            <p class="mb-2 text-xs font-semibold uppercase tracking-wider text-slate-400">Planned Features</p>
+            <p class="mb-2 text-xs font-semibold uppercase tracking-wider text-fg-subtle">Planned Features</p>
             <ul class="space-y-1.5">
               {#each features as feature}
-                <li class="flex items-center gap-2 text-sm text-slate-600">
-                  <span class="inline-block h-1.5 w-1.5 rounded-full bg-blue-500"></span>
+                <li class="flex items-center gap-2 text-sm text-fg-muted">
+                  <span class="inline-block h-1.5 w-1.5 rounded-full bg-accent"></span>
                   {feature}
                 </li>
               {/each}

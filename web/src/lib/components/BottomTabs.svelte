@@ -25,38 +25,38 @@
 
   function severityColor(sev: string): string {
     switch (sev) {
-      case 'critical': return 'bg-red-500/20 text-red-400 border-red-500/30';
-      case 'high': return 'bg-orange-500/20 text-orange-400 border-orange-500/30';
-      case 'warning': return 'bg-yellow-500/20 text-yellow-400 border-yellow-500/30';
-      default: return 'bg-blue-500/20 text-blue-400 border-blue-500/30';
+      case 'critical': return 'bg-error/20 text-error border-error/30';
+      case 'high': return 'bg-warning/20 text-warning border-warning/30';
+      case 'warning': return 'bg-warning/20 text-warning border-warning/30';
+      default: return 'bg-info/20 text-info border-info/30';
     }
   }
 
   function warningTypeColor(type: string): string {
     switch (type) {
-      case 'blocking': return 'bg-red-500/20 text-red-400';
-      case 'risk': return 'bg-orange-500/20 text-orange-400';
-      case 'manual_step': return 'bg-yellow-500/20 text-yellow-400';
-      case 'recommendation': return 'bg-blue-500/20 text-blue-400';
-      case 'rollback_note': return 'bg-purple-500/20 text-purple-400';
-      default: return 'bg-gray-500/20 text-gray-400';
+      case 'blocking': return 'bg-error/20 text-error';
+      case 'risk': return 'bg-warning/20 text-warning';
+      case 'manual_step': return 'bg-warning/20 text-warning';
+      case 'recommendation': return 'bg-info/20 text-info';
+      case 'rollback_note': return 'bg-accent/20 text-accent';
+      default: return 'bg-surface-muted text-fg-subtle';
     }
   }
 
   import type { RiskReport } from '$lib/api/pipeline';
 </script>
 
-<div class="bg-gray-900 rounded-xl border border-gray-800 flex flex-col" style="min-height: 200px;">
+<div class="bg-surface rounded-xl border border-border flex flex-col" style="min-height: 200px;">
   <!-- Tab Bar -->
-  <div class="flex items-center border-b border-gray-800 px-2 shrink-0">
+  <div class="flex items-center border-b border-border px-2 shrink-0">
     {#each tabs as tab}
       <button
         on:click={() => (activeTab = tab.id)}
-        class="px-3 py-2.5 text-xs font-medium border-b-2 transition-colors {activeTab === tab.id ? 'border-blue-500 text-blue-400' : 'border-transparent text-gray-500 hover:text-gray-300'}"
+        class="px-3 py-2.5 text-xs font-medium border-b-2 transition-colors {activeTab === tab.id ? 'border-accent text-accent' : 'border-transparent text-fg-subtle hover:text-fg-muted'}"
       >
         {tab.label}
         {#if tab.id === 'warnings' && warnings.length > 0}
-          <span class="ml-1 px-1.5 py-0.5 rounded-full text-xs bg-yellow-500/20 text-yellow-400">{warnings.length}</span>
+          <span class="ml-1 px-1.5 py-0.5 rounded-full text-xs bg-warning/20 text-warning">{warnings.length}</span>
         {/if}
       </button>
     {/each}
@@ -69,18 +69,18 @@
         <div class="space-y-1.5">
           {#each auditTrail.slice(-30).reverse() as entry}
             <div class="flex items-start gap-2 text-xs">
-              <span class="text-gray-500 shrink-0 w-16">{new Date(entry.createdAt).toLocaleTimeString()}</span>
-              <span class="px-1.5 py-0.5 rounded bg-gray-800 text-gray-300 shrink-0">{entry.eventType}</span>
+              <span class="text-fg-subtle shrink-0 w-16">{new Date(entry.createdAt).toLocaleTimeString()}</span>
+              <span class="px-1.5 py-0.5 rounded bg-surface-muted text-fg-muted shrink-0">{entry.eventType}</span>
               {#if entry.previousState && entry.newState}
-                <span class="text-gray-400">{entry.previousState} &rarr; {entry.newState}</span>
+                <span class="text-fg-subtle">{entry.previousState} &rarr; {entry.newState}</span>
               {/if}
             </div>
           {/each}
         </div>
       {:else}
-        <div class="text-center py-6 text-gray-500 text-sm">
+        <div class="text-center py-6 text-fg-subtle text-sm">
           No timeline events yet
-          <button on:click={onRefreshAudit} class="block mx-auto mt-2 text-xs text-blue-400 hover:text-blue-300">Load Timeline</button>
+          <button on:click={onRefreshAudit} class="block mx-auto mt-2 text-xs text-accent hover:text-accent-hover">Load Timeline</button>
         </div>
       {/if}
 
@@ -89,12 +89,12 @@
         {#if wsMessages.length > 0}
           {#each wsMessages.slice(-50) as msg}
             <div class="flex items-start gap-2">
-              <span class="px-1.5 py-0.5 rounded shrink-0 {msg.status === 'error' ? 'bg-red-500/20 text-red-400' : msg.status === 'success' || msg.status === 'complete' ? 'bg-green-500/20 text-green-400' : 'bg-blue-500/20 text-blue-400'}">{msg.status}</span>
-              <span class="text-gray-300">[{msg.step}] {msg.value || msg.error || ''}</span>
+              <span class="px-1.5 py-0.5 rounded shrink-0 {msg.status === 'error' ? 'bg-error/20 text-error' : msg.status === 'success' || msg.status === 'complete' ? 'bg-success/20 text-success' : 'bg-info/20 text-info'}">{msg.status}</span>
+              <span class="text-fg-muted">[{msg.step}] {msg.value || msg.error || ''}</span>
             </div>
           {/each}
         {:else}
-          <p class="text-gray-500 text-center py-6">No logs yet. Start the pipeline to see real-time logs.</p>
+          <p class="text-fg-subtle text-center py-6">No logs yet. Start the pipeline to see real-time logs.</p>
         {/if}
       </div>
 
@@ -103,14 +103,14 @@
         <div class="space-y-1.5">
           {#each events.slice(-30).reverse() as event}
             <div class="flex items-start gap-2 text-xs">
-              <span class="text-gray-500 shrink-0 w-16">{new Date(event.timestamp).toLocaleTimeString()}</span>
+              <span class="text-fg-subtle shrink-0 w-16">{new Date(event.timestamp).toLocaleTimeString()}</span>
               <span class="px-1.5 py-0.5 rounded shrink-0 {severityColor(event.level)}">{event.level}</span>
-              <span class="text-gray-300">{event.message}</span>
+              <span class="text-fg-muted">{event.message}</span>
             </div>
           {/each}
         </div>
       {:else}
-        <p class="text-gray-500 text-center py-6 text-sm">No events recorded yet.</p>
+        <p class="text-fg-subtle text-center py-6 text-sm">No events recorded yet.</p>
       {/if}
 
     {:else if activeTab === 'graph'}
@@ -120,47 +120,47 @@
       {#if warnings.length > 0}
         <div class="space-y-2">
           {#each warnings as warning}
-            <div class="flex items-start gap-3 p-2.5 rounded-lg bg-gray-800">
+            <div class="flex items-start gap-3 p-2.5 rounded-lg bg-surface-muted">
               <span class="px-2 py-0.5 rounded text-xs font-medium shrink-0 {warningTypeColor(warning.type)}">{warning.type}</span>
               <div class="flex-1">
-                <div class="text-sm text-gray-300">{warning.message}</div>
+                <div class="text-sm text-fg-muted">{warning.message}</div>
                 {#if warning.recommendation}
-                  <div class="text-xs text-gray-500 mt-1">{warning.recommendation}</div>
+                  <div class="text-xs text-fg-subtle mt-1">{warning.recommendation}</div>
                 {/if}
               </div>
               {#if warning.blocking}
-                <span class="text-xs text-red-400 shrink-0">BLOCKING</span>
+                <span class="text-xs text-error shrink-0">BLOCKING</span>
               {/if}
             </div>
           {/each}
         </div>
       {:else}
-        <p class="text-gray-500 text-center py-6 text-sm">No warnings. Run planner to check for issues.</p>
+        <p class="text-fg-subtle text-center py-6 text-sm">No warnings. Run planner to check for issues.</p>
       {/if}
 
     {:else if activeTab === 'report'}
       <div class="space-y-3">
         {#if riskReport}
           <div class="grid grid-cols-4 gap-2">
-            <div class="bg-gray-800 rounded p-2 text-center">
-              <div class="text-xs text-gray-500">Risk Score</div>
-              <div class="text-lg font-bold">{riskReport.riskScore.toFixed(0)}</div>
+            <div class="bg-surface-muted rounded p-2 text-center">
+              <div class="text-xs text-fg-subtle">Risk Score</div>
+              <div class="text-lg font-bold text-fg">{riskReport.riskScore.toFixed(0)}</div>
             </div>
-            <div class="bg-gray-800 rounded p-2 text-center">
-              <div class="text-xs text-gray-500">Data Size</div>
-              <div class="text-sm font-mono">{(riskReport.dataSizeBytes / 1024 / 1024).toFixed(0)}MB</div>
+            <div class="bg-surface-muted rounded p-2 text-center">
+              <div class="text-xs text-fg-subtle">Data Size</div>
+              <div class="text-sm font-mono text-fg">{(riskReport.dataSizeBytes / 1024 / 1024).toFixed(0)}MB</div>
             </div>
-            <div class="bg-gray-800 rounded p-2 text-center">
-              <div class="text-xs text-gray-500">Containers</div>
-              <div class="text-lg font-bold">{riskReport.containerCount}</div>
+            <div class="bg-surface-muted rounded p-2 text-center">
+              <div class="text-xs text-fg-subtle">Containers</div>
+              <div class="text-lg font-bold text-fg">{riskReport.containerCount}</div>
             </div>
-            <div class="bg-gray-800 rounded p-2 text-center">
-              <div class="text-xs text-gray-500">Volumes</div>
-              <div class="text-lg font-bold">{riskReport.volumeCount}</div>
+            <div class="bg-surface-muted rounded p-2 text-center">
+              <div class="text-xs text-fg-subtle">Volumes</div>
+              <div class="text-lg font-bold text-fg">{riskReport.volumeCount}</div>
             </div>
           </div>
         {/if}
-        <button on:click={onExportReport} class="px-4 py-2 bg-blue-600 hover:bg-blue-700 rounded-lg text-sm font-medium transition-colors">
+        <button on:click={onExportReport} class="px-4 py-2 bg-accent hover:bg-accent-hover text-accent-fg rounded-lg text-sm font-medium transition-colors">
           Export Full Report
         </button>
       </div>

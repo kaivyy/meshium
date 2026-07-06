@@ -7,19 +7,19 @@
 
   function stepIndicatorColor(status: string): string {
     switch (status) {
-      case 'completed': return 'bg-green-500 text-white';
-      case 'running': return 'bg-blue-500 text-white animate-pulse';
-      case 'failed': return 'bg-red-500 text-white';
-      default: return 'bg-gray-700 text-gray-400';
+      case 'completed': return 'bg-success text-accent-fg';
+      case 'running': return 'bg-accent text-accent-fg animate-pulse';
+      case 'failed': return 'bg-error text-accent-fg';
+      default: return 'bg-surface-muted text-fg-subtle';
     }
   }
 
   function stepLineColor(status: string): string {
     switch (status) {
-      case 'completed': return 'bg-green-500';
-      case 'running': return 'bg-blue-500';
-      case 'failed': return 'bg-red-500';
-      default: return 'bg-gray-700';
+      case 'completed': return 'bg-success';
+      case 'running': return 'bg-accent';
+      case 'failed': return 'bg-error';
+      default: return 'bg-border';
     }
   }
 
@@ -30,7 +30,7 @@
   }
 </script>
 
-<div class="border-b border-gray-800 px-4 py-3 shrink-0 bg-gray-950">
+<div class="border-b border-border px-4 py-3 shrink-0 bg-bg">
   <div class="flex items-center overflow-x-auto">
     {#each WIZARD_STEPS as step, i}
       <button
@@ -45,7 +45,7 @@
             {i + 1}
           {/if}
         </div>
-        <span class="text-xs font-medium hidden lg:inline {currentStep === i ? 'text-blue-400' : stepStatuses[i] === 'completed' ? 'text-green-400' : 'text-gray-400'}">
+        <span class="text-xs font-medium hidden lg:inline {currentStep === i ? 'text-accent' : stepStatuses[i] === 'completed' ? 'text-success' : 'text-fg-subtle'}">
           {step.name}
         </span>
       </button>
@@ -55,7 +55,7 @@
     {/each}
   </div>
   <div class="mt-1.5 text-center">
-    <span class="text-xs font-medium text-blue-400">Step {currentStep + 1}: {WIZARD_STEPS[currentStep].name}</span>
-    <span class="text-xs text-gray-500 ml-1.5 hidden md:inline">&mdash; {WIZARD_STEPS[currentStep].description}</span>
+    <span class="text-xs font-medium text-accent">Step {currentStep + 1}: {WIZARD_STEPS[currentStep].name}</span>
+    <span class="text-xs text-fg-subtle ml-1.5 hidden md:inline">&mdash; {WIZARD_STEPS[currentStep].description}</span>
   </div>
 </div>
