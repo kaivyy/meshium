@@ -503,7 +503,7 @@
         type="button"
         onclick={refreshCurrentView}
         disabled={loadingLogs || loadingMetadata || !currentServerId || (activeTab === 'search' && !searchPattern.trim())}
-        class="inline-flex items-center gap-2 rounded-lg border border-slate-300 bg-white px-4 py-2 text-sm font-medium text-slate-700 transition hover:bg-slate-50 disabled:opacity-60"
+        class="inline-flex items-center gap-2 rounded-lg border border-border-strong bg-surface px-4 py-2 text-sm font-medium text-fg-muted transition hover:bg-surface-muted disabled:opacity-60"
       >
         {#if loadingLogs}<Spinner size="sm" label="Refreshing logs" />{:else if activeTab === 'search'}<Search size={16} />{:else}<RefreshCw size={16} />{/if}
         {currentActionLabel}
@@ -512,7 +512,7 @@
   </PageHeader>
 
   {#if loadingServers}
-    <div class="mt-6 flex items-center gap-3 rounded-2xl border border-slate-200 bg-white p-6 text-sm text-slate-600">
+    <div class="mt-6 flex items-center gap-3 rounded-2xl border border-border bg-surface p-6 text-sm text-fg-muted">
       <Spinner size="sm" label="Loading servers" />
       Loading servers...
     </div>
@@ -529,12 +529,12 @@
       <Card padding="lg">
         <div class="space-y-5">
           <div>
-            <label for="logs-server" class="mb-2 block text-xs font-semibold uppercase tracking-wide text-slate-500">Server</label>
+            <label for="logs-server" class="mb-2 block text-xs font-semibold uppercase tracking-wide text-fg-subtle">Server</label>
             <select
               id="logs-server"
               value={selectedServerId}
               onchange={changeServer}
-              class="w-full rounded-xl border border-slate-300 bg-white px-3 py-2 text-sm text-slate-900 outline-none transition focus:border-blue-500"
+              class="w-full rounded-xl border border-border-strong bg-surface px-3 py-2 text-sm text-fg outline-none transition focus:border-accent"
             >
               {#each servers as server (server.id)}
                 <option value={String(server.id)}>{server.name} — {server.host}:{server.port || 22}</option>
@@ -543,18 +543,18 @@
           </div>
 
           <div>
-            <div class="mb-2 block text-xs font-semibold uppercase tracking-wide text-slate-500">View</div>
+            <div class="mb-2 block text-xs font-semibold uppercase tracking-wide text-fg-subtle">View</div>
             <div class="grid grid-cols-2 gap-2">
-              <button type="button" onclick={() => changeTab('file')} class={`rounded-lg border px-3 py-2 text-sm font-medium transition ${activeTab === 'file' ? 'border-blue-500 bg-blue-50 text-blue-700' : 'border-slate-300 bg-white text-slate-700 hover:bg-slate-50'}`}>
+              <button type="button" onclick={() => changeTab('file')} class={`rounded-lg border px-3 py-2 text-sm font-medium transition ${activeTab === 'file' ? 'border-accent bg-accent-subtle text-accent' : 'border-border-strong bg-surface text-fg-muted hover:bg-surface-muted'}`}>
                 <FileText size={16} class="mr-2 inline-block" />Files
               </button>
-              <button type="button" onclick={() => changeTab('system')} class={`rounded-lg border px-3 py-2 text-sm font-medium transition ${activeTab === 'system' ? 'border-blue-500 bg-blue-50 text-blue-700' : 'border-slate-300 bg-white text-slate-700 hover:bg-slate-50'}`}>
+              <button type="button" onclick={() => changeTab('system')} class={`rounded-lg border px-3 py-2 text-sm font-medium transition ${activeTab === 'system' ? 'border-accent bg-accent-subtle text-accent' : 'border-border-strong bg-surface text-fg-muted hover:bg-surface-muted'}`}>
                 <TerminalSquare size={16} class="mr-2 inline-block" />System
               </button>
-              <button type="button" onclick={() => changeTab('service')} class={`rounded-lg border px-3 py-2 text-sm font-medium transition ${activeTab === 'service' ? 'border-blue-500 bg-blue-50 text-blue-700' : 'border-slate-300 bg-white text-slate-700 hover:bg-slate-50'}`}>
+              <button type="button" onclick={() => changeTab('service')} class={`rounded-lg border px-3 py-2 text-sm font-medium transition ${activeTab === 'service' ? 'border-accent bg-accent-subtle text-accent' : 'border-border-strong bg-surface text-fg-muted hover:bg-surface-muted'}`}>
                 <Wrench size={16} class="mr-2 inline-block" />Service
               </button>
-              <button type="button" onclick={() => changeTab('search')} class={`rounded-lg border px-3 py-2 text-sm font-medium transition ${activeTab === 'search' ? 'border-blue-500 bg-blue-50 text-blue-700' : 'border-slate-300 bg-white text-slate-700 hover:bg-slate-50'}`}>
+              <button type="button" onclick={() => changeTab('search')} class={`rounded-lg border px-3 py-2 text-sm font-medium transition ${activeTab === 'search' ? 'border-accent bg-accent-subtle text-accent' : 'border-border-strong bg-surface text-fg-muted hover:bg-surface-muted'}`}>
                 <Search size={16} class="mr-2 inline-block" />Search
               </button>
             </div>
@@ -563,12 +563,12 @@
           {#if activeTab === 'file'}
             <div class="space-y-3">
               <div>
-                <label for="logs-file-list" class="mb-2 block text-xs font-semibold uppercase tracking-wide text-slate-500">Log file list</label>
+                <label for="logs-file-list" class="mb-2 block text-xs font-semibold uppercase tracking-wide text-fg-subtle">Log file list</label>
                 <select
                   id="logs-file-list"
                   value={selectedFilePath}
                   onchange={changeFile}
-                  class="w-full rounded-xl border border-slate-300 bg-white px-3 py-2 text-sm text-slate-900 outline-none transition focus:border-blue-500"
+                  class="w-full rounded-xl border border-border-strong bg-surface px-3 py-2 text-sm text-fg outline-none transition focus:border-accent"
                 >
                   {#if logFiles.length === 0}
                     <option value="">No log files found</option>
@@ -581,7 +581,7 @@
               </div>
 
               <div>
-                <label for="logs-custom-file-path" class="mb-2 block text-xs font-semibold uppercase tracking-wide text-slate-500">Custom file path</label>
+                <label for="logs-custom-file-path" class="mb-2 block text-xs font-semibold uppercase tracking-wide text-fg-subtle">Custom file path</label>
                 <input
                   id="logs-custom-file-path"
                   value={customFilePath}
@@ -590,18 +590,18 @@
                   }}
                   onblur={ensureSearchFile}
                   placeholder="/var/log/syslog"
-                  class="w-full rounded-xl border border-slate-300 bg-white px-3 py-2 text-sm text-slate-900 outline-none transition focus:border-blue-500"
+                  class="w-full rounded-xl border border-border-strong bg-surface px-3 py-2 text-sm text-fg outline-none transition focus:border-accent"
                 />
               </div>
             </div>
           {:else if activeTab === 'service'}
             <div>
-              <label for="logs-service" class="mb-2 block text-xs font-semibold uppercase tracking-wide text-slate-500">Service</label>
+              <label for="logs-service" class="mb-2 block text-xs font-semibold uppercase tracking-wide text-fg-subtle">Service</label>
               <select
                 id="logs-service"
                 value={selectedServiceName}
                 onchange={changeService}
-                class="w-full rounded-xl border border-slate-300 bg-white px-3 py-2 text-sm text-slate-900 outline-none transition focus:border-blue-500"
+                class="w-full rounded-xl border border-border-strong bg-surface px-3 py-2 text-sm text-fg outline-none transition focus:border-accent"
               >
                 {#if services.length === 0}
                   <option value="">No services found</option>
@@ -615,7 +615,7 @@
           {:else if activeTab === 'search'}
             <div class="space-y-3">
               <div>
-                <label for="logs-search-file" class="mb-2 block text-xs font-semibold uppercase tracking-wide text-slate-500">Search file</label>
+                <label for="logs-search-file" class="mb-2 block text-xs font-semibold uppercase tracking-wide text-fg-subtle">Search file</label>
                 <input
                   id="logs-search-file"
                   value={searchFilePath}
@@ -623,12 +623,12 @@
                     searchFilePath = (event.currentTarget as HTMLInputElement).value;
                   }}
                   placeholder={resolvedFilePath || '/var/log/syslog'}
-                  class="w-full rounded-xl border border-slate-300 bg-white px-3 py-2 text-sm text-slate-900 outline-none transition focus:border-blue-500"
+                  class="w-full rounded-xl border border-border-strong bg-surface px-3 py-2 text-sm text-fg outline-none transition focus:border-accent"
                 />
               </div>
 
               <div>
-                <label for="logs-search-pattern" class="mb-2 block text-xs font-semibold uppercase tracking-wide text-slate-500">Pattern</label>
+                <label for="logs-search-pattern" class="mb-2 block text-xs font-semibold uppercase tracking-wide text-fg-subtle">Pattern</label>
                 <input
                   id="logs-search-pattern"
                   value={searchPattern}
@@ -636,20 +636,20 @@
                     searchPattern = (event.currentTarget as HTMLInputElement).value;
                   }}
                   placeholder="error|warning|timeout"
-                  class="w-full rounded-xl border border-slate-300 bg-white px-3 py-2 text-sm text-slate-900 outline-none transition focus:border-blue-500"
+                  class="w-full rounded-xl border border-border-strong bg-surface px-3 py-2 text-sm text-fg outline-none transition focus:border-accent"
                 />
               </div>
             </div>
           {/if}
 
-          <div class="space-y-3 border-t border-slate-200 pt-5">
+          <div class="space-y-3 border-t border-border pt-5">
             <div>
-              <label for="logs-line-count" class="mb-2 block text-xs font-semibold uppercase tracking-wide text-slate-500">Lines</label>
+              <label for="logs-line-count" class="mb-2 block text-xs font-semibold uppercase tracking-wide text-fg-subtle">Lines</label>
               <select
                 id="logs-line-count"
                 value={selectedLineCount}
                 onchange={changeLineCount}
-                class="w-full rounded-xl border border-slate-300 bg-white px-3 py-2 text-sm text-slate-900 outline-none transition focus:border-blue-500"
+                class="w-full rounded-xl border border-border-strong bg-surface px-3 py-2 text-sm text-fg outline-none transition focus:border-accent"
               >
                 <option value="50">50</option>
                 <option value="100">100</option>
@@ -660,7 +660,7 @@
             </div>
 
             <div>
-              <label for="logs-filter" class="mb-2 block text-xs font-semibold uppercase tracking-wide text-slate-500">Filter</label>
+              <label for="logs-filter" class="mb-2 block text-xs font-semibold uppercase tracking-wide text-fg-subtle">Filter</label>
               <input
                 id="logs-filter"
                 value={filterText}
@@ -668,7 +668,7 @@
                   filterText = (event.currentTarget as HTMLInputElement).value;
                 }}
                 placeholder="Filter visible lines"
-                class="w-full rounded-xl border border-slate-300 bg-white px-3 py-2 text-sm text-slate-900 outline-none transition focus:border-blue-500"
+                class="w-full rounded-xl border border-border-strong bg-surface px-3 py-2 text-sm text-fg outline-none transition focus:border-accent"
               />
             </div>
 
@@ -677,7 +677,7 @@
                 type="button"
                 onclick={toggleStreaming}
                 disabled={activeTab === 'search' || !hasLiveSource}
-                class={`inline-flex items-center justify-center gap-2 rounded-xl border px-3 py-2 text-sm font-medium transition disabled:cursor-not-allowed disabled:opacity-50 ${streamingEnabled ? 'border-red-200 bg-red-50 text-red-700 hover:bg-red-100' : 'border-emerald-200 bg-emerald-50 text-emerald-700 hover:bg-emerald-100'}`}
+                class={`inline-flex items-center justify-center gap-2 rounded-xl border px-3 py-2 text-sm font-medium transition disabled:cursor-not-allowed disabled:opacity-50 ${streamingEnabled ? 'border-error/30 bg-error/15 text-error hover:bg-error/25' : 'border-success/30 bg-success/15 text-success hover:bg-success/25'}`}
                 title={streamUrl ? 'Live stream connected over WebSocket' : 'Live streaming toggles between a static view and a live SSH tail'}
               >
                 {#if streamingEnabled}<Pause size={16} />Stop{:else}<Play size={16} />Live{/if}
@@ -687,7 +687,7 @@
                 type="button"
                 onclick={refreshCurrentView}
                 disabled={loadingLogs || loadingMetadata || !currentServerId}
-                class="inline-flex items-center justify-center gap-2 rounded-xl border border-slate-300 bg-white px-3 py-2 text-sm font-medium text-slate-700 transition hover:bg-slate-50 disabled:opacity-60"
+                class="inline-flex items-center justify-center gap-2 rounded-xl border border-border-strong bg-surface px-3 py-2 text-sm font-medium text-fg-muted transition hover:bg-surface-muted disabled:opacity-60"
               >
                 {#if loadingLogs}<Spinner size="sm" label="Refreshing logs" />{:else if activeTab === 'search'}<Search size={16} />{:else}<RefreshCw size={16} />{/if}
                 {currentActionLabel}
@@ -698,14 +698,14 @@
               <button
                 type="button"
                 onclick={copyVisibleLogs}
-                class="inline-flex items-center justify-center gap-2 rounded-xl border border-slate-300 bg-white px-3 py-2 text-sm font-medium text-slate-700 transition hover:bg-slate-50"
+                class="inline-flex items-center justify-center gap-2 rounded-xl border border-border-strong bg-surface px-3 py-2 text-sm font-medium text-fg-muted transition hover:bg-surface-muted"
               >
                 Copy
               </button>
               <button
                 type="button"
                 onclick={downloadVisibleLogs}
-                class="inline-flex items-center justify-center gap-2 rounded-xl border border-slate-300 bg-white px-3 py-2 text-sm font-medium text-slate-700 transition hover:bg-slate-50"
+                class="inline-flex items-center justify-center gap-2 rounded-xl border border-border-strong bg-surface px-3 py-2 text-sm font-medium text-fg-muted transition hover:bg-surface-muted"
               >
                 <Download size={16} />Download
               </button>
@@ -718,8 +718,8 @@
         <div class="flex flex-col gap-4">
           <div class="flex flex-wrap items-center justify-between gap-3">
             <div class="min-w-0">
-              <h2 class="truncate text-lg font-semibold text-slate-900">{currentSourceLabel}</h2>
-              <p class="text-sm text-slate-500">
+              <h2 class="truncate text-lg font-semibold text-fg">{currentSourceLabel}</h2>
+              <p class="text-sm text-fg-subtle">
                 {#if currentServer}
                   {currentServer.name} · {currentServer.host}:{currentServer.port || 22}
                 {:else}
@@ -736,22 +736,22 @@
             </div>
           </div>
 
-          <div class="rounded-2xl border border-slate-200 bg-slate-950" style="min-height: 36rem;">
-            <div class="border-b border-slate-800 px-4 py-3 text-xs text-slate-400">
+          <div class="rounded-2xl border border-border bg-surface-muted" style="min-height: 36rem;">
+            <div class="border-b border-border px-4 py-3 text-xs text-fg-subtle">
               {#if activeTab === 'search'}
-                Search results for <span class="font-mono text-slate-200">{searchPattern || 'pattern'}</span>
+                Search results for <span class="font-mono text-fg">{searchPattern || 'pattern'}</span>
               {:else if activeTab === 'file'}
-                Viewing <span class="font-mono text-slate-200">{resolvedFilePath || 'a log file'}</span>
+                Viewing <span class="font-mono text-fg">{resolvedFilePath || 'a log file'}</span>
               {:else if activeTab === 'system'}
-                Viewing <span class="font-mono text-slate-200">journalctl -f</span>
+                Viewing <span class="font-mono text-fg">journalctl -f</span>
               {:else}
-                Viewing <span class="font-mono text-slate-200">journalctl -u {selectedServiceName || 'service'}</span>
+                Viewing <span class="font-mono text-fg">journalctl -u {selectedServiceName || 'service'}</span>
               {/if}
             </div>
 
-            <div bind:this={viewerEl} class="max-h-[70vh] overflow-auto font-mono text-sm leading-6 text-slate-100">
+            <div bind:this={viewerEl} class="max-h-[70vh] overflow-auto font-mono text-sm leading-6 text-fg">
               {#if loadingLogs && displayLines.length === 0}
-                <div class="flex min-h-[20rem] items-center justify-center gap-3 p-8 text-slate-400">
+                <div class="flex min-h-[20rem] items-center justify-center gap-3 p-8 text-fg-subtle">
                   <Spinner size="lg" label="Loading logs" />
                   <span>Loading logs...</span>
                 </div>
@@ -764,16 +764,16 @@
                   />
                 </div>
               {:else}
-                <div class="divide-y divide-slate-800">
+                <div class="divide-y divide-border">
                   {#each displayLines as entry (entry.number)}
-                    <div class={`grid grid-cols-[4rem_5.5rem_1fr] gap-3 px-4 py-2 ${entry.level === 'error' ? 'bg-red-950/35' : entry.level === 'warning' ? 'bg-amber-950/25' : entry.level === 'debug' ? 'bg-slate-950/50' : 'bg-emerald-950/20'}`}>
-                      <div class="text-right text-xs text-slate-500">{entry.number}</div>
+                    <div class={`grid grid-cols-[4rem_5.5rem_1fr] gap-3 px-4 py-2 ${entry.level === 'error' ? 'bg-error/15' : entry.level === 'warning' ? 'bg-warning/15' : entry.level === 'debug' ? 'bg-surface-muted' : 'bg-success/10'}`}>
+                      <div class="text-right text-xs text-fg-subtle">{entry.number}</div>
                       <div>
-                        <span class={`rounded-full px-2 py-0.5 text-[11px] font-semibold uppercase tracking-wide ${entry.level === 'error' ? 'bg-red-500/20 text-red-200' : entry.level === 'warning' ? 'bg-amber-500/20 text-amber-200' : entry.level === 'debug' ? 'bg-slate-700 text-slate-200' : 'bg-emerald-500/20 text-emerald-200'}`}>
+                        <span class={`rounded-full px-2 py-0.5 text-[11px] font-semibold uppercase tracking-wide ${entry.level === 'error' ? 'bg-error/20 text-error' : entry.level === 'warning' ? 'bg-warning/20 text-warning' : entry.level === 'debug' ? 'bg-surface-muted text-fg-muted' : 'bg-success/20 text-success'}`}>
                           {entry.level}
                         </span>
                       </div>
-                      <div class="whitespace-pre-wrap break-all text-slate-100">{entry.text}</div>
+                      <div class="whitespace-pre-wrap break-all text-fg">{entry.text}</div>
                     </div>
                   {/each}
                 </div>

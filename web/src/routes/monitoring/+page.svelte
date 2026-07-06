@@ -440,7 +440,7 @@
   {#if selectedServer}
     <Badge variant={streamBadgeVariant}>
       <span class="inline-flex items-center gap-1.5">
-        <span class={`h-2 w-2 rounded-full ${streamStatus === 'connected' ? 'bg-green-500 animate-pulse' : streamStatus === 'connecting' ? 'bg-amber-500 animate-pulse' : streamStatus === 'error' ? 'bg-red-500' : 'bg-slate-400'}`}></span>
+        <span class={`h-2 w-2 rounded-full ${streamStatus === 'connected' ? 'bg-success animate-pulse' : streamStatus === 'connecting' ? 'bg-warning animate-pulse' : streamStatus === 'error' ? 'bg-error' : 'bg-fg-subtle'}`}></span>
         {streamLabel}
       </span>
     </Badge>
@@ -486,13 +486,13 @@
       <Card>
         <div class="flex flex-col gap-4 lg:flex-row lg:items-end lg:justify-between">
           <div class="space-y-2">
-            <div class="flex items-center gap-2 text-sm font-medium text-slate-700">
+            <div class="flex items-center gap-2 text-sm font-medium text-fg-muted">
               <ServerIcon size={16} />
               Server
             </div>
             <div class="flex flex-col gap-2 sm:flex-row sm:items-center">
               <select
-                class="min-w-[260px] rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm text-slate-900 shadow-sm outline-none transition focus:border-blue-500"
+                class="min-w-[260px] rounded-lg border border-border bg-surface px-3 py-2 text-sm text-fg shadow-sm outline-none transition focus:border-accent"
                 value={selectedServerId?.toString() ?? ''}
                 onchange={handleServerChange}
               >
@@ -519,7 +519,7 @@
           <div class="grid grid-cols-2 gap-2 sm:flex sm:flex-wrap sm:items-center">
             <button
               type="button"
-              class="inline-flex items-center justify-center gap-2 rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm font-medium text-slate-700 transition hover:border-slate-300 hover:bg-slate-50"
+              class="inline-flex items-center justify-center gap-2 rounded-lg border border-border bg-surface px-3 py-2 text-sm font-medium text-fg-muted transition hover:border-border-strong hover:bg-surface-muted"
               onclick={toggleStreaming}
               disabled={!selectedServerId}
             >
@@ -534,7 +534,7 @@
 
             <button
               type="button"
-              class="inline-flex items-center justify-center gap-2 rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm font-medium text-slate-700 transition hover:border-slate-300 hover:bg-slate-50"
+              class="inline-flex items-center justify-center gap-2 rounded-lg border border-border bg-surface px-3 py-2 text-sm font-medium text-fg-muted transition hover:border-border-strong hover:bg-surface-muted"
               onclick={refreshDashboard}
               disabled={!selectedServerId || loadingMetrics || topProcessesLoading}
             >
@@ -547,7 +547,7 @@
             </button>
 
             <select
-              class="rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm text-slate-700 shadow-sm outline-none transition focus:border-blue-500"
+              class="rounded-lg border border-border bg-surface px-3 py-2 text-sm text-fg-muted shadow-sm outline-none transition focus:border-accent"
               value={selectedInterval.toString()}
               onchange={handleIntervalChange}
               disabled={!selectedServerId}
@@ -560,7 +560,7 @@
           </div>
         </div>
 
-        <div class="mt-4 flex flex-wrap items-center gap-3 text-xs text-slate-500">
+        <div class="mt-4 flex flex-wrap items-center gap-3 text-xs text-fg-subtle">
           <Badge variant={streamBadgeVariant}>{streamLabel}</Badge>
           {#if streamEndpoint}
             <span class="font-mono">{streamEndpoint}</span>
@@ -574,25 +574,25 @@
       <Card>
         <div class="flex h-full flex-col justify-between gap-4">
           <div>
-            <h2 class="text-sm font-semibold text-slate-900">Live history</h2>
-            <p class="mt-1 text-sm text-slate-500">CPU and memory samples from the current session.</p>
+            <h2 class="text-sm font-semibold text-fg">Live history</h2>
+            <p class="mt-1 text-sm text-fg-subtle">CPU and memory samples from the current session.</p>
           </div>
 
           {#if historyWindow.length > 1}
-            <div class="rounded-xl border border-slate-200 bg-slate-50 p-3">
+            <div class="rounded-xl border border-border bg-surface-muted p-3">
               <svg viewBox="0 0 360 120" class="h-28 w-full" preserveAspectRatio="none" aria-hidden="true">
-                <path d={cpuSparkline} fill="none" stroke="currentColor" stroke-width="3" class="text-blue-500" />
-                <path d={memorySparkline} fill="none" stroke="currentColor" stroke-width="3" class="text-emerald-500" />
-                <line x1="0" y1="116" x2="360" y2="116" stroke="currentColor" stroke-width="1" class="text-slate-200" />
+                <path d={cpuSparkline} fill="none" stroke="currentColor" stroke-width="3" class="text-accent" />
+                <path d={memorySparkline} fill="none" stroke="currentColor" stroke-width="3" class="text-success" />
+                <line x1="0" y1="116" x2="360" y2="116" stroke="currentColor" stroke-width="1" class="text-border" />
               </svg>
-              <div class="mt-2 flex items-center justify-between text-xs text-slate-500">
-                <span><span class="inline-block h-2 w-2 rounded-full bg-blue-500"></span> CPU</span>
-                <span><span class="inline-block h-2 w-2 rounded-full bg-emerald-500"></span> Memory</span>
+              <div class="mt-2 flex items-center justify-between text-xs text-fg-subtle">
+                <span><span class="inline-block h-2 w-2 rounded-full bg-accent"></span> CPU</span>
+                <span><span class="inline-block h-2 w-2 rounded-full bg-success"></span> Memory</span>
                 <span>{historyWindow.length} samples</span>
               </div>
             </div>
           {:else}
-            <div class="rounded-xl border border-dashed border-slate-200 bg-slate-50 p-4 text-sm text-slate-500">
+            <div class="rounded-xl border border-dashed border-border bg-surface-muted p-4 text-sm text-fg-subtle">
               Start live streaming to build a session history.
             </div>
           {/if}
@@ -612,9 +612,9 @@
         <Card>
           <div class="flex items-start justify-between gap-4">
             <div>
-              <p class="text-sm font-medium text-slate-500">CPU usage</p>
-              <p class="mt-2 text-3xl font-bold text-slate-900">{metrics.cpu.usage.toFixed(1)}%</p>
-              <p class="mt-1 text-sm text-slate-500">{metrics.cpu.cores} cores · {metrics.cpu.model || 'Unknown model'}</p>
+              <p class="text-sm font-medium text-fg-subtle">CPU usage</p>
+              <p class="mt-2 text-3xl font-bold text-fg">{metrics.cpu.usage.toFixed(1)}%</p>
+              <p class="mt-1 text-sm text-fg-subtle">{metrics.cpu.cores} cores · {metrics.cpu.model || 'Unknown model'}</p>
             </div>
             <Badge variant={gaugeVariant(metrics.cpu.usage)}>{formatPercentage(metrics.cpu.usage)}</Badge>
           </div>
@@ -623,11 +623,11 @@
             <svg viewBox="0 0 120 120" class="h-32 w-32">
               <defs>
                 <linearGradient id="cpu-gauge" x1="0%" x2="100%" y1="0%" y2="100%">
-                  <stop offset="0%" stop-color="currentColor" class={metrics.cpu.usage >= 90 ? 'text-red-500' : metrics.cpu.usage >= 75 ? 'text-amber-500' : 'text-emerald-500'} />
-                  <stop offset="100%" stop-color="currentColor" class={metrics.cpu.usage >= 90 ? 'text-red-400' : metrics.cpu.usage >= 75 ? 'text-amber-400' : 'text-emerald-400'} />
+                  <stop offset="0%" stop-color="currentColor" class={metrics.cpu.usage >= 90 ? 'text-error' : metrics.cpu.usage >= 75 ? 'text-warning' : 'text-success'} />
+                  <stop offset="100%" stop-color="currentColor" class={metrics.cpu.usage >= 90 ? 'text-error' : metrics.cpu.usage >= 75 ? 'text-warning' : 'text-success'} />
                 </linearGradient>
               </defs>
-              <circle cx="60" cy="60" r="46" fill="none" stroke="currentColor" stroke-width="12" class="text-slate-100" />
+              <circle cx="60" cy="60" r="46" fill="none" stroke="currentColor" stroke-width="12" class="text-surface-muted" />
               <circle
                 cx="60"
                 cy="60"
@@ -639,8 +639,8 @@
                 transform="rotate(-90 60 60)"
                 style={`stroke-dasharray: ${2 * Math.PI * 46 * (metrics.cpu.usage / 100)} ${2 * Math.PI * 46};`}
               />
-              <text x="60" y="57" text-anchor="middle" class="fill-slate-900 text-lg font-bold">{metrics.cpu.usage.toFixed(0)}%</text>
-              <text x="60" y="74" text-anchor="middle" class="fill-slate-500 text-[10px]">utilization</text>
+              <text x="60" y="57" text-anchor="middle" class="fill-fg text-lg font-bold">{metrics.cpu.usage.toFixed(0)}%</text>
+              <text x="60" y="74" text-anchor="middle" class="fill-fg-subtle text-[10px]">utilization</text>
             </svg>
           </div>
         </Card>
@@ -648,38 +648,38 @@
         <Card>
           <div class="flex items-start justify-between gap-4">
             <div>
-              <p class="text-sm font-medium text-slate-500">Memory</p>
-              <p class="mt-2 text-3xl font-bold text-slate-900">{metrics.memory.usagePercent.toFixed(1)}%</p>
-              <p class="mt-1 text-sm text-slate-500">
+              <p class="text-sm font-medium text-fg-subtle">Memory</p>
+              <p class="mt-2 text-3xl font-bold text-fg">{metrics.memory.usagePercent.toFixed(1)}%</p>
+              <p class="mt-1 text-sm text-fg-subtle">
                 {formatBytes(metrics.memory.used * 1024 * 1024)} used of {formatBytes(metrics.memory.total * 1024 * 1024)}
               </p>
             </div>
             <Badge variant={gaugeVariant(metrics.memory.usagePercent)}>{formatPercentage(metrics.memory.usagePercent)}</Badge>
           </div>
 
-          <div class="mt-4 h-3 overflow-hidden rounded-full bg-slate-100">
+          <div class="mt-4 h-3 overflow-hidden rounded-full bg-surface-muted">
             <div
-              class={`h-full rounded-full ${metrics.memory.usagePercent >= 90 ? 'bg-red-500' : metrics.memory.usagePercent >= 75 ? 'bg-amber-500' : 'bg-emerald-500'}`}
+              class={`h-full rounded-full ${metrics.memory.usagePercent >= 90 ? 'bg-error' : metrics.memory.usagePercent >= 75 ? 'bg-warning' : 'bg-success'}`}
               style={`width: ${Math.min(100, metrics.memory.usagePercent)}%;`}
             ></div>
           </div>
 
           <dl class="mt-4 grid grid-cols-2 gap-3 text-sm">
             <div>
-              <dt class="text-slate-500">Free</dt>
-              <dd class="font-medium text-slate-900">{formatBytes(metrics.memory.free * 1024 * 1024)}</dd>
+              <dt class="text-fg-subtle">Free</dt>
+              <dd class="font-medium text-fg">{formatBytes(metrics.memory.free * 1024 * 1024)}</dd>
             </div>
             <div>
-              <dt class="text-slate-500">Available</dt>
-              <dd class="font-medium text-slate-900">{formatBytes(metrics.memory.available * 1024 * 1024)}</dd>
+              <dt class="text-fg-subtle">Available</dt>
+              <dd class="font-medium text-fg">{formatBytes(metrics.memory.available * 1024 * 1024)}</dd>
             </div>
             <div>
-              <dt class="text-slate-500">Swap</dt>
-              <dd class="font-medium text-slate-900">{formatBytes(metrics.memory.swapUsed * 1024 * 1024)} / {formatBytes(metrics.memory.swapTotal * 1024 * 1024)}</dd>
+              <dt class="text-fg-subtle">Swap</dt>
+              <dd class="font-medium text-fg">{formatBytes(metrics.memory.swapUsed * 1024 * 1024)} / {formatBytes(metrics.memory.swapTotal * 1024 * 1024)}</dd>
             </div>
             <div>
-              <dt class="text-slate-500">Cached</dt>
-              <dd class="font-medium text-slate-900">{formatBytes(metrics.memory.cached * 1024 * 1024)}</dd>
+              <dt class="text-fg-subtle">Cached</dt>
+              <dd class="font-medium text-fg">{formatBytes(metrics.memory.cached * 1024 * 1024)}</dd>
             </div>
           </dl>
         </Card>
@@ -687,9 +687,9 @@
         <Card>
           <div class="flex items-start justify-between gap-4">
             <div>
-              <p class="text-sm font-medium text-slate-500">System</p>
-              <p class="mt-2 text-3xl font-bold text-slate-900">{formatUptime(metrics.uptime)}</p>
-              <p class="mt-1 text-sm text-slate-500">{processCountLabel(metrics.processCount)} processes</p>
+              <p class="text-sm font-medium text-fg-subtle">System</p>
+              <p class="mt-2 text-3xl font-bold text-fg">{formatUptime(metrics.uptime)}</p>
+              <p class="mt-1 text-sm text-fg-subtle">{processCountLabel(metrics.processCount)} processes</p>
             </div>
             <div class="flex flex-col items-end gap-2">
               <Badge variant={temperatureVariant(metrics.temperature ?? 0)}>{formatTemperature(metrics.temperature)}</Badge>
@@ -698,17 +698,17 @@
           </div>
 
           <div class="mt-4 grid grid-cols-3 gap-2 text-center text-sm">
-            <div class="rounded-lg bg-slate-50 px-3 py-2">
-              <p class="text-xs text-slate-500">1m</p>
-              <p class="font-semibold text-slate-900">{formatLoad(metrics.load.load1)}</p>
+            <div class="rounded-lg bg-surface-muted px-3 py-2">
+              <p class="text-xs text-fg-subtle">1m</p>
+              <p class="font-semibold text-fg">{formatLoad(metrics.load.load1)}</p>
             </div>
-            <div class="rounded-lg bg-slate-50 px-3 py-2">
-              <p class="text-xs text-slate-500">5m</p>
-              <p class="font-semibold text-slate-900">{formatLoad(metrics.load.load5)}</p>
+            <div class="rounded-lg bg-surface-muted px-3 py-2">
+              <p class="text-xs text-fg-subtle">5m</p>
+              <p class="font-semibold text-fg">{formatLoad(metrics.load.load5)}</p>
             </div>
-            <div class="rounded-lg bg-slate-50 px-3 py-2">
-              <p class="text-xs text-slate-500">15m</p>
-              <p class="font-semibold text-slate-900">{formatLoad(metrics.load.load15)}</p>
+            <div class="rounded-lg bg-surface-muted px-3 py-2">
+              <p class="text-xs text-fg-subtle">15m</p>
+              <p class="font-semibold text-fg">{formatLoad(metrics.load.load15)}</p>
             </div>
           </div>
         </Card>
@@ -716,23 +716,23 @@
         <Card>
           <div class="flex items-start justify-between gap-4">
             <div>
-              <p class="text-sm font-medium text-slate-500">Disk</p>
-              <p class="mt-2 text-3xl font-bold text-slate-900">{metrics.disk.length}</p>
-              <p class="mt-1 text-sm text-slate-500">Mounted filesystems</p>
+              <p class="text-sm font-medium text-fg-subtle">Disk</p>
+              <p class="mt-2 text-3xl font-bold text-fg">{metrics.disk.length}</p>
+              <p class="mt-1 text-sm text-fg-subtle">Mounted filesystems</p>
             </div>
-            <HardDrive class="text-slate-400" size={24} />
+            <HardDrive class="text-fg-subtle" size={24} />
           </div>
 
           <div class="mt-4 space-y-3">
             {#each metrics.disk.slice(0, 3) as partition}
               <div>
-                <div class="mb-1 flex items-center justify-between text-xs text-slate-500">
+                <div class="mb-1 flex items-center justify-between text-xs text-fg-subtle">
                   <span class="truncate">{partition.mount}</span>
                   <span>{formatPercentage(partition.usagePercent)}</span>
                 </div>
-                <div class="h-2 overflow-hidden rounded-full bg-slate-100">
+                <div class="h-2 overflow-hidden rounded-full bg-surface-muted">
                   <div
-                    class={`h-full rounded-full ${partition.usagePercent >= 90 ? 'bg-red-500' : partition.usagePercent >= 75 ? 'bg-amber-500' : 'bg-emerald-500'}`}
+                    class={`h-full rounded-full ${partition.usagePercent >= 90 ? 'bg-error' : partition.usagePercent >= 75 ? 'bg-warning' : 'bg-success'}`}
                     style={`width: ${Math.min(100, partition.usagePercent)}%;`}
                   ></div>
                 </div>
@@ -748,14 +748,14 @@
         <Card>
           <div class="flex items-center justify-between gap-4">
             <div>
-              <h2 class="text-base font-semibold text-slate-900">Network interfaces</h2>
-              <p class="mt-1 text-sm text-slate-500">Live RX/TX counters and estimated transfer rates.</p>
+              <h2 class="text-base font-semibold text-fg">Network interfaces</h2>
+              <p class="mt-1 text-sm text-fg-subtle">Live RX/TX counters and estimated transfer rates.</p>
             </div>
-            <div class="flex items-center gap-2 text-sm text-slate-500">
+            <div class="flex items-center gap-2 text-sm text-fg-subtle">
               {#if hasNetworkData()}
-                <Wifi size={16} class="text-emerald-500" />
+                <Wifi size={16} class="text-success" />
               {:else}
-                <WifiOff size={16} class="text-slate-400" />
+                <WifiOff size={16} class="text-fg-subtle" />
               {/if}
             </div>
           </div>
@@ -763,11 +763,11 @@
           {#if metrics && metrics.network.length > 0}
             <div class="mt-4 grid gap-3 md:grid-cols-2">
               {#each metrics.network as iface}
-                <div class="rounded-xl border border-slate-200 bg-slate-50 p-4">
+                <div class="rounded-xl border border-border bg-surface-muted p-4">
                   <div class="flex items-start justify-between gap-3">
                     <div>
-                      <p class="font-medium text-slate-900">{iface.interface}</p>
-                      <p class="mt-1 text-xs text-slate-500">{formatBytes(iface.rxBytes)} RX · {formatBytes(iface.txBytes)} TX</p>
+                      <p class="font-medium text-fg">{iface.interface}</p>
+                      <p class="mt-1 text-xs text-fg-subtle">{formatBytes(iface.rxBytes)} RX · {formatBytes(iface.txBytes)} TX</p>
                     </div>
                     <Badge variant="info">
                       {networkRates[iface.interface] ? `${formatRate(networkRates[iface.interface].rxPerSec)} · ${formatRate(networkRates[iface.interface].txPerSec)}` : 'warming up'}
@@ -776,21 +776,21 @@
 
                   <div class="mt-3 space-y-2 text-sm">
                     <div>
-                      <div class="mb-1 flex items-center justify-between text-xs text-slate-500">
+                      <div class="mb-1 flex items-center justify-between text-xs text-fg-subtle">
                         <span>RX</span>
                         <span>{networkRates[iface.interface] ? formatRate(networkRates[iface.interface].rxPerSec) : '—'}</span>
                       </div>
-                      <div class="h-2 rounded-full bg-slate-200">
-                        <div class="h-2 rounded-full bg-blue-500" style="width: 100%; opacity: 0.35;"></div>
+                      <div class="h-2 rounded-full bg-surface-muted">
+                        <div class="h-2 rounded-full bg-accent" style="width: 100%; opacity: 0.35;"></div>
                       </div>
                     </div>
                     <div>
-                      <div class="mb-1 flex items-center justify-between text-xs text-slate-500">
+                      <div class="mb-1 flex items-center justify-between text-xs text-fg-subtle">
                         <span>TX</span>
                         <span>{networkRates[iface.interface] ? formatRate(networkRates[iface.interface].txPerSec) : '—'}</span>
                       </div>
-                      <div class="h-2 rounded-full bg-slate-200">
-                        <div class="h-2 rounded-full bg-emerald-500" style="width: 100%; opacity: 0.35;"></div>
+                      <div class="h-2 rounded-full bg-surface-muted">
+                        <div class="h-2 rounded-full bg-success" style="width: 100%; opacity: 0.35;"></div>
                       </div>
                     </div>
                   </div>
@@ -798,7 +798,7 @@
               {/each}
             </div>
           {:else}
-            <div class="mt-4 rounded-xl border border-dashed border-slate-200 bg-slate-50 p-4 text-sm text-slate-500">
+            <div class="mt-4 rounded-xl border border-dashed border-border bg-surface-muted p-4 text-sm text-fg-subtle">
               No network interface data available.
             </div>
           {/if}
@@ -807,8 +807,8 @@
         <Card>
           <div class="flex items-center justify-between gap-4">
             <div>
-              <h2 class="text-base font-semibold text-slate-900">Historical snapshot</h2>
-              <p class="mt-1 text-sm text-slate-500">Latest discovery scan, if available, shown as a baseline.</p>
+              <h2 class="text-base font-semibold text-fg">Historical snapshot</h2>
+              <p class="mt-1 text-sm text-fg-subtle">Latest discovery scan, if available, shown as a baseline.</p>
             </div>
             <Badge variant={selectedSnapshot ? 'info' : 'neutral'}>
               {selectedSnapshot ? formatRelativeTime(selectedSnapshot.capturedAt) : 'No snapshot'}
@@ -817,52 +817,52 @@
 
           {#if selectedSnapshot}
             <div class="mt-4 grid gap-4 lg:grid-cols-2">
-              <div class="rounded-xl border border-slate-200 bg-slate-50 p-4">
-                <div class="flex items-center gap-2 text-sm font-medium text-slate-700">
+              <div class="rounded-xl border border-border bg-surface-muted p-4">
+                <div class="flex items-center gap-2 text-sm font-medium text-fg-muted">
                   <Cpu size={16} />
                   Hardware
                 </div>
                 <dl class="mt-3 grid grid-cols-2 gap-3 text-sm">
                   <div>
-                    <dt class="text-slate-500">CPU</dt>
-                    <dd class="font-medium text-slate-900">{selectedSnapshot.hardware.cpuModel}</dd>
+                    <dt class="text-fg-subtle">CPU</dt>
+                    <dd class="font-medium text-fg">{selectedSnapshot.hardware.cpuModel}</dd>
                   </div>
                   <div>
-                    <dt class="text-slate-500">Cores</dt>
-                    <dd class="font-medium text-slate-900">{selectedSnapshot.hardware.cpuCores}</dd>
+                    <dt class="text-fg-subtle">Cores</dt>
+                    <dd class="font-medium text-fg">{selectedSnapshot.hardware.cpuCores}</dd>
                   </div>
                   <div>
-                    <dt class="text-slate-500">RAM</dt>
-                    <dd class="font-medium text-slate-900">{selectedSnapshot.hardware.ramUsedMb} / {selectedSnapshot.hardware.ramTotalMb} MB</dd>
+                    <dt class="text-fg-subtle">RAM</dt>
+                    <dd class="font-medium text-fg">{selectedSnapshot.hardware.ramUsedMb} / {selectedSnapshot.hardware.ramTotalMb} MB</dd>
                   </div>
                   <div>
-                    <dt class="text-slate-500">Disk</dt>
-                    <dd class="font-medium text-slate-900">{selectedSnapshot.hardware.diskUsedGb.toFixed(1)} / {selectedSnapshot.hardware.diskTotalGb.toFixed(1)} GB</dd>
+                    <dt class="text-fg-subtle">Disk</dt>
+                    <dd class="font-medium text-fg">{selectedSnapshot.hardware.diskUsedGb.toFixed(1)} / {selectedSnapshot.hardware.diskTotalGb.toFixed(1)} GB</dd>
                   </div>
                 </dl>
               </div>
 
-              <div class="rounded-xl border border-slate-200 bg-slate-50 p-4">
-                <div class="flex items-center gap-2 text-sm font-medium text-slate-700">
+              <div class="rounded-xl border border-border bg-surface-muted p-4">
+                <div class="flex items-center gap-2 text-sm font-medium text-fg-muted">
                   <Clock size={16} />
                   Snapshot details
                 </div>
                 <dl class="mt-3 grid grid-cols-2 gap-3 text-sm">
                   <div>
-                    <dt class="text-slate-500">Captured</dt>
-                    <dd class="font-medium text-slate-900">{formatRelativeTime(selectedSnapshot.capturedAt)}</dd>
+                    <dt class="text-fg-subtle">Captured</dt>
+                    <dd class="font-medium text-fg">{formatRelativeTime(selectedSnapshot.capturedAt)}</dd>
                   </div>
                   <div>
-                    <dt class="text-slate-500">Hostname</dt>
-                    <dd class="font-medium text-slate-900">{selectedSnapshot.os.hostname}</dd>
+                    <dt class="text-fg-subtle">Hostname</dt>
+                    <dd class="font-medium text-fg">{selectedSnapshot.os.hostname}</dd>
                   </div>
                   <div>
-                    <dt class="text-slate-500">Kernel</dt>
-                    <dd class="font-medium text-slate-900">{selectedSnapshot.os.kernel}</dd>
+                    <dt class="text-fg-subtle">Kernel</dt>
+                    <dd class="font-medium text-fg">{selectedSnapshot.os.kernel}</dd>
                   </div>
                   <div>
-                    <dt class="text-slate-500">Uptime</dt>
-                    <dd class="font-medium text-slate-900">{formatUptime(selectedSnapshot.os.uptimeSeconds)}</dd>
+                    <dt class="text-fg-subtle">Uptime</dt>
+                    <dd class="font-medium text-fg">{formatUptime(selectedSnapshot.os.uptimeSeconds)}</dd>
                   </div>
                 </dl>
               </div>
@@ -872,13 +872,13 @@
               <div class="mt-4 space-y-3">
                 {#each selectedSnapshot.diskUsage.slice(0, 4) as partition}
                   <div>
-                    <div class="mb-1 flex items-center justify-between text-xs text-slate-500">
+                    <div class="mb-1 flex items-center justify-between text-xs text-fg-subtle">
                       <span>{partition.mountPoint}</span>
                       <span>{partition.usePercent.toFixed(0)}%</span>
                     </div>
-                    <div class="h-2 overflow-hidden rounded-full bg-slate-100">
+                    <div class="h-2 overflow-hidden rounded-full bg-surface-muted">
                       <div
-                        class={`h-full rounded-full ${partition.usePercent >= 90 ? 'bg-red-500' : partition.usePercent >= 75 ? 'bg-amber-500' : 'bg-emerald-500'}`}
+                        class={`h-full rounded-full ${partition.usePercent >= 90 ? 'bg-error' : partition.usePercent >= 75 ? 'bg-warning' : 'bg-success'}`}
                         style={`width: ${Math.min(100, partition.usePercent)}%;`}
                       ></div>
                     </div>
@@ -887,7 +887,7 @@
               </div>
             {/if}
           {:else}
-            <div class="mt-4 rounded-xl border border-dashed border-slate-200 bg-slate-50 p-4 text-sm text-slate-500">
+            <div class="mt-4 rounded-xl border border-dashed border-border bg-surface-muted p-4 text-sm text-fg-subtle">
               Discovery snapshots will appear here after a scan completes.
             </div>
           {/if}
@@ -898,8 +898,8 @@
         <Card>
           <div class="flex items-center justify-between gap-4">
             <div>
-              <h2 class="text-base font-semibold text-slate-900">Top processes</h2>
-              <p class="mt-1 text-sm text-slate-500">Sorted by CPU usage.</p>
+              <h2 class="text-base font-semibold text-fg">Top processes</h2>
+              <p class="mt-1 text-sm text-fg-subtle">Sorted by CPU usage.</p>
             </div>
             {#if topProcessesLoading}
               <Spinner size="sm" label="Loading top processes" />
@@ -907,9 +907,9 @@
           </div>
 
           {#if topProcesses.length > 0}
-            <div class="mt-4 overflow-hidden rounded-xl border border-slate-200">
-              <table class="min-w-full divide-y divide-slate-200 text-sm">
-                <thead class="bg-slate-50 text-left text-xs uppercase tracking-wide text-slate-500">
+            <div class="mt-4 overflow-hidden rounded-xl border border-border">
+              <table class="min-w-full divide-y divide-border text-sm">
+                <thead class="bg-surface-muted text-left text-xs uppercase tracking-wide text-fg-subtle">
                   <tr>
                     <th class="px-3 py-2">PID</th>
                     <th class="px-3 py-2">User</th>
@@ -918,18 +918,18 @@
                     <th class="px-3 py-2">Command</th>
                   </tr>
                 </thead>
-                <tbody class="divide-y divide-slate-100 bg-white">
+                <tbody class="divide-y divide-border bg-surface">
                   {#each topProcesses as process}
                     <tr>
-                      <td class="px-3 py-2 font-mono text-xs text-slate-700">{process.pid}</td>
-                      <td class="px-3 py-2 text-slate-700">{process.user}</td>
-                      <td class="px-3 py-2 text-right font-medium {gaugeVariant(process.cpu, 50, 80) === 'error' ? 'text-red-600' : gaugeVariant(process.cpu, 50, 80) === 'warning' ? 'text-amber-600' : 'text-emerald-600'}">
+                      <td class="px-3 py-2 font-mono text-xs text-fg-muted">{process.pid}</td>
+                      <td class="px-3 py-2 text-fg-muted">{process.user}</td>
+                      <td class="px-3 py-2 text-right font-medium {gaugeVariant(process.cpu, 50, 80) === 'error' ? 'text-error' : gaugeVariant(process.cpu, 50, 80) === 'warning' ? 'text-warning' : 'text-success'}">
                         {process.cpu.toFixed(1)}%
                       </td>
-                      <td class="px-3 py-2 text-right font-medium {gaugeVariant(process.memory, 50, 80) === 'error' ? 'text-red-600' : gaugeVariant(process.memory, 50, 80) === 'warning' ? 'text-amber-600' : 'text-emerald-600'}">
+                      <td class="px-3 py-2 text-right font-medium {gaugeVariant(process.memory, 50, 80) === 'error' ? 'text-error' : gaugeVariant(process.memory, 50, 80) === 'warning' ? 'text-warning' : 'text-success'}">
                         {process.memory.toFixed(1)}%
                       </td>
-                      <td class="px-3 py-2 text-slate-700">
+                      <td class="px-3 py-2 text-fg-muted">
                         <span class="block max-w-[240px] truncate font-mono text-xs" title={process.command}>{process.command}</span>
                       </td>
                     </tr>
@@ -938,33 +938,33 @@
               </table>
             </div>
           {:else}
-            <div class="mt-4 rounded-xl border border-dashed border-slate-200 bg-slate-50 p-4 text-sm text-slate-500">
+            <div class="mt-4 rounded-xl border border-dashed border-border bg-surface-muted p-4 text-sm text-fg-subtle">
               Top process information will appear once metrics are collected.
             </div>
           {/if}
         </Card>
 
         <Card>
-          <div class="flex items-center gap-2 text-sm font-medium text-slate-700">
+          <div class="flex items-center gap-2 text-sm font-medium text-fg-muted">
             <Activity size={16} />
             Current session
           </div>
           <dl class="mt-4 grid grid-cols-2 gap-4 text-sm">
             <div>
-              <dt class="text-slate-500">Samples</dt>
-              <dd class="mt-1 text-lg font-semibold text-slate-900">{historyWindow.length}</dd>
+              <dt class="text-fg-subtle">Samples</dt>
+              <dd class="mt-1 text-lg font-semibold text-fg">{historyWindow.length}</dd>
             </div>
             <div>
-              <dt class="text-slate-500">Process count</dt>
-              <dd class="mt-1 text-lg font-semibold text-slate-900">{metrics ? processCountLabel(metrics.processCount) : '—'}</dd>
+              <dt class="text-fg-subtle">Process count</dt>
+              <dd class="mt-1 text-lg font-semibold text-fg">{metrics ? processCountLabel(metrics.processCount) : '—'}</dd>
             </div>
             <div>
-              <dt class="text-slate-500">Temp</dt>
-              <dd class="mt-1 text-lg font-semibold text-slate-900">{metrics ? formatTemperature(metrics.temperature) : '—'}</dd>
+              <dt class="text-fg-subtle">Temp</dt>
+              <dd class="mt-1 text-lg font-semibold text-fg">{metrics ? formatTemperature(metrics.temperature) : '—'}</dd>
             </div>
             <div>
-              <dt class="text-slate-500">Load 1m</dt>
-              <dd class="mt-1 text-lg font-semibold text-slate-900">{metrics ? formatLoad(metrics.load.load1) : '—'}</dd>
+              <dt class="text-fg-subtle">Load 1m</dt>
+              <dd class="mt-1 text-lg font-semibold text-fg">{metrics ? formatLoad(metrics.load.load1) : '—'}</dd>
             </div>
           </dl>
         </Card>
@@ -974,7 +974,7 @@
 </div>
 
 {#if !selectedServerId && servers.length > 0}
-  <div class="fixed bottom-4 right-4 rounded-full bg-slate-900 px-4 py-2 text-xs text-white shadow-lg">
+  <div class="fixed bottom-4 right-4 rounded-full bg-surface px-4 py-2 text-xs text-fg shadow-lg">
     Select a server to begin monitoring
   </div>
 {/if}

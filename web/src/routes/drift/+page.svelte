@@ -265,14 +265,14 @@
           label: 'Added',
           badge: 'success' as const,
           icon: ArrowUp,
-          circleClass: 'bg-green-100 text-green-700'
+          circleClass: 'bg-success/10 text-success'
         };
       case 'removed':
         return {
           label: 'Removed',
           badge: 'error' as const,
           icon: ArrowDown,
-          circleClass: 'bg-red-100 text-red-700'
+          circleClass: 'bg-error/10 text-error'
         };
       case 'modified':
       default:
@@ -280,7 +280,7 @@
           label: 'Modified',
           badge: 'warning' as const,
           icon: PencilLine,
-          circleClass: 'bg-yellow-100 text-yellow-700'
+          circleClass: 'bg-warning/10 text-warning'
         };
     }
   }
@@ -341,7 +341,7 @@
           type="button"
           onclick={handleCheckNow}
           disabled={!selectedServerID || checkingNow || loadingReport}
-          class="inline-flex items-center justify-center gap-2 rounded-lg bg-blue-600 px-4 py-2 text-sm font-medium text-white transition hover:bg-blue-700 disabled:cursor-not-allowed disabled:opacity-50"
+          class="inline-flex items-center justify-center gap-2 rounded-lg bg-accent px-4 py-2 text-sm font-medium text-accent-fg transition hover:bg-accent-hover disabled:cursor-not-allowed disabled:opacity-50"
         >
           {#if checkingNow}
             <Spinner size="sm" label="Checking drift" />
@@ -356,11 +356,11 @@
     <Card padding="lg">
       <div class="grid gap-6 lg:grid-cols-[1.6fr_1fr]">
         <div>
-          <label class="mb-2 block text-sm font-medium text-slate-700" for="server-select">Server</label>
+          <label class="mb-2 block text-sm font-medium text-fg-muted" for="server-select">Server</label>
           <select
             id="server-select"
             bind:value={selectedServerID}
-            class="w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm text-slate-900 shadow-sm outline-none transition focus:border-blue-500 focus:ring-2 focus:ring-blue-100"
+            class="w-full rounded-lg border border-border-strong bg-surface px-3 py-2 text-sm text-fg shadow-sm outline-none transition focus:border-accent focus:ring-2 focus:ring-accent/20"
           >
             <option value="">Select a server</option>
             {#each servers as server}
@@ -368,21 +368,21 @@
             {/each}
           </select>
 
-          <div class="mt-3 flex flex-wrap items-center gap-2 text-xs text-slate-500">
+          <div class="mt-3 flex flex-wrap items-center gap-2 text-xs text-fg-subtle">
             {#if selectedServer}
-              <span class="rounded-full bg-slate-100 px-2.5 py-1 font-medium text-slate-600">
+              <span class="rounded-full bg-surface-muted px-2.5 py-1 font-medium text-fg-muted">
                 {selectedServer.host}:{selectedServer.port}
               </span>
-              <span class="rounded-full bg-slate-100 px-2.5 py-1 font-medium text-slate-600">
+              <span class="rounded-full bg-surface-muted px-2.5 py-1 font-medium text-fg-muted">
                 {selectedServer.username}
               </span>
               {#if selectedServer.environment}
-                <span class="rounded-full bg-blue-50 px-2.5 py-1 font-medium text-blue-600">
+                <span class="rounded-full bg-accent-subtle px-2.5 py-1 font-medium text-accent">
                   {selectedServer.environment}
                 </span>
               {/if}
               {#if selectedServer.region}
-                <span class="rounded-full bg-slate-100 px-2.5 py-1 font-medium text-slate-600">
+                <span class="rounded-full bg-surface-muted px-2.5 py-1 font-medium text-fg-muted">
                   {selectedServer.region}
                 </span>
               {/if}
@@ -396,29 +396,29 @@
           </div>
         </div>
 
-        <div class="rounded-2xl border border-slate-200 bg-slate-50 p-4">
+        <div class="rounded-2xl border border-border bg-surface-muted p-4">
           <div class="flex items-center justify-between gap-3">
             <div>
-              <p class="text-sm font-medium text-slate-700">Current snapshot status</p>
-              <p class="text-xs text-slate-500">{report?.serverName || selectedServer?.name || '—'}</p>
+              <p class="text-sm font-medium text-fg-muted">Current snapshot status</p>
+              <p class="text-xs text-fg-subtle">{report?.serverName || selectedServer?.name || '—'}</p>
             </div>
             <Badge variant={reportReady ? 'success' : 'neutral'}>
               {reportReady ? 'Ready' : loadingReport ? 'Loading' : 'Waiting'}
             </Badge>
           </div>
 
-          <div class="mt-4 space-y-2 text-sm text-slate-600">
+          <div class="mt-4 space-y-2 text-sm text-fg-muted">
             <div class="flex items-center justify-between gap-3">
               <span>Latest comparison</span>
-              <span class="font-medium text-slate-900">{formatTimestamp(report?.snapshotB)}</span>
+              <span class="font-medium text-fg">{formatTimestamp(report?.snapshotB)}</span>
             </div>
             <div class="flex items-center justify-between gap-3">
               <span>Previous snapshot</span>
-              <span class="font-medium text-slate-900">{formatTimestamp(report?.snapshotA)}</span>
+              <span class="font-medium text-fg">{formatTimestamp(report?.snapshotA)}</span>
             </div>
             <div class="flex items-center justify-between gap-3">
               <span>Total changes</span>
-              <span class="font-medium text-slate-900">{report?.totalChanges ?? 0}</span>
+              <span class="font-medium text-fg">{report?.totalChanges ?? 0}</span>
             </div>
           </div>
         </div>
@@ -426,7 +426,7 @@
     </Card>
 
     {#if reportError}
-      <div class="rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700" role="alert">
+      <div class="rounded-xl border border-error/20 bg-error/15 px-4 py-3 text-sm text-error" role="alert">
         {reportError}
       </div>
     {/if}
@@ -445,11 +445,11 @@
 
     {#if selectedServerID && loadingReport && !report}
       <Card padding="lg">
-        <div class="flex items-center gap-3 text-slate-600">
+        <div class="flex items-center gap-3 text-fg-muted">
           <Spinner size="md" label="Loading drift report" />
           <div>
-            <p class="font-medium text-slate-900">Loading drift data...</p>
-            <p class="text-sm text-slate-500">Fetching the latest snapshots and history.</p>
+            <p class="font-medium text-fg">Loading drift data...</p>
+            <p class="text-sm text-fg-subtle">Fetching the latest snapshots and history.</p>
           </div>
         </div>
       </Card>
@@ -460,84 +460,84 @@
         <div class="grid gap-4 sm:grid-cols-2 xl:grid-cols-5">
           <Card padding="md">
             <div class="flex items-center gap-3">
-              <div class="flex h-10 w-10 items-center justify-center rounded-full bg-green-100 text-green-700">
+              <div class="flex h-10 w-10 items-center justify-center rounded-full bg-success/10 text-success">
                 <Package size={18} />
               </div>
               <div>
-                <p class="text-sm font-medium text-slate-900">Packages</p>
-                <p class="text-xs text-slate-500">+{summary.packagesAdded} / -{summary.packagesRemoved}</p>
+                <p class="text-sm font-medium text-fg">Packages</p>
+                <p class="text-xs text-fg-subtle">+{summary.packagesAdded} / -{summary.packagesRemoved}</p>
               </div>
             </div>
           </Card>
 
           <Card padding="md">
             <div class="flex items-center gap-3">
-              <div class="flex h-10 w-10 items-center justify-center rounded-full bg-blue-100 text-blue-700">
+              <div class="flex h-10 w-10 items-center justify-center rounded-full bg-info/10 text-info">
                 <Cog size={18} />
               </div>
               <div>
-                <p class="text-sm font-medium text-slate-900">Services</p>
-                <p class="text-xs text-slate-500">{summary.servicesChanged} changed</p>
+                <p class="text-sm font-medium text-fg">Services</p>
+                <p class="text-xs text-fg-subtle">{summary.servicesChanged} changed</p>
               </div>
             </div>
           </Card>
 
           <Card padding="md">
             <div class="flex items-center gap-3">
-              <div class="flex h-10 w-10 items-center justify-center rounded-full bg-purple-100 text-purple-700">
+              <div class="flex h-10 w-10 items-center justify-center rounded-full bg-accent/10 text-accent">
                 <Container size={18} />
               </div>
               <div>
-                <p class="text-sm font-medium text-slate-900">Docker</p>
-                <p class="text-xs text-slate-500">{summary.dockerChanged} changed</p>
+                <p class="text-sm font-medium text-fg">Docker</p>
+                <p class="text-xs text-fg-subtle">{summary.dockerChanged} changed</p>
               </div>
             </div>
           </Card>
 
           <Card padding="md">
             <div class="flex items-center gap-3">
-              <div class="flex h-10 w-10 items-center justify-center rounded-full bg-orange-100 text-orange-700">
+              <div class="flex h-10 w-10 items-center justify-center rounded-full bg-warning/10 text-warning">
                 <Users size={18} />
               </div>
               <div>
-                <p class="text-sm font-medium text-slate-900">Users</p>
-                <p class="text-xs text-slate-500">{summary.usersChanged} changed</p>
+                <p class="text-sm font-medium text-fg">Users</p>
+                <p class="text-xs text-fg-subtle">{summary.usersChanged} changed</p>
               </div>
             </div>
           </Card>
 
           <Card padding="md">
             <div class="flex items-center gap-3">
-              <div class="flex h-10 w-10 items-center justify-center rounded-full bg-sky-100 text-sky-700">
+              <div class="flex h-10 w-10 items-center justify-center rounded-full bg-info/10 text-info">
                 <Network size={18} />
               </div>
               <div>
-                <p class="text-sm font-medium text-slate-900">Network</p>
-                <p class="text-xs text-slate-500">{summary.networkChanged} changed</p>
+                <p class="text-sm font-medium text-fg">Network</p>
+                <p class="text-xs text-fg-subtle">{summary.networkChanged} changed</p>
               </div>
             </div>
           </Card>
 
           <Card padding="md">
             <div class="flex items-center gap-3">
-              <div class="flex h-10 w-10 items-center justify-center rounded-full bg-slate-100 text-slate-700">
+              <div class="flex h-10 w-10 items-center justify-center rounded-full bg-surface-muted text-fg-muted">
                 <HardDrive size={18} />
               </div>
               <div>
-                <p class="text-sm font-medium text-slate-900">Disk</p>
-                <p class="text-xs text-slate-500">{summary.diskChanged} changed</p>
+                <p class="text-sm font-medium text-fg">Disk</p>
+                <p class="text-xs text-fg-subtle">{summary.diskChanged} changed</p>
               </div>
             </div>
           </Card>
 
           <Card padding="md">
             <div class="flex items-center gap-3">
-              <div class="flex h-10 w-10 items-center justify-center rounded-full bg-slate-100 text-slate-700">
+              <div class="flex h-10 w-10 items-center justify-center rounded-full bg-surface-muted text-fg-muted">
                 <Server size={18} />
               </div>
               <div>
-                <p class="text-sm font-medium text-slate-900">Total</p>
-                <p class="text-xs text-slate-500">{report.totalChanges} changes</p>
+                <p class="text-sm font-medium text-fg">Total</p>
+                <p class="text-xs text-fg-subtle">{report.totalChanges} changes</p>
               </div>
             </div>
           </Card>
@@ -547,20 +547,20 @@
           <div class="flex flex-col gap-4 lg:flex-row lg:items-end lg:justify-between">
             <div>
               <div class="flex items-center gap-2">
-                <Filter size={16} class="text-slate-400" />
-                <h2 class="text-lg font-semibold text-slate-900">Changes timeline</h2>
+                <Filter size={16} class="text-fg-subtle" />
+                <h2 class="text-lg font-semibold text-fg">Changes timeline</h2>
               </div>
-              <p class="mt-1 text-sm text-slate-500">
+              <p class="mt-1 text-sm text-fg-subtle">
                 Showing {filteredChanges.length} of {report.changes.length} recorded drift changes.
               </p>
             </div>
 
             <div class="grid gap-3 sm:grid-cols-2">
               <label class="block">
-                <span class="mb-1 block text-xs font-medium uppercase tracking-wide text-slate-500">Category</span>
+                <span class="mb-1 block text-xs font-medium uppercase tracking-wide text-fg-subtle">Category</span>
                 <select
                   bind:value={categoryFilter}
-                  class="w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm text-slate-900 outline-none transition focus:border-blue-500 focus:ring-2 focus:ring-blue-100"
+                  class="w-full rounded-lg border border-border-strong bg-surface px-3 py-2 text-sm text-fg outline-none transition focus:border-accent focus:ring-2 focus:ring-accent/20"
                 >
                   <option value="all">All categories</option>
                   <option value="packages">Packages</option>
@@ -574,10 +574,10 @@
               </label>
 
               <label class="block">
-                <span class="mb-1 block text-xs font-medium uppercase tracking-wide text-slate-500">Severity</span>
+                <span class="mb-1 block text-xs font-medium uppercase tracking-wide text-fg-subtle">Severity</span>
                 <select
                   bind:value={severityFilter}
-                  class="w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm text-slate-900 outline-none transition focus:border-blue-500 focus:ring-2 focus:ring-blue-100"
+                  class="w-full rounded-lg border border-border-strong bg-surface px-3 py-2 text-sm text-fg outline-none transition focus:border-accent focus:ring-2 focus:ring-accent/20"
                 >
                   <option value="all">All severities</option>
                   <option value="info">Info</option>
@@ -597,28 +597,28 @@
 
                 <Card padding="md" hoverable>
                   <div class="flex gap-4">
-                    <div class="flex h-12 w-12 shrink-0 items-center justify-center rounded-full bg-slate-100 text-slate-600">
+                    <div class="flex h-12 w-12 shrink-0 items-center justify-center rounded-full bg-surface-muted text-fg-muted">
                       <CategoryIcon size={18} />
                     </div>
 
                     <div class="min-w-0 flex-1">
                       <div class="flex flex-wrap items-center gap-2">
-                        <p class="font-medium text-slate-900">{change.name}</p>
+                        <p class="font-medium text-fg">{change.name}</p>
                         <Badge variant={severityVariant(change.severity)}>{change.severity}</Badge>
                         <Badge variant={typeMeta.badge}>{typeMeta.label}</Badge>
                       </div>
-                      <p class="mt-1 text-xs uppercase tracking-wide text-slate-400">{change.category}</p>
+                      <p class="mt-1 text-xs uppercase tracking-wide text-fg-subtle">{change.category}</p>
 
                       <div class="mt-3 grid gap-3 md:grid-cols-2">
-                        <div class="rounded-lg bg-slate-50 p-3">
-                          <div class="text-xs font-medium uppercase tracking-wide text-slate-400">Old value</div>
-                          <div class="mt-1 whitespace-pre-wrap text-sm text-slate-700">
+                        <div class="rounded-lg bg-surface-muted p-3">
+                          <div class="text-xs font-medium uppercase tracking-wide text-fg-subtle">Old value</div>
+                          <div class="mt-1 whitespace-pre-wrap text-sm text-fg-muted">
                             {change.oldValue || '—'}
                           </div>
                         </div>
-                        <div class="rounded-lg bg-slate-50 p-3">
-                          <div class="text-xs font-medium uppercase tracking-wide text-slate-400">New value</div>
-                          <div class="mt-1 whitespace-pre-wrap text-sm text-slate-700">
+                        <div class="rounded-lg bg-surface-muted p-3">
+                          <div class="text-xs font-medium uppercase tracking-wide text-fg-subtle">New value</div>
+                          <div class="mt-1 whitespace-pre-wrap text-sm text-fg-muted">
                             {change.newValue || '—'}
                           </div>
                         </div>
@@ -650,10 +650,10 @@
       <div class="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
         <div>
           <div class="flex items-center gap-2">
-            <GitCompare size={16} class="text-slate-400" />
-            <h2 class="text-lg font-semibold text-slate-900">Server comparison</h2>
+            <GitCompare size={16} class="text-fg-subtle" />
+            <h2 class="text-lg font-semibold text-fg">Server comparison</h2>
           </div>
-          <p class="mt-1 text-sm text-slate-500">
+          <p class="mt-1 text-sm text-fg-subtle">
             Compare two servers' latest snapshots before planning a migration.
           </p>
         </div>
@@ -662,7 +662,7 @@
           type="button"
           onclick={handleCompareServers}
           disabled={!canCompare}
-          class="inline-flex items-center justify-center gap-2 rounded-lg bg-slate-900 px-4 py-2 text-sm font-medium text-white transition hover:bg-slate-700 disabled:cursor-not-allowed disabled:opacity-50"
+          class="inline-flex items-center justify-center gap-2 rounded-lg bg-fg px-4 py-2 text-sm font-medium text-bg transition hover:bg-fg-muted disabled:cursor-not-allowed disabled:opacity-50"
         >
           {#if comparing}
             <Spinner size="sm" label="Comparing servers" />
@@ -676,10 +676,10 @@
 
       <div class="mt-4 grid gap-4 md:grid-cols-2">
         <label class="block">
-          <span class="mb-1 block text-xs font-medium uppercase tracking-wide text-slate-500">Source server</span>
+          <span class="mb-1 block text-xs font-medium uppercase tracking-wide text-fg-subtle">Source server</span>
           <select
             bind:value={compareSourceID}
-            class="w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm text-slate-900 outline-none transition focus:border-blue-500 focus:ring-2 focus:ring-blue-100"
+            class="w-full rounded-lg border border-border-strong bg-surface px-3 py-2 text-sm text-fg outline-none transition focus:border-accent focus:ring-2 focus:ring-accent/20"
           >
             <option value="">Select source server</option>
             {#each servers as server}
@@ -689,10 +689,10 @@
         </label>
 
         <label class="block">
-          <span class="mb-1 block text-xs font-medium uppercase tracking-wide text-slate-500">Target server</span>
+          <span class="mb-1 block text-xs font-medium uppercase tracking-wide text-fg-subtle">Target server</span>
           <select
             bind:value={compareTargetID}
-            class="w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm text-slate-900 outline-none transition focus:border-blue-500 focus:ring-2 focus:ring-blue-100"
+            class="w-full rounded-lg border border-border-strong bg-surface px-3 py-2 text-sm text-fg outline-none transition focus:border-accent focus:ring-2 focus:ring-accent/20"
           >
             <option value="">Select target server</option>
             {#each servers as server}
@@ -702,37 +702,37 @@
         </label>
       </div>
 
-      <div class="mt-3 flex flex-wrap items-center gap-2 text-sm text-slate-500">
+      <div class="mt-3 flex flex-wrap items-center gap-2 text-sm text-fg-subtle">
         {#if compareSourceServer}
-          <span class="rounded-full bg-blue-50 px-2.5 py-1 font-medium text-blue-600">
+          <span class="rounded-full bg-accent-subtle px-2.5 py-1 font-medium text-accent">
             Source: {compareSourceServer.name}
           </span>
         {/if}
         {#if compareTargetServer}
-          <span class="rounded-full bg-slate-100 px-2.5 py-1 font-medium text-slate-600">
+          <span class="rounded-full bg-surface-muted px-2.5 py-1 font-medium text-fg-muted">
             Target: {compareTargetServer.name}
           </span>
         {/if}
         {#if compareSourceID && compareTargetID && compareSourceID === compareTargetID}
-          <span class="rounded-full bg-yellow-50 px-2.5 py-1 font-medium text-yellow-700">
+          <span class="rounded-full bg-warning/15 px-2.5 py-1 font-medium text-warning">
             Choose two different servers
           </span>
         {/if}
       </div>
 
       {#if compareError}
-        <div class="mt-4 rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700" role="alert">
+        <div class="mt-4 rounded-xl border border-error/20 bg-error/15 px-4 py-3 text-sm text-error" role="alert">
           {compareError}
         </div>
       {/if}
 
       {#if compareReport}
         <div class="mt-6 space-y-4">
-          <div class="rounded-2xl border border-slate-200 bg-slate-50 p-4">
+          <div class="rounded-2xl border border-border bg-surface-muted p-4">
             <div class="flex flex-wrap items-center justify-between gap-3">
               <div>
-                <p class="text-sm font-medium text-slate-700">Comparison result</p>
-                <p class="text-xs text-slate-500">
+                <p class="text-sm font-medium text-fg-muted">Comparison result</p>
+                <p class="text-xs text-fg-subtle">
                   {compareReport.serverName} · {formatTimestamp(compareReport.snapshotA)} → {formatTimestamp(compareReport.snapshotB)}
                 </p>
               </div>
@@ -742,27 +742,27 @@
             </div>
 
             <div class="mt-4 grid gap-3 sm:grid-cols-2 xl:grid-cols-5">
-              <div class="rounded-xl bg-white p-3 shadow-sm">
-                <p class="text-xs uppercase tracking-wide text-slate-400">Packages</p>
-                <p class="mt-1 text-sm font-semibold text-slate-900">
+              <div class="rounded-xl bg-surface p-3 shadow-sm">
+                <p class="text-xs uppercase tracking-wide text-fg-subtle">Packages</p>
+                <p class="mt-1 text-sm font-semibold text-fg">
                   +{compareSummary.packagesAdded} / -{compareSummary.packagesRemoved}
                 </p>
               </div>
-              <div class="rounded-xl bg-white p-3 shadow-sm">
-                <p class="text-xs uppercase tracking-wide text-slate-400">Services</p>
-                <p class="mt-1 text-sm font-semibold text-slate-900">{compareSummary.servicesChanged} changed</p>
+              <div class="rounded-xl bg-surface p-3 shadow-sm">
+                <p class="text-xs uppercase tracking-wide text-fg-subtle">Services</p>
+                <p class="mt-1 text-sm font-semibold text-fg">{compareSummary.servicesChanged} changed</p>
               </div>
-              <div class="rounded-xl bg-white p-3 shadow-sm">
-                <p class="text-xs uppercase tracking-wide text-slate-400">Docker</p>
-                <p class="mt-1 text-sm font-semibold text-slate-900">{compareSummary.dockerChanged} changed</p>
+              <div class="rounded-xl bg-surface p-3 shadow-sm">
+                <p class="text-xs uppercase tracking-wide text-fg-subtle">Docker</p>
+                <p class="mt-1 text-sm font-semibold text-fg">{compareSummary.dockerChanged} changed</p>
               </div>
-              <div class="rounded-xl bg-white p-3 shadow-sm">
-                <p class="text-xs uppercase tracking-wide text-slate-400">Users</p>
-                <p class="mt-1 text-sm font-semibold text-slate-900">{compareSummary.usersChanged} changed</p>
+              <div class="rounded-xl bg-surface p-3 shadow-sm">
+                <p class="text-xs uppercase tracking-wide text-fg-subtle">Users</p>
+                <p class="mt-1 text-sm font-semibold text-fg">{compareSummary.usersChanged} changed</p>
               </div>
-              <div class="rounded-xl bg-white p-3 shadow-sm">
-                <p class="text-xs uppercase tracking-wide text-slate-400">Network / Disk</p>
-                <p class="mt-1 text-sm font-semibold text-slate-900">
+              <div class="rounded-xl bg-surface p-3 shadow-sm">
+                <p class="text-xs uppercase tracking-wide text-fg-subtle">Network / Disk</p>
+                <p class="mt-1 text-sm font-semibold text-fg">
                   {compareSummary.networkChanged} / {compareSummary.diskChanged}
                 </p>
               </div>
@@ -775,20 +775,20 @@
               {@const typeMeta = changeTypeMeta(change.type)}
               {@const TypeIcon = typeMeta.icon}
 
-              <div class="flex items-start gap-3 rounded-xl border border-slate-200 bg-white p-3">
-                <div class="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-slate-100 text-slate-600">
+              <div class="flex items-start gap-3 rounded-xl border border-border bg-surface p-3">
+                <div class="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-surface-muted text-fg-muted">
                   <CategoryIcon size={18} />
                 </div>
                 <div class="min-w-0 flex-1">
                   <div class="flex flex-wrap items-center gap-2">
-                    <p class="font-medium text-slate-900">{change.name}</p>
+                    <p class="font-medium text-fg">{change.name}</p>
                     <Badge variant={severityVariant(change.severity)}>{change.severity}</Badge>
                     <Badge variant={typeMeta.badge}>{typeMeta.label}</Badge>
                   </div>
-                  <p class="mt-1 text-xs text-slate-500">{change.category}</p>
-                  <div class="mt-2 text-sm text-slate-600">
+                  <p class="mt-1 text-xs text-fg-subtle">{change.category}</p>
+                  <div class="mt-2 text-sm text-fg-muted">
                     {change.oldValue || '—'}
-                    <span class="mx-2 text-slate-300">→</span>
+                    <span class="mx-2 text-fg-subtle">→</span>
                     {change.newValue || '—'}
                   </div>
                 </div>
@@ -805,34 +805,34 @@
     <Card padding="lg">
       <div class="flex items-center justify-between gap-3">
         <div>
-          <h2 class="text-lg font-semibold text-slate-900">Drift history</h2>
-          <p class="mt-1 text-sm text-slate-500">Past comparisons between consecutive snapshots.</p>
+          <h2 class="text-lg font-semibold text-fg">Drift history</h2>
+          <p class="mt-1 text-sm text-fg-subtle">Past comparisons between consecutive snapshots.</p>
         </div>
         <Badge variant="neutral">{history.length} entries</Badge>
       </div>
 
       {#if historyError}
-        <div class="mt-4 rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700" role="alert">
+        <div class="mt-4 rounded-xl border border-error/20 bg-error/15 px-4 py-3 text-sm text-error" role="alert">
           {historyError}
         </div>
       {/if}
 
       {#if loadingHistory && history.length === 0}
-        <div class="mt-4 flex items-center gap-3 text-slate-600">
+        <div class="mt-4 flex items-center gap-3 text-fg-muted">
           <Spinner size="md" label="Loading drift history" />
           <div>
-            <p class="font-medium text-slate-900">Loading history...</p>
-            <p class="text-sm text-slate-500">Fetching previous snapshot comparisons.</p>
+            <p class="font-medium text-fg">Loading history...</p>
+            <p class="text-sm text-fg-subtle">Fetching previous snapshot comparisons.</p>
           </div>
         </div>
       {:else if history.length}
         <div class="mt-4 space-y-3">
           {#each history as entry}
-            <div class="rounded-xl border border-slate-200 bg-white p-4">
+            <div class="rounded-xl border border-border bg-surface p-4">
               <div class="flex flex-wrap items-center justify-between gap-3">
                 <div>
-                  <p class="font-medium text-slate-900">{formatSummaryTime(entry)}</p>
-                  <p class="text-xs text-slate-500">{formatRange(entry)}</p>
+                  <p class="font-medium text-fg">{formatSummaryTime(entry)}</p>
+                  <p class="text-xs text-fg-subtle">{formatRange(entry)}</p>
                 </div>
                 <Badge variant={totalHistoryChanges(entry) ? 'warning' : 'success'}>
                   {totalHistoryChanges(entry)} changes
@@ -840,25 +840,25 @@
               </div>
 
               <div class="mt-3 grid gap-2 sm:grid-cols-2 xl:grid-cols-5">
-                <div class="rounded-lg bg-slate-50 p-3 text-sm">
-                  <span class="block text-xs uppercase tracking-wide text-slate-400">Packages</span>
-                  <span class="font-medium text-slate-900">+{entry.packagesAdded} / -{entry.packagesRemoved}</span>
+                <div class="rounded-lg bg-surface-muted p-3 text-sm">
+                  <span class="block text-xs uppercase tracking-wide text-fg-subtle">Packages</span>
+                  <span class="font-medium text-fg">+{entry.packagesAdded} / -{entry.packagesRemoved}</span>
                 </div>
-                <div class="rounded-lg bg-slate-50 p-3 text-sm">
-                  <span class="block text-xs uppercase tracking-wide text-slate-400">Services</span>
-                  <span class="font-medium text-slate-900">{entry.servicesChanged}</span>
+                <div class="rounded-lg bg-surface-muted p-3 text-sm">
+                  <span class="block text-xs uppercase tracking-wide text-fg-subtle">Services</span>
+                  <span class="font-medium text-fg">{entry.servicesChanged}</span>
                 </div>
-                <div class="rounded-lg bg-slate-50 p-3 text-sm">
-                  <span class="block text-xs uppercase tracking-wide text-slate-400">Docker</span>
-                  <span class="font-medium text-slate-900">{entry.dockerChanged}</span>
+                <div class="rounded-lg bg-surface-muted p-3 text-sm">
+                  <span class="block text-xs uppercase tracking-wide text-fg-subtle">Docker</span>
+                  <span class="font-medium text-fg">{entry.dockerChanged}</span>
                 </div>
-                <div class="rounded-lg bg-slate-50 p-3 text-sm">
-                  <span class="block text-xs uppercase tracking-wide text-slate-400">Users</span>
-                  <span class="font-medium text-slate-900">{entry.usersChanged}</span>
+                <div class="rounded-lg bg-surface-muted p-3 text-sm">
+                  <span class="block text-xs uppercase tracking-wide text-fg-subtle">Users</span>
+                  <span class="font-medium text-fg">{entry.usersChanged}</span>
                 </div>
-                <div class="rounded-lg bg-slate-50 p-3 text-sm">
-                  <span class="block text-xs uppercase tracking-wide text-slate-400">Network / Disk</span>
-                  <span class="font-medium text-slate-900">{entry.networkChanged} / {entry.diskChanged}</span>
+                <div class="rounded-lg bg-surface-muted p-3 text-sm">
+                  <span class="block text-xs uppercase tracking-wide text-fg-subtle">Network / Disk</span>
+                  <span class="font-medium text-fg">{entry.networkChanged} / {entry.diskChanged}</span>
                 </div>
               </div>
             </div>

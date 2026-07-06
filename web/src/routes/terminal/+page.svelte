@@ -446,7 +446,7 @@
         type="button"
         onclick={loadServers}
         disabled={loading}
-        class="inline-flex items-center gap-2 rounded-lg border border-slate-300 bg-white px-4 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50 focus-visible:ring-2 focus-visible:ring-blue-500 focus-visible:ring-offset-2 disabled:opacity-60"
+        class="inline-flex items-center gap-2 rounded-lg border border-border-strong bg-surface px-4 py-2 text-sm font-medium text-fg-muted hover:bg-surface-muted focus-visible:ring-2 focus-visible:ring-accent focus-visible:ring-offset-2 disabled:opacity-60"
         aria-label="Refresh server list"
       >
         {#if loading}<Spinner size="sm" label="Refreshing" />{:else}<RefreshCw size={16} />{/if}
@@ -455,7 +455,7 @@
       <button
         type="button"
         onclick={() => showSpecialKeys = !showSpecialKeys}
-        class={`inline-flex items-center gap-2 rounded-lg border px-4 py-2 text-sm font-medium transition focus-visible:ring-2 focus-visible:ring-blue-500 focus-visible:ring-offset-2 ${showSpecialKeys ? 'border-blue-500 bg-blue-50 text-blue-700' : 'border-slate-300 bg-white text-slate-700 hover:bg-slate-50'}`}
+        class={`inline-flex items-center gap-2 rounded-lg border px-4 py-2 text-sm font-medium transition focus-visible:ring-2 focus-visible:ring-accent focus-visible:ring-offset-2 ${showSpecialKeys ? 'border-accent bg-accent-subtle text-accent' : 'border-border-strong bg-surface text-fg-muted hover:bg-surface-muted'}`}
         aria-label="Toggle special keys"
         aria-pressed={showSpecialKeys}
       >
@@ -468,9 +468,9 @@
   <div class="grid gap-6 lg:grid-cols-3">
     <!-- Server list -->
     <div class="lg:col-span-1">
-      <h2 class="mb-3 text-sm font-semibold text-slate-700">Select Server</h2>
+      <h2 class="mb-3 text-sm font-semibold text-fg-muted">Select Server</h2>
       {#if loading}
-        <div class="flex items-center justify-center gap-3 py-8 text-slate-500">
+        <div class="flex items-center justify-center gap-3 py-8 text-fg-subtle">
           <Spinner size="md" label="Loading servers" />
           <span class="text-sm">Loading servers...</span>
         </div>
@@ -485,22 +485,22 @@
                 selectedServerId = server.id;
                 closeConnection();
               }}
-              class={`w-full rounded-xl border p-3 text-left transition focus-visible:ring-2 focus-visible:ring-blue-500 focus-visible:ring-offset-2 ${selectedServerId === server.id ? 'border-blue-500 bg-blue-50 shadow-sm' : 'border-slate-200 bg-white hover:border-slate-300 hover:bg-slate-50'}`}
+              class={`w-full rounded-xl border p-3 text-left transition focus-visible:ring-2 focus-visible:ring-accent focus-visible:ring-offset-2 ${selectedServerId === server.id ? 'border-accent bg-accent-subtle shadow-sm' : 'border-border bg-surface hover:border-border-strong hover:bg-surface-muted'}`}
               aria-pressed={selectedServerId === server.id}
             >
               <div class="flex items-center gap-3">
-                <div class={`flex h-8 w-8 shrink-0 items-center justify-center rounded-lg ${selectedServerId === server.id ? 'bg-blue-100 text-blue-600' : 'bg-slate-100 text-slate-500'}`} aria-hidden="true">
+                <div class={`flex h-8 w-8 shrink-0 items-center justify-center rounded-lg ${selectedServerId === server.id ? 'bg-accent-subtle text-accent' : 'bg-surface-muted text-fg-subtle'}`} aria-hidden="true">
                   <ServerIcon size={16} />
                 </div>
                 <div class="min-w-0 flex-1">
-                  <p class="truncate text-sm font-medium text-slate-900">{server.name}</p>
-                  <p class="truncate text-xs text-slate-500">{server.username}@{server.host}:{server.port}</p>
+                  <p class="truncate text-sm font-medium text-fg">{server.name}</p>
+                  <p class="truncate text-xs text-fg-subtle">{server.username}@{server.host}:{server.port}</p>
                 </div>
                 {#if selectedServerId === server.id && connectionStatus === 'connected'}
-                  <span class="inline-block h-2 w-2 rounded-full bg-green-500 animate-pulse" aria-label="Connected"></span>
+                  <span class="inline-block h-2 w-2 rounded-full bg-success animate-pulse" aria-label="Connected"></span>
                 {/if}
                 {#if selectedServerId === server.id}
-                  <ChevronRight size={16} class="text-blue-500" aria-hidden="true" />
+                  <ChevronRight size={16} class="text-accent" aria-hidden="true" />
                 {/if}
               </div>
             </button>
@@ -510,21 +510,21 @@
 
       <!-- Info panel when connected -->
       {#if connectionStatus === 'connected'}
-        <div class="mt-6 rounded-xl border border-slate-200 bg-slate-50 p-4">
-          <h3 class="mb-3 text-xs font-semibold uppercase tracking-wider text-slate-500">Session Info</h3>
+        <div class="mt-6 rounded-xl border border-border bg-surface-muted p-4">
+          <h3 class="mb-3 text-xs font-semibold uppercase tracking-wider text-fg-subtle">Session Info</h3>
           <dl class="space-y-2 text-sm">
             <div class="flex justify-between">
-              <dt class="text-slate-500">Host</dt>
-              <dd class="font-mono text-slate-700">{selectedServer?.host}</dd>
+              <dt class="text-fg-subtle">Host</dt>
+              <dd class="font-mono text-fg-muted">{selectedServer?.host}</dd>
             </div>
             <div class="flex justify-between">
-              <dt class="text-slate-500">User</dt>
-              <dd class="font-mono text-slate-700">{selectedServer?.username}</dd>
+              <dt class="text-fg-subtle">User</dt>
+              <dd class="font-mono text-fg-muted">{selectedServer?.username}</dd>
             </div>
             {#if hostname}
               <div class="flex justify-between">
-                <dt class="text-slate-500">Hostname</dt>
-                <dd class="font-mono text-slate-700">{hostname}</dd>
+                <dt class="text-fg-subtle">Hostname</dt>
+                <dd class="font-mono text-fg-muted">{hostname}</dd>
               </div>
             {/if}
           </dl>
@@ -532,29 +532,29 @@
             <button
               type="button"
               onclick={clearTerminal}
-              class="flex w-full items-center gap-2 rounded-lg border border-slate-200 bg-white px-3 py-2 text-xs font-medium text-slate-600 transition hover:bg-slate-50 focus-visible:ring-2 focus-visible:ring-blue-500 focus-visible:ring-offset-2"
+              class="flex w-full items-center gap-2 rounded-lg border border-border bg-surface px-3 py-2 text-xs font-medium text-fg-muted transition hover:bg-surface-muted focus-visible:ring-2 focus-visible:ring-accent focus-visible:ring-offset-2"
             >
               <Trash2 size={14} /> Clear Terminal
             </button>
             <button
               type="button"
               onclick={copyAll}
-              class="flex w-full items-center gap-2 rounded-lg border border-slate-200 bg-white px-3 py-2 text-xs font-medium text-slate-600 transition hover:bg-slate-50 focus-visible:ring-2 focus-visible:ring-blue-500 focus-visible:ring-offset-2"
+              class="flex w-full items-center gap-2 rounded-lg border border-border bg-surface px-3 py-2 text-xs font-medium text-fg-muted transition hover:bg-surface-muted focus-visible:ring-2 focus-visible:ring-accent focus-visible:ring-offset-2"
             >
               <Copy size={14} /> Copy All Output
             </button>
             <button
               type="button"
               onclick={fitTerminal}
-              class="flex w-full items-center gap-2 rounded-lg border border-slate-200 bg-white px-3 py-2 text-xs font-medium text-slate-600 transition hover:bg-slate-50 focus-visible:ring-2 focus-visible:ring-blue-500 focus-visible:ring-offset-2"
+              class="flex w-full items-center gap-2 rounded-lg border border-border bg-surface px-3 py-2 text-xs font-medium text-fg-muted transition hover:bg-surface-muted focus-visible:ring-2 focus-visible:ring-accent focus-visible:ring-offset-2"
             >
               <Maximize2 size={14} /> Fit to Container
             </button>
           </div>
         </div>
 
-        <div class="mt-4 rounded-xl border border-blue-100 bg-blue-50 p-3">
-          <p class="text-xs text-blue-700">
+        <div class="mt-4 rounded-xl border border-accent/20 bg-accent/10 p-3">
+          <p class="text-xs text-accent">
             <strong>Real PTY Terminal</strong> — supports interactive commands (top, vim, htop), ANSI colors, Ctrl+C, and live streaming.
           </p>
         </div>
@@ -566,22 +566,22 @@
       {#if !selectedServer}
         <Card padding="lg">
           <div class="flex flex-col items-center justify-center py-16 text-center">
-            <TerminalIcon size={32} class="text-slate-300" aria-hidden="true" />
-            <p class="mt-4 text-sm text-slate-500">Select a server to start an interactive terminal session.</p>
+            <TerminalIcon size={32} class="text-fg-subtle" aria-hidden="true" />
+            <p class="mt-4 text-sm text-fg-subtle">Select a server to start an interactive terminal session.</p>
           </div>
         </Card>
       {:else}
-        <div class="overflow-hidden rounded-xl border border-slate-700 shadow-lg">
+        <div class="overflow-hidden rounded-xl border border-border shadow-lg">
           <!-- Terminal header -->
-          <div class="flex items-center justify-between border-b border-slate-700 bg-slate-800 px-4 py-2.5">
+          <div class="flex items-center justify-between border-b border-border bg-surface px-4 py-2.5">
             <div class="flex items-center gap-2">
               <!-- Traffic light dots -->
               <div class="flex items-center gap-1.5" aria-hidden="true">
-                <span class="h-3 w-3 rounded-full bg-red-500"></span>
-                <span class="h-3 w-3 rounded-full bg-yellow-500"></span>
-                <span class="h-3 w-3 rounded-full bg-green-500"></span>
+                <span class="h-3 w-3 rounded-full bg-error"></span>
+                <span class="h-3 w-3 rounded-full bg-warning"></span>
+                <span class="h-3 w-3 rounded-full bg-success"></span>
               </div>
-              <span class="ml-2 font-mono text-xs text-slate-400">
+              <span class="ml-2 font-mono text-xs text-fg-subtle">
                 {selectedServer.username}@{selectedServer.host}
                 {#if hostname}: {hostname}{/if}
               </span>
@@ -594,7 +594,7 @@
                   onclick={focusTerminal}
                   title="Focus terminal"
                   aria-label="Focus terminal"
-                  class="rounded p-1 text-slate-400 hover:bg-slate-700 hover:text-slate-200 focus-visible:ring-2 focus-visible:ring-blue-500"
+                  class="rounded p-1 text-fg-subtle hover:bg-surface-muted hover:text-fg focus-visible:ring-2 focus-visible:ring-accent"
                 >
                   <ExternalLink size={14} />
                 </button>
@@ -608,29 +608,29 @@
             <!-- xterm.js terminal container — always rendered -->
             <div
               bind:this={terminalContainer}
-              class="h-[400px] sm:h-[500px] bg-slate-900 p-2"
+              class="h-[400px] sm:h-[500px] bg-surface-muted p-2"
             ></div>
 
             <!-- Overlay: shown when not yet connected -->
             {#if connectionStatus !== 'connected'}
-              <div class="absolute inset-0 flex flex-col items-center justify-center bg-slate-900 p-4">
+              <div class="absolute inset-0 flex flex-col items-center justify-center bg-surface-muted p-4">
                 {#if connectionStatus === 'connecting'}
-                  <div class="flex items-center gap-3 text-slate-400">
+                  <div class="flex items-center gap-3 text-fg-subtle">
                     <Loader2 size={20} class="animate-spin" />
                     <span class="text-sm">Connecting to {selectedServer.name}...</span>
                   </div>
                 {:else if connectionStatus === 'failed'}
                   <div class="text-center">
-                    <WifiOff size={28} class="mx-auto text-red-500" aria-hidden="true" />
-                    <p class="mt-3 text-sm text-red-400">Connection failed</p>
-                    <p class="mt-1 text-xs text-slate-500">Check that the server is online and SSH credentials are correct.</p>
+                    <WifiOff size={28} class="mx-auto text-error" aria-hidden="true" />
+                    <p class="mt-3 text-sm text-error">Connection failed</p>
+                    <p class="mt-1 text-xs text-fg-subtle">Check that the server is online and SSH credentials are correct.</p>
                   </div>
                 {:else}
                   <div class="text-center">
-                    <TerminalIcon size={28} class="mx-auto text-slate-600" aria-hidden="true" />
-                    <p class="mt-3 text-sm text-slate-500">Ready to connect</p>
-                    <p class="mt-1 text-xs text-slate-600">Click "Connect" to start a real interactive SSH terminal session.</p>
-                    <p class="mt-2 text-xs text-slate-600">Full PTY support — interactive commands, colors, streaming output.</p>
+                    <TerminalIcon size={28} class="mx-auto text-fg-subtle" aria-hidden="true" />
+                    <p class="mt-3 text-sm text-fg-subtle">Ready to connect</p>
+                    <p class="mt-1 text-xs text-fg-subtle">Click "Connect" to start a real interactive SSH terminal session.</p>
+                    <p class="mt-2 text-xs text-fg-subtle">Full PTY support — interactive commands, colors, streaming output.</p>
                   </div>
                 {/if}
               </div>
@@ -639,13 +639,13 @@
 
           <!-- Special Keys Bar (always visible when connected, toggleable) -->
           {#if showSpecialKeys && connectionStatus === 'connected'}
-            <div class="border-t border-slate-700 bg-slate-800 p-2">
+            <div class="border-t border-border bg-surface p-2">
               <!-- Modifier keys row -->
               <div class="mb-2 flex flex-wrap items-center gap-1.5">
                 <button
                   type="button"
                   onclick={toggleCtrl}
-                  class={`rounded px-3 py-1.5 text-xs font-bold transition focus-visible:ring-2 focus-visible:ring-blue-500 ${ctrlActive ? 'bg-blue-600 text-white' : 'bg-slate-700 text-slate-300 hover:bg-slate-600'}`}
+                  class={`rounded px-3 py-1.5 text-xs font-bold transition focus-visible:ring-2 focus-visible:ring-accent ${ctrlActive ? 'bg-accent text-accent-fg' : 'bg-surface-muted text-fg-muted hover:bg-border'}`}
                   aria-pressed={ctrlActive}
                   title="Ctrl modifier — tap then a key"
                 >
@@ -654,20 +654,20 @@
                 <button
                   type="button"
                   onclick={toggleAlt}
-                  class={`rounded px-3 py-1.5 text-xs font-bold transition focus-visible:ring-2 focus-visible:ring-blue-500 ${altActive ? 'bg-blue-600 text-white' : 'bg-slate-700 text-slate-300 hover:bg-slate-600'}`}
+                  class={`rounded px-3 py-1.5 text-xs font-bold transition focus-visible:ring-2 focus-visible:ring-accent ${altActive ? 'bg-accent text-accent-fg' : 'bg-surface-muted text-fg-muted hover:bg-border'}`}
                   aria-pressed={altActive}
                   title="Alt modifier — tap then a key"
                 >
                   ALT
                 </button>
 
-                <div class="mx-1 h-6 w-px bg-slate-600"></div>
+                <div class="mx-1 h-6 w-px bg-border-strong"></div>
 
                 <!-- ESC -->
                 <button
                   type="button"
                   onclick={() => sendSpecialKey('esc')}
-                  class="rounded bg-slate-700 px-3 py-1.5 text-xs font-semibold text-slate-300 transition hover:bg-slate-600 focus-visible:ring-2 focus-visible:ring-blue-500"
+                  class="rounded bg-surface-muted px-3 py-1.5 text-xs font-semibold text-fg-muted transition hover:bg-border focus-visible:ring-2 focus-visible:ring-accent"
                   aria-label="Escape key"
                 >
                   ESC
@@ -676,7 +676,7 @@
                 <button
                   type="button"
                   onclick={() => sendSpecialKey('tab')}
-                  class="rounded bg-slate-700 px-3 py-1.5 text-xs font-semibold text-slate-300 transition hover:bg-slate-600 focus-visible:ring-2 focus-visible:ring-blue-500"
+                  class="rounded bg-surface-muted px-3 py-1.5 text-xs font-semibold text-fg-muted transition hover:bg-border focus-visible:ring-2 focus-visible:ring-accent"
                   aria-label="Tab key"
                 >
                   TAB
@@ -685,7 +685,7 @@
                 <button
                   type="button"
                   onclick={() => sendSpecialKey('enter')}
-                  class="rounded bg-slate-700 px-3 py-1.5 text-xs font-semibold text-slate-300 transition hover:bg-slate-600 focus-visible:ring-2 focus-visible:ring-blue-500"
+                  class="rounded bg-surface-muted px-3 py-1.5 text-xs font-semibold text-fg-muted transition hover:bg-border focus-visible:ring-2 focus-visible:ring-accent"
                   aria-label="Enter key"
                 >
                   ⏎
@@ -694,19 +694,19 @@
                 <button
                   type="button"
                   onclick={() => sendSpecialKey('backspace')}
-                  class="rounded bg-slate-700 px-3 py-1.5 text-xs font-semibold text-slate-300 transition hover:bg-slate-600 focus-visible:ring-2 focus-visible:ring-blue-500"
+                  class="rounded bg-surface-muted px-3 py-1.5 text-xs font-semibold text-fg-muted transition hover:bg-border focus-visible:ring-2 focus-visible:ring-accent"
                   aria-label="Backspace key"
                 >
                   ⌫
                 </button>
 
-                <div class="mx-1 h-6 w-px bg-slate-600"></div>
+                <div class="mx-1 h-6 w-px bg-border-strong"></div>
 
                 <!-- Arrow keys -->
                 <button
                   type="button"
                   onclick={() => sendSpecialKey('arrowup')}
-                  class="rounded bg-slate-700 px-2.5 py-1.5 text-slate-300 transition hover:bg-slate-600 focus-visible:ring-2 focus-visible:ring-blue-500"
+                  class="rounded bg-surface-muted px-2.5 py-1.5 text-fg-muted transition hover:bg-border focus-visible:ring-2 focus-visible:ring-accent"
                   aria-label="Arrow up"
                 >
                   <ChevronUp size={14} />
@@ -714,7 +714,7 @@
                 <button
                   type="button"
                   onclick={() => sendSpecialKey('arrowdown')}
-                  class="rounded bg-slate-700 px-2.5 py-1.5 text-slate-300 transition hover:bg-slate-600 focus-visible:ring-2 focus-visible:ring-blue-500"
+                  class="rounded bg-surface-muted px-2.5 py-1.5 text-fg-muted transition hover:bg-border focus-visible:ring-2 focus-visible:ring-accent"
                   aria-label="Arrow down"
                 >
                   <ChevronDown size={14} />
@@ -722,7 +722,7 @@
                 <button
                   type="button"
                   onclick={() => sendSpecialKey('arrowleft')}
-                  class="rounded bg-slate-700 px-2.5 py-1.5 text-slate-300 transition hover:bg-slate-600 focus-visible:ring-2 focus-visible:ring-blue-500"
+                  class="rounded bg-surface-muted px-2.5 py-1.5 text-fg-muted transition hover:bg-border focus-visible:ring-2 focus-visible:ring-accent"
                   aria-label="Arrow left"
                 >
                   <ArrowLeft size={14} />
@@ -730,19 +730,19 @@
                 <button
                   type="button"
                   onclick={() => sendSpecialKey('arrowright')}
-                  class="rounded bg-slate-700 px-2.5 py-1.5 text-slate-300 transition hover:bg-slate-600 focus-visible:ring-2 focus-visible:ring-blue-500"
+                  class="rounded bg-surface-muted px-2.5 py-1.5 text-fg-muted transition hover:bg-border focus-visible:ring-2 focus-visible:ring-accent"
                   aria-label="Arrow right"
                 >
                   <ArrowRight size={14} />
                 </button>
 
-                <div class="mx-1 h-6 w-px bg-slate-600"></div>
+                <div class="mx-1 h-6 w-px bg-border-strong"></div>
 
                 <!-- Home / End / Page Up / Page Down -->
                 <button
                   type="button"
                   onclick={() => sendSpecialKey('home')}
-                  class="rounded bg-slate-700 px-2.5 py-1.5 text-xs font-semibold text-slate-300 transition hover:bg-slate-600 focus-visible:ring-2 focus-visible:ring-blue-500"
+                  class="rounded bg-surface-muted px-2.5 py-1.5 text-xs font-semibold text-fg-muted transition hover:bg-border focus-visible:ring-2 focus-visible:ring-accent"
                   aria-label="Home key"
                 >
                   Home
@@ -750,7 +750,7 @@
                 <button
                   type="button"
                   onclick={() => sendSpecialKey('end')}
-                  class="rounded bg-slate-700 px-2.5 py-1.5 text-xs font-semibold text-slate-300 transition hover:bg-slate-600 focus-visible:ring-2 focus-visible:ring-blue-500"
+                  class="rounded bg-surface-muted px-2.5 py-1.5 text-xs font-semibold text-fg-muted transition hover:bg-border focus-visible:ring-2 focus-visible:ring-accent"
                   aria-label="End key"
                 >
                   End
@@ -758,7 +758,7 @@
                 <button
                   type="button"
                   onclick={() => sendSpecialKey('pageup')}
-                  class="rounded bg-slate-700 px-2.5 py-1.5 text-xs font-semibold text-slate-300 transition hover:bg-slate-600 focus-visible:ring-2 focus-visible:ring-blue-500"
+                  class="rounded bg-surface-muted px-2.5 py-1.5 text-xs font-semibold text-fg-muted transition hover:bg-border focus-visible:ring-2 focus-visible:ring-accent"
                   aria-label="Page up key"
                 >
                   PgUp
@@ -766,7 +766,7 @@
                 <button
                   type="button"
                   onclick={() => sendSpecialKey('pagedown')}
-                  class="rounded bg-slate-700 px-2.5 py-1.5 text-xs font-semibold text-slate-300 transition hover:bg-slate-600 focus-visible:ring-2 focus-visible:ring-blue-500"
+                  class="rounded bg-surface-muted px-2.5 py-1.5 text-xs font-semibold text-fg-muted transition hover:bg-border focus-visible:ring-2 focus-visible:ring-accent"
                   aria-label="Page down key"
                 >
                   PgDn
@@ -775,13 +775,13 @@
 
               <!-- Ctrl+key shortcuts (visible when ctrl is active or always shown) -->
               {#if ctrlActive}
-                <div class="mb-2 flex flex-wrap items-center gap-1.5 rounded-lg bg-slate-900/50 p-2">
-                  <span class="mr-1 text-xs font-medium text-slate-500">Ctrl +</span>
+                <div class="mb-2 flex flex-wrap items-center gap-1.5 rounded-lg bg-bg/50 p-2">
+                  <span class="mr-1 text-xs font-medium text-fg-subtle">Ctrl +</span>
                   {#each ctrlKeys as ck}
                     <button
                       type="button"
                       onclick={() => sendCtrlCombo(ck.char)}
-                      class="rounded bg-slate-700 px-2.5 py-1.5 text-xs font-mono font-semibold text-slate-300 transition hover:bg-blue-600 hover:text-white focus-visible:ring-2 focus-visible:ring-blue-500"
+                      class="rounded bg-surface-muted px-2.5 py-1.5 text-xs font-mono font-semibold text-fg-muted transition hover:bg-accent hover:text-accent-fg focus-visible:ring-2 focus-visible:ring-accent"
                       title={`Ctrl+${ck.label} — ${ck.desc}`}
                       aria-label={`Ctrl+${ck.label} — ${ck.desc}`}
                     >
@@ -797,7 +797,7 @@
                   <button
                     type="button"
                     onclick={() => sendSpecialKey(sc.key)}
-                    class="rounded bg-slate-700 px-2 py-1.5 text-xs font-mono text-slate-300 transition hover:bg-slate-600 focus-visible:ring-2 focus-visible:ring-blue-500"
+                    class="rounded bg-surface-muted px-2 py-1.5 text-xs font-mono text-fg-muted transition hover:bg-border focus-visible:ring-2 focus-visible:ring-accent"
                     aria-label={`Send ${sc.label}`}
                   >
                     {sc.label}
@@ -808,13 +808,13 @@
           {/if}
 
           <!-- Action bar -->
-          <div class="flex items-center justify-between border-t border-slate-700 bg-slate-800 px-4 py-2.5">
+          <div class="flex items-center justify-between border-t border-border bg-surface px-4 py-2.5">
             <div class="flex items-center gap-2">
               {#if connectionStatus === 'connected'}
                 <button
                   type="button"
                   onclick={closeConnection}
-                  class="inline-flex items-center gap-1.5 rounded-lg border border-red-700 bg-red-900/50 px-3 py-1.5 text-xs font-medium text-red-300 transition hover:bg-red-900 focus-visible:ring-2 focus-visible:ring-red-500"
+                  class="inline-flex items-center gap-1.5 rounded-lg border border-error/40 bg-error/15 px-3 py-1.5 text-xs font-medium text-error transition hover:bg-error/25 focus-visible:ring-2 focus-visible:ring-error"
                 >
                   <WifiOff size={12} />
                   Disconnect
@@ -824,7 +824,7 @@
                   type="button"
                   onclick={connectTerminal}
                   disabled={connectionStatus === 'connecting'}
-                  class="inline-flex items-center gap-1.5 rounded-lg bg-blue-600 px-3 py-1.5 text-xs font-medium text-white transition hover:bg-blue-700 focus-visible:ring-2 focus-visible:ring-blue-500 disabled:opacity-60"
+                  class="inline-flex items-center gap-1.5 rounded-lg bg-accent px-3 py-1.5 text-xs font-medium text-accent-fg transition hover:bg-accent-hover focus-visible:ring-2 focus-visible:ring-accent disabled:opacity-60"
                 >
                   {#if connectionStatus === 'connecting'}
                     <Loader2 size={12} class="animate-spin" />
@@ -836,7 +836,7 @@
                 </button>
               {/if}
             </div>
-            <div class="text-xs text-slate-500">
+            <div class="text-xs text-fg-subtle">
               {#if connectionStatus === 'connected'}
                 Real PTY · Interactive commands · Ctrl+C works
               {:else}

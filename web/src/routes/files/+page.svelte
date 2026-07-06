@@ -115,7 +115,7 @@
 <div class="p-4 sm:p-6 max-w-7xl mx-auto">
   <PageHeader title="Files" subtitle="Disk usage and filesystem overview across all servers.">
     {#snippet actions()}
-      <button type="button" onclick={loadAll} disabled={loading} class="inline-flex items-center gap-2 rounded-lg border border-slate-300 bg-white px-4 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50 disabled:opacity-60">
+      <button type="button" onclick={loadAll} disabled={loading} class="inline-flex items-center gap-2 rounded-lg border border-border-strong bg-surface px-4 py-2 text-sm font-medium text-fg-muted hover:bg-surface-muted disabled:opacity-60">
         {#if loading}<Spinner size="sm" label="Refreshing" />{:else}<RefreshCw size={16} />{/if}
         Refresh
       </button>
@@ -126,37 +126,37 @@
   <div class="mb-6 grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
     <Card padding="lg">
       <div class="flex items-center gap-3">
-        <div class="flex h-10 w-10 items-center justify-center rounded-lg bg-blue-50 text-blue-600"><HardDrive size={20} /></div>
+        <div class="flex h-10 w-10 items-center justify-center rounded-lg bg-accent/10 text-accent"><HardDrive size={20} /></div>
         <div>
-          <p class="text-2xl font-bold text-slate-900">{diskStats.total}</p>
-          <p class="text-xs text-slate-500">Partitions</p>
+          <p class="text-2xl font-bold text-fg">{diskStats.total}</p>
+          <p class="text-xs text-fg-subtle">Partitions</p>
         </div>
       </div>
     </Card>
     <Card padding="lg">
       <div class="flex items-center gap-3">
-        <div class="flex h-10 w-10 items-center justify-center rounded-lg bg-green-50 text-green-600"><Folder size={20} /></div>
+        <div class="flex h-10 w-10 items-center justify-center rounded-lg bg-success/10 text-success"><Folder size={20} /></div>
         <div>
-          <p class="text-2xl font-bold text-slate-900">{formatGB(diskStats.totalUsedGb)} / {formatGB(diskStats.totalSizeGb)}</p>
-          <p class="text-xs text-slate-500">Total Used / Size</p>
+          <p class="text-2xl font-bold text-fg">{formatGB(diskStats.totalUsedGb)} / {formatGB(diskStats.totalSizeGb)}</p>
+          <p class="text-xs text-fg-subtle">Total Used / Size</p>
         </div>
       </div>
     </Card>
     <Card padding="lg">
       <div class="flex items-center gap-3">
-        <div class="flex h-10 w-10 items-center justify-center rounded-lg bg-yellow-50 text-yellow-600"><AlertCircle size={20} /></div>
+        <div class="flex h-10 w-10 items-center justify-center rounded-lg bg-warning/10 text-warning"><AlertCircle size={20} /></div>
         <div>
-          <p class="text-2xl font-bold text-slate-900">{diskStats.warning}</p>
-          <p class="text-xs text-slate-500">Warnings (>75%)</p>
+          <p class="text-2xl font-bold text-fg">{diskStats.warning}</p>
+          <p class="text-xs text-fg-subtle">Warnings (>75%)</p>
         </div>
       </div>
     </Card>
     <Card padding="lg">
       <div class="flex items-center gap-3">
-        <div class="flex h-10 w-10 items-center justify-center rounded-lg bg-red-50 text-red-600"><AlertCircle size={20} /></div>
+        <div class="flex h-10 w-10 items-center justify-center rounded-lg bg-error/10 text-error"><AlertCircle size={20} /></div>
         <div>
-          <p class="text-2xl font-bold text-slate-900">{diskStats.critical}</p>
-          <p class="text-xs text-slate-500">Critical (>90%)</p>
+          <p class="text-2xl font-bold text-fg">{diskStats.critical}</p>
+          <p class="text-xs text-fg-subtle">Critical (>90%)</p>
         </div>
       </div>
     </Card>
@@ -165,19 +165,19 @@
   <!-- Server Browser Section -->
   {#if !loading && servers.length > 0}
     <div class="mb-6">
-      <h2 class="mb-3 text-sm font-semibold uppercase tracking-wide text-slate-500">Browse Files by Server</h2>
+      <h2 class="mb-3 text-sm font-semibold uppercase tracking-wide text-fg-subtle">Browse Files by Server</h2>
       <div class="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
         {#each servers as srv (srv.id)}
           <Card padding="lg" hoverable>
             <button type="button" onclick={() => goto(`/files/${srv.id}`)} class="flex w-full items-center gap-3 text-left">
-              <div class="flex h-10 w-10 items-center justify-center rounded-lg bg-blue-50 text-blue-600">
+              <div class="flex h-10 w-10 items-center justify-center rounded-lg bg-accent/10 text-accent">
                 <FolderOpen size={20} />
               </div>
               <div class="min-w-0 flex-1">
-                <p class="truncate text-sm font-medium text-slate-900">{srv.name}</p>
-                <p class="truncate font-mono text-xs text-slate-500">{srv.host}:{srv.port || 22}</p>
+                <p class="truncate text-sm font-medium text-fg">{srv.name}</p>
+                <p class="truncate font-mono text-xs text-fg-subtle">{srv.host}:{srv.port || 22}</p>
               </div>
-              <FolderTree size={16} class="text-slate-400" />
+              <FolderTree size={16} class="text-fg-subtle" />
             </button>
           </Card>
         {/each}
@@ -191,24 +191,24 @@
     <div class="flex flex-col gap-4">
       <div class="flex items-center gap-3">
         <div class="relative flex-1">
-          <Search size={16} class="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
-          <input type="text" bind:value={searchQuery} placeholder="Search mount points, filesystems, servers..." class="w-full rounded-lg border border-slate-300 bg-white py-2 pl-10 pr-4 text-sm outline-none focus:border-blue-500" />
+          <Search size={16} class="absolute left-3 top-1/2 -translate-y-1/2 text-fg-subtle" />
+          <input type="text" bind:value={searchQuery} placeholder="Search mount points, filesystems, servers..." class="w-full rounded-lg border border-border-strong bg-surface py-2 pl-10 pr-4 text-sm outline-none focus:border-accent" />
         </div>
-        <button type="button" onclick={() => showFilters = !showFilters} class="inline-flex items-center gap-2 rounded-lg border border-slate-300 bg-white px-4 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50">
+        <button type="button" onclick={() => showFilters = !showFilters} class="inline-flex items-center gap-2 rounded-lg border border-border-strong bg-surface px-4 py-2 text-sm font-medium text-fg-muted hover:bg-surface-muted">
           <Filter size={16} />Filters{#if showFilters}<ChevronUp size={16} />{:else}<ChevronDown size={16} />{/if}
         </button>
       </div>
       {#if showFilters}
         <div class="grid gap-4 sm:grid-cols-2">
           <label class="block">
-            <span class="mb-1 block text-xs font-semibold uppercase tracking-wide text-slate-500">Server</span>
-            <select bind:value={filterServer} class="w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm outline-none focus:border-blue-500">
+            <span class="mb-1 block text-xs font-semibold uppercase tracking-wide text-fg-subtle">Server</span>
+            <select bind:value={filterServer} class="w-full rounded-lg border border-border-strong bg-surface px-3 py-2 text-sm outline-none focus:border-accent">
               {#each serverOptions as srv}<option value={srv}>{srv === 'all' ? 'All servers' : srv}</option>{/each}
             </select>
           </label>
           <label class="block">
-            <span class="mb-1 block text-xs font-semibold uppercase tracking-wide text-slate-500">Usage Level</span>
-            <select bind:value={filterUsage} class="w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm outline-none focus:border-blue-500">
+            <span class="mb-1 block text-xs font-semibold uppercase tracking-wide text-fg-subtle">Usage Level</span>
+            <select bind:value={filterUsage} class="w-full rounded-lg border border-border-strong bg-surface px-3 py-2 text-sm outline-none focus:border-accent">
               <option value="all">All levels</option>
               <option value="critical">Critical (>90%)</option>
               <option value="warning">Warning (75-90%)</option>
@@ -237,25 +237,25 @@
           <div class="flex items-start justify-between gap-4">
             <div class="min-w-0 flex-1">
               <div class="flex items-center gap-2">
-                <FolderTree size={16} class="text-slate-400" />
-                <span class="font-mono text-sm font-medium text-slate-900">{item.partition.mountPoint}</span>
+                <FolderTree size={16} class="text-fg-subtle" />
+                <span class="font-mono text-sm font-medium text-fg">{item.partition.mountPoint}</span>
                 {#if item.partition.usePercent > 90}
                   <Badge variant="error" size="sm">Critical</Badge>
                 {:else if item.partition.usePercent > 75}
                   <Badge variant="warning" size="sm">Warning</Badge>
                 {/if}
               </div>
-              <p class="mt-1 font-mono text-xs text-slate-500">{item.partition.filesystem}</p>
-              <div class="mt-2 flex items-center gap-3 text-xs text-slate-400">
-                <button type="button" onclick={() => goto(`/servers/${item.serverId}`)} class="hover:text-blue-600 hover:underline">{item.serverName}</button>
+              <p class="mt-1 font-mono text-xs text-fg-subtle">{item.partition.filesystem}</p>
+              <div class="mt-2 flex items-center gap-3 text-xs text-fg-subtle">
+                <button type="button" onclick={() => goto(`/servers/${item.serverId}`)} class="hover:text-accent hover:underline">{item.serverName}</button>
                 <span>·</span>
                 <span>Scanned {formatRelativeTime(item.capturedAt)}</span>
               </div>
             </div>
             <div class="shrink-0 text-right">
-              <p class="text-sm font-medium text-slate-700">{formatGB(item.partition.usedGb)} / {formatGB(item.partition.sizeGb)}</p>
-              <p class="text-xs text-slate-400">{formatGB(item.partition.availGb)} free</p>
-              <button type="button" onclick={() => goto(`/files/${item.serverId}`)} class="mt-2 inline-flex items-center gap-1.5 rounded-lg bg-blue-50 px-3 py-1.5 text-xs font-medium text-blue-600 hover:bg-blue-100">
+              <p class="text-sm font-medium text-fg-muted">{formatGB(item.partition.usedGb)} / {formatGB(item.partition.sizeGb)}</p>
+              <p class="text-xs text-fg-subtle">{formatGB(item.partition.availGb)} free</p>
+              <button type="button" onclick={() => goto(`/files/${item.serverId}`)} class="mt-2 inline-flex items-center gap-1.5 rounded-lg bg-accent-subtle px-3 py-1.5 text-xs font-medium text-accent hover:bg-accent/15">
                 <FolderOpen size={14} /> Browse Files
               </button>
             </div>

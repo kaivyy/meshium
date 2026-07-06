@@ -435,9 +435,9 @@
   <title>Assistant - Meshium</title>
 </svelte:head>
 
-<div class="min-h-[calc(100vh-4rem)] bg-[radial-gradient(circle_at_top,_rgba(14,165,233,0.14),_transparent_35%),linear-gradient(180deg,_#020617_0%,_#0f172a_55%,_#020617_100%)] px-4 py-6 text-slate-100 sm:px-6">
+<div class="min-h-[calc(100vh-4rem)] bg-bg px-4 py-6 text-fg sm:px-6">
   <div class="mx-auto flex max-w-7xl flex-col gap-6">
-    <div class="rounded-3xl border border-slate-800/80 bg-slate-950/70 px-5 py-5 shadow-2xl shadow-cyan-950/20 backdrop-blur-sm [&_h1]:text-slate-50 [&_p]:text-slate-400">
+    <div class="rounded-3xl border border-border bg-surface px-5 py-5 shadow-2xl shadow-cyan-950/20 backdrop-blur-sm [&_h1]:text-fg [&_p]:text-fg-subtle">
       <PageHeader
         title="Assistant"
         subtitle="Rule-based help for servers, migrations, logs, and shell commands."
@@ -446,7 +446,7 @@
           <button
             type="button"
             onclick={refreshSuggestions}
-            class="inline-flex items-center gap-2 rounded-xl border border-slate-700 bg-slate-900/70 px-4 py-2 text-sm font-medium text-slate-200 transition hover:border-sky-500/60 hover:text-white"
+            class="inline-flex items-center gap-2 rounded-xl border border-border-strong bg-surface-muted px-4 py-2 text-sm font-medium text-fg-muted transition hover:border-accent hover:text-fg"
           >
             {#if suggestionsLoading}
               <Spinner size="sm" label="Refreshing" />
@@ -458,7 +458,7 @@
           <button
             type="button"
             onclick={clearConversation}
-            class="inline-flex items-center gap-2 rounded-xl border border-slate-700 bg-slate-900/70 px-4 py-2 text-sm font-medium text-slate-200 transition hover:border-rose-500/60 hover:text-white"
+            class="inline-flex items-center gap-2 rounded-xl border border-border-strong bg-surface-muted px-4 py-2 text-sm font-medium text-fg-muted transition hover:border-error hover:text-fg"
           >
             <Trash2 size={16} />
             Clear chat
@@ -468,10 +468,10 @@
 
       <div class="grid gap-4 lg:grid-cols-[1.6fr_0.9fr]">
         <div class="space-y-4">
-          <div class="rounded-2xl border border-slate-800 bg-slate-950/60 p-4 shadow-lg shadow-slate-950/40">
+          <div class="rounded-2xl border border-border bg-bg/60 p-4 shadow-lg shadow-slate-950/40">
             <div class="flex flex-col gap-4 sm:flex-row sm:items-end sm:justify-between">
               <div class="min-w-0 flex-1">
-                <label for="assistant-server-select" class="mb-2 block text-xs font-semibold uppercase tracking-[0.2em] text-slate-400">Server context</label>
+                <label for="assistant-server-select" class="mb-2 block text-xs font-semibold uppercase tracking-[0.2em] text-fg-subtle">Server context</label>
                 {#if loadingServers}
                   <div class="space-y-2">
                     <Skeleton width="100%" height="2.75rem" />
@@ -482,7 +482,7 @@
                     id="assistant-server-select"
                     value={selectedServerId ?? ''}
                     onchange={setSelectedServer}
-                    class="w-full rounded-xl border border-slate-700 bg-slate-900/90 px-4 py-3 text-sm text-slate-100 outline-none transition focus:border-sky-500 focus:ring-2 focus:ring-sky-500/20"
+                    class="w-full rounded-xl border border-border-strong bg-surface/90 px-4 py-3 text-sm text-fg outline-none transition focus:border-accent focus:ring-2 focus:ring-accent/20"
                   >
                     <option value="">General / all servers</option>
                     {#each servers as server}
@@ -490,8 +490,8 @@
                     {/each}
                   </select>
                   {#if selectedServer}
-                    <div class="mt-3 flex flex-wrap items-center gap-2 text-sm text-slate-300">
-                      <span class="inline-flex items-center gap-1 rounded-full border border-slate-700 bg-slate-900 px-3 py-1">
+                    <div class="mt-3 flex flex-wrap items-center gap-2 text-sm text-fg-muted">
+                      <span class="inline-flex items-center gap-1 rounded-full border border-border-strong bg-surface px-3 py-1">
                         <ServerIcon size={14} />
                         {selectedServer.name}
                       </span>
@@ -501,10 +501,10 @@
                       {#if selectedServer.region}
                         <Badge variant="neutral" size="sm">{selectedServer.region}</Badge>
                       {/if}
-                      <span class="text-slate-500">{selectedServer.host}:{selectedServer.port}</span>
+                      <span class="text-fg-subtle">{selectedServer.host}:{selectedServer.port}</span>
                     </div>
                   {:else}
-                    <p class="mt-3 text-sm text-slate-500">No server selected. Ask a general question or choose a server for tailored advice.</p>
+                    <p class="mt-3 text-sm text-fg-subtle">No server selected. Ask a general question or choose a server for tailored advice.</p>
                   {/if}
                 {/if}
               </div>
@@ -513,7 +513,7 @@
                 <button
                   type="button"
                   onclick={openLogModal}
-                  class="inline-flex items-center gap-2 rounded-xl border border-slate-700 bg-slate-900 px-4 py-2 text-sm font-medium text-slate-200 transition hover:border-amber-500/60 hover:text-white"
+                  class="inline-flex items-center gap-2 rounded-xl border border-border-strong bg-surface px-4 py-2 text-sm font-medium text-fg-muted transition hover:border-warning hover:text-white"
                 >
                   <FileText size={16} />
                   Analyze logs
@@ -521,7 +521,7 @@
                 <button
                   type="button"
                   onclick={() => sendMessage('Check this server for package updates and recommend the safest next steps.')}
-                  class="inline-flex items-center gap-2 rounded-xl border border-slate-700 bg-slate-900 px-4 py-2 text-sm font-medium text-slate-200 transition hover:border-emerald-500/60 hover:text-white"
+                  class="inline-flex items-center gap-2 rounded-xl border border-border-strong bg-surface px-4 py-2 text-sm font-medium text-fg-muted transition hover:border-success hover:text-white"
                 >
                   <Database size={16} />
                   Check updates
@@ -529,7 +529,7 @@
                 <button
                   type="button"
                   onclick={() => sendMessage('Suggest a practical migration plan for this server.')}
-                  class="inline-flex items-center gap-2 rounded-xl border border-slate-700 bg-slate-900 px-4 py-2 text-sm font-medium text-slate-200 transition hover:border-sky-500/60 hover:text-white"
+                  class="inline-flex items-center gap-2 rounded-xl border border-border-strong bg-surface px-4 py-2 text-sm font-medium text-fg-muted transition hover:border-accent hover:text-white"
                 >
                   <Wand2 size={16} />
                   Suggest migration
@@ -538,14 +538,14 @@
             </div>
           </div>
 
-          <div class="rounded-2xl border border-slate-800 bg-slate-950/60 p-4 shadow-lg shadow-slate-950/40">
-            <div class="mb-2 text-xs font-semibold uppercase tracking-[0.2em] text-slate-400">Suggested prompts</div>
+          <div class="rounded-2xl border border-border bg-bg/60 p-4 shadow-lg shadow-slate-950/40">
+            <div class="mb-2 text-xs font-semibold uppercase tracking-[0.2em] text-fg-subtle">Suggested prompts</div>
             <div class="flex flex-wrap gap-2">
               {#each starterPrompts as prompt}
                 <button
                   type="button"
                   onclick={() => usePrompt(prompt)}
-                  class="rounded-full border border-slate-700 bg-slate-900/80 px-3 py-2 text-sm text-slate-200 transition hover:border-sky-500/60 hover:text-white"
+                  class="rounded-full border border-border-strong bg-surface/80 px-3 py-2 text-sm text-fg-muted transition hover:border-accent hover:text-white"
                 >
                   {prompt}
                 </button>
@@ -553,27 +553,27 @@
             </div>
           </div>
 
-          <div class="rounded-2xl border border-slate-800 bg-slate-950/60 shadow-lg shadow-slate-950/40">
-            <div class="border-b border-slate-800 px-4 py-3">
+          <div class="rounded-2xl border border-border bg-bg/60 shadow-lg shadow-slate-950/40">
+            <div class="border-b border-border px-4 py-3">
               <div class="flex items-center justify-between gap-3">
                 <div>
-                  <h2 class="text-sm font-semibold text-slate-100">Conversation</h2>
-                  <p class="text-xs text-slate-500">Rule-based replies with server context, command suggestions, and log explanations.</p>
+                  <h2 class="text-sm font-semibold text-fg">Conversation</h2>
+                  <p class="text-xs text-fg-subtle">Rule-based replies with server context, command suggestions, and log explanations.</p>
                 </div>
                 {#if sending}
-                  <div class="flex items-center gap-2 text-xs text-slate-400"><Activity size={14} class="animate-pulse" />Thinking</div>
+                  <div class="flex items-center gap-2 text-xs text-fg-subtle"><Activity size={14} class="animate-pulse" />Thinking</div>
                 {/if}
               </div>
             </div>
 
             <div bind:this={messagesContainer} class="max-h-[58vh] space-y-4 overflow-y-auto px-4 py-4 sm:px-5">
               {#if messages.length === 0}
-                <div class="rounded-2xl border border-dashed border-slate-800 bg-slate-900/40 p-6 text-center">
-                  <div class="mx-auto inline-flex items-center justify-center rounded-full bg-sky-500/10 p-3 text-sky-300">
+                <div class="rounded-2xl border border-dashed border-border bg-surface/40 p-6 text-center">
+                  <div class="mx-auto inline-flex items-center justify-center rounded-full bg-accent/10 p-3 text-accent">
                     <Bot size={22} />
                   </div>
-                  <h3 class="mt-4 text-base font-semibold text-slate-100">Ask anything about your servers</h3>
-                  <p class="mt-2 text-sm text-slate-400">
+                  <h3 class="mt-4 text-base font-semibold text-fg">Ask anything about your servers</h3>
+                  <p class="mt-2 text-sm text-fg-subtle">
                     Try asking about migrations, package lists, logs, services, or shell commands.
                   </p>
                 </div>
@@ -582,31 +582,31 @@
               {#each messages as message (message.id)}
                 <div class={`flex gap-3 ${message.role === 'user' ? 'justify-end' : 'justify-start'}`}>
                   {#if message.role !== 'user'}
-                    <div class="mt-1 flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-sky-500/15 text-sky-300 ring-1 ring-sky-500/20">
+                    <div class="mt-1 flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-accent/15 text-accent ring-1 ring-accent/20">
                       <Bot size={16} />
                     </div>
                   {/if}
 
                   <div class={`max-w-[min(100%,44rem)] rounded-2xl border px-4 py-3 shadow-sm ${
                     message.role === 'user'
-                      ? 'border-sky-500/20 bg-sky-500/10 text-slate-50'
+                      ? 'border-accent/20 bg-accent text-accent-fg'
                       : message.error
-                        ? 'border-rose-500/20 bg-rose-500/10 text-rose-50'
-                        : 'border-slate-800 bg-slate-900/80 text-slate-100'
+                        ? 'border-error/20 bg-error/10 text-error'
+                        : 'border-border bg-surface-muted text-fg'
                   }`}>
                     <div class="mb-2 flex items-center justify-between gap-3">
-                      <div class="flex items-center gap-2 text-xs font-medium uppercase tracking-[0.16em] text-slate-400">
+                      <div class="flex items-center gap-2 text-xs font-medium uppercase tracking-[0.16em] text-fg-subtle">
                         <span>{message.role === 'user' ? 'You' : 'Assistant'}</span>
                         {#if message.context}
-                          <span class="rounded-full border border-slate-700 bg-slate-950 px-2 py-0.5 normal-case tracking-normal text-slate-300">
+                          <span class="rounded-full border border-border-strong bg-bg px-2 py-0.5 normal-case tracking-normal text-fg-muted">
                             Context
                           </span>
                         {/if}
                       </div>
-                      <span class="text-[11px] text-slate-500">{formatTime(message.timestamp)}</span>
+                      <span class="text-[11px] text-fg-subtle">{formatTime(message.timestamp)}</span>
                     </div>
 
-                    <div class="space-y-3 text-sm leading-6 text-slate-100">
+                    <div class="space-y-3 text-sm leading-6 text-fg">
                       {#each parseBlocks(message.content) as block}
                         {#if block.type === 'paragraph'}
                           <p>
@@ -616,7 +616,7 @@
                               {:else if segment.type === 'bold'}
                                 <strong class="font-semibold text-white">{segment.text}</strong>
                               {:else}
-                                <code class="rounded bg-slate-950/80 px-1.5 py-0.5 text-[0.85em] text-sky-200">{segment.text}</code>
+                                <code class="rounded bg-bg/80 px-1.5 py-0.5 text-[0.85em] text-accent">{segment.text}</code>
                               {/if}
                             {/each}
                           </p>
@@ -630,26 +630,26 @@
                                   {:else if segment.type === 'bold'}
                                     <strong class="font-semibold text-white">{segment.text}</strong>
                                   {:else}
-                                    <code class="rounded bg-slate-950/80 px-1.5 py-0.5 text-[0.85em] text-sky-200">{segment.text}</code>
+                                    <code class="rounded bg-bg/80 px-1.5 py-0.5 text-[0.85em] text-accent">{segment.text}</code>
                                   {/if}
                                 {/each}
                               </li>
                             {/each}
                           </ul>
                         {:else}
-                          <div class="rounded-xl border border-slate-800 bg-slate-950/80">
-                            <div class="flex items-center justify-between border-b border-slate-800 px-3 py-2 text-xs text-slate-400">
+                          <div class="rounded-xl border border-border bg-bg/80">
+                            <div class="flex items-center justify-between border-b border-border px-3 py-2 text-xs text-fg-subtle">
                               <span>{block.language || 'code'}</span>
                               <button
                                 type="button"
                                 onclick={() => copyText(block.code)}
-                                class="inline-flex items-center gap-1 rounded-lg border border-slate-700 bg-slate-900 px-2 py-1 text-slate-200 transition hover:border-sky-500/60"
+                                class="inline-flex items-center gap-1 rounded-lg border border-border-strong bg-surface px-2 py-1 text-fg-muted transition hover:border-accent"
                               >
                                 <Copy size={12} />
                                 Copy
                               </button>
                             </div>
-                            <pre class="overflow-x-auto p-3 text-xs leading-6 text-slate-100"><code>{block.code}</code></pre>
+                            <pre class="overflow-x-auto p-3 text-xs leading-6 text-fg"><code>{block.code}</code></pre>
                           </div>
                         {/if}
                       {/each}
@@ -657,19 +657,19 @@
 
                     {#if message.commands?.length}
                       <div class="mt-4 space-y-3">
-                        <div class="flex items-center gap-2 text-xs font-semibold uppercase tracking-[0.16em] text-slate-400">
+                        <div class="flex items-center gap-2 text-xs font-semibold uppercase tracking-[0.16em] text-fg-subtle">
                           <ShieldAlert size={14} />
                           Suggested commands
                         </div>
                         {#each message.commands as command}
-                          <div class="overflow-hidden rounded-xl border border-slate-800 bg-slate-950/90">
-                            <div class="flex items-center justify-between gap-2 border-b border-slate-800 px-3 py-2 text-xs text-slate-400">
+                          <div class="overflow-hidden rounded-xl border border-border bg-bg/90">
+                            <div class="flex items-center justify-between gap-2 border-b border-border px-3 py-2 text-xs text-fg-subtle">
                               <span class="truncate">{command}</span>
                               <div class="flex items-center gap-2">
                                 <button
                                   type="button"
                                   onclick={() => openCommandHelp(command)}
-                                  class="inline-flex items-center gap-1 rounded-lg border border-slate-700 bg-slate-900 px-2 py-1 text-slate-200 transition hover:border-sky-500/60"
+                                  class="inline-flex items-center gap-1 rounded-lg border border-border-strong bg-surface px-2 py-1 text-fg-muted transition hover:border-accent"
                                 >
                                   <HelpCircle size={12} />
                                   Help
@@ -677,14 +677,14 @@
                                 <button
                                   type="button"
                                   onclick={() => copyText(command)}
-                                  class="inline-flex items-center gap-1 rounded-lg border border-slate-700 bg-slate-900 px-2 py-1 text-slate-200 transition hover:border-sky-500/60"
+                                  class="inline-flex items-center gap-1 rounded-lg border border-border-strong bg-surface px-2 py-1 text-fg-muted transition hover:border-accent"
                                 >
                                   <ClipboardCopy size={12} />
                                   Copy
                                 </button>
                               </div>
                             </div>
-                            <pre class="overflow-x-auto p-3 text-xs leading-6 text-sky-100"><code>{command}</code></pre>
+                            <pre class="overflow-x-auto p-3 text-xs leading-6 text-accent"><code>{command}</code></pre>
                           </div>
                         {/each}
                       </div>
@@ -692,7 +692,7 @@
 
                     {#if message.suggestions?.length}
                       <div class="mt-4 space-y-2">
-                        <div class="flex items-center gap-2 text-xs font-semibold uppercase tracking-[0.16em] text-slate-400">
+                        <div class="flex items-center gap-2 text-xs font-semibold uppercase tracking-[0.16em] text-fg-subtle">
                           <Sparkles size={14} />
                           Next steps
                         </div>
@@ -701,7 +701,7 @@
                             <button
                               type="button"
                               onclick={() => usePrompt(suggestion)}
-                              class="rounded-full border border-slate-700 bg-slate-900 px-3 py-1.5 text-xs text-slate-200 transition hover:border-sky-500/60 hover:text-white"
+                              class="rounded-full border border-border-strong bg-surface px-3 py-1.5 text-xs text-fg-muted transition hover:border-accent hover:text-white"
                             >
                               {suggestion}
                             </button>
@@ -712,7 +712,7 @@
                   </div>
 
                   {#if message.role === 'user'}
-                    <div class="mt-1 flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-slate-700/80 text-slate-100 ring-1 ring-slate-600">
+                    <div class="mt-1 flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-surface-muted text-fg ring-1 ring-border-strong">
                       <ServerIcon size={16} />
                     </div>
                   {/if}
@@ -721,23 +721,23 @@
 
               {#if sending}
                 <div class="flex gap-3">
-                  <div class="mt-1 flex h-9 w-9 items-center justify-center rounded-full bg-sky-500/15 text-sky-300 ring-1 ring-sky-500/20">
+                  <div class="mt-1 flex h-9 w-9 items-center justify-center rounded-full bg-accent/15 text-accent ring-1 ring-accent/20">
                     <Bot size={16} />
                   </div>
-                  <div class="rounded-2xl border border-slate-800 bg-slate-900/80 px-4 py-3 text-sm text-slate-300">
+                  <div class="rounded-2xl border border-border bg-surface/80 px-4 py-3 text-sm text-fg-muted">
                     <Spinner size="sm" label="Thinking" />
                   </div>
                 </div>
               {/if}
             </div>
 
-            <div class="border-t border-slate-800 px-4 py-4 sm:px-5">
+            <div class="border-t border-border px-4 py-4 sm:px-5">
               <div class="mb-3 flex flex-wrap gap-2">
                 {#each starterPrompts as prompt}
                   <button
                     type="button"
                     onclick={() => sendMessage(prompt)}
-                    class="rounded-full border border-slate-700 bg-slate-900/80 px-3 py-1.5 text-xs text-slate-200 transition hover:border-sky-500/60 hover:text-white"
+                    class="rounded-full border border-border-strong bg-surface/80 px-3 py-1.5 text-xs text-fg-muted transition hover:border-accent hover:text-white"
                   >
                     {prompt}
                   </button>
@@ -746,14 +746,14 @@
 
               <div class="flex flex-col gap-3 sm:flex-row sm:items-end">
                 <div class="flex-1">
-                  <label for="assistant-message-input" class="mb-2 block text-xs font-semibold uppercase tracking-[0.2em] text-slate-400">Your question</label>
+                  <label for="assistant-message-input" class="mb-2 block text-xs font-semibold uppercase tracking-[0.2em] text-fg-subtle">Your question</label>
                   <textarea
                     id="assistant-message-input"
                     bind:this={inputRef}
                     bind:value={input}
                     rows="3"
                     placeholder="Ask about a server, a migration plan, a log snippet, or a shell command..."
-                    class="w-full rounded-2xl border border-slate-700 bg-slate-900/90 px-4 py-3 text-sm text-slate-100 outline-none transition placeholder:text-slate-500 focus:border-sky-500 focus:ring-2 focus:ring-sky-500/20"
+                    class="w-full rounded-2xl border border-border-strong bg-surface/90 px-4 py-3 text-sm text-fg outline-none transition placeholder:text-fg-subtle focus:border-accent focus:ring-2 focus:ring-accent/20"
                     onkeydown={(event) => {
                       if (event.key === 'Enter' && !event.shiftKey) {
                         event.preventDefault();
@@ -768,7 +768,7 @@
                     type="button"
                     onclick={() => void sendMessage()}
                     disabled={sending || !input.trim()}
-                    class="inline-flex items-center justify-center gap-2 rounded-2xl bg-sky-500 px-5 py-3 text-sm font-medium text-slate-950 transition hover:bg-sky-400 disabled:cursor-not-allowed disabled:opacity-60"
+                    class="inline-flex items-center justify-center gap-2 rounded-2xl bg-accent px-5 py-3 text-sm font-medium text-accent-fg transition hover:bg-accent-hover disabled:cursor-not-allowed disabled:opacity-60"
                   >
                     {#if sending}
                       <Spinner size="sm" label="Sending" />
@@ -784,11 +784,11 @@
         </div>
 
         <aside class="space-y-4">
-          <div class="rounded-2xl border border-slate-800 bg-slate-950/60 p-4 shadow-lg shadow-slate-950/40">
+          <div class="rounded-2xl border border-border bg-bg/60 p-4 shadow-lg shadow-slate-950/40">
             <div class="mb-4 flex items-center justify-between gap-3">
               <div>
-                <h2 class="text-sm font-semibold text-slate-100">Proactive suggestions</h2>
-                <p class="text-xs text-slate-500">Tailored to the selected server when possible.</p>
+                <h2 class="text-sm font-semibold text-fg">Proactive suggestions</h2>
+                <p class="text-xs text-fg-subtle">Tailored to the selected server when possible.</p>
               </div>
               {#if suggestionsLoading}
                 <Spinner size="sm" label="Loading suggestions" />
@@ -796,11 +796,11 @@
             </div>
 
             {#if suggestionsError}
-              <div class="rounded-xl border border-amber-500/20 bg-amber-500/10 p-3 text-sm text-amber-100">
+              <div class="rounded-xl border border-warning/20 bg-warning/10 p-3 text-sm text-warning">
                 {suggestionsError}
               </div>
             {:else if suggestions.length === 0}
-              <div class="rounded-xl border border-dashed border-slate-800 bg-slate-900/40 p-4 text-sm text-slate-400">
+              <div class="rounded-xl border border-dashed border-border bg-surface/40 p-4 text-sm text-fg-subtle">
                 No proactive suggestions yet. Ask a question or select a server to get tailored advice.
               </div>
             {:else}
@@ -809,7 +809,7 @@
                   <button
                     type="button"
                     onclick={() => sendMessage(suggestion)}
-                    class="w-full rounded-xl border border-slate-800 bg-slate-900/70 px-3 py-3 text-left text-sm text-slate-200 transition hover:border-sky-500/60 hover:bg-slate-900"
+                    class="w-full rounded-xl border border-border bg-surface/70 px-3 py-3 text-left text-sm text-fg-muted transition hover:border-accent hover:bg-surface"
                   >
                     {suggestion}
                   </button>
@@ -818,26 +818,26 @@
             {/if}
           </div>
 
-          <div class="rounded-2xl border border-slate-800 bg-slate-950/60 p-4 shadow-lg shadow-slate-950/40">
+          <div class="rounded-2xl border border-border bg-bg/60 p-4 shadow-lg shadow-slate-950/40">
             <div class="mb-3 flex items-center gap-2">
-              <Sparkles size={16} class="text-sky-300" />
-              <h2 class="text-sm font-semibold text-slate-100">What this assistant can do</h2>
+              <Sparkles size={16} class="text-accent" />
+              <h2 class="text-sm font-semibold text-fg">What this assistant can do</h2>
             </div>
-            <ul class="space-y-3 text-sm text-slate-400">
+            <ul class="space-y-3 text-sm text-fg-subtle">
               <li class="flex gap-2">
-                <Check size={16} class="mt-0.5 shrink-0 text-emerald-400" />
+                <Check size={16} class="mt-0.5 shrink-0 text-success" />
                 Explain logs and error messages in plain language.
               </li>
               <li class="flex gap-2">
-                <Check size={16} class="mt-0.5 shrink-0 text-emerald-400" />
+                <Check size={16} class="mt-0.5 shrink-0 text-success" />
                 Suggest migration steps based on discovery data.
               </li>
               <li class="flex gap-2">
-                <Check size={16} class="mt-0.5 shrink-0 text-emerald-400" />
+                <Check size={16} class="mt-0.5 shrink-0 text-success" />
                 Recommend useful shell commands with copy buttons.
               </li>
               <li class="flex gap-2">
-                <Check size={16} class="mt-0.5 shrink-0 text-emerald-400" />
+                <Check size={16} class="mt-0.5 shrink-0 text-success" />
                 Surface server-specific suggestions without calling an external LLM.
               </li>
             </ul>
@@ -850,7 +850,7 @@
 
 <Modal open={logModalOpen} title="Analyze logs" size="lg" onClose={closeLogModal}>
   <div class="space-y-4">
-    <p class="text-sm text-slate-600">
+    <p class="text-sm text-fg-muted">
       Paste a log snippet or error trace. The assistant will explain the likely cause and suggest next steps.
     </p>
 
@@ -858,7 +858,7 @@
       bind:value={logInput}
       rows="10"
       placeholder="Paste logs here..."
-      class="w-full rounded-2xl border border-slate-200 bg-white px-4 py-3 text-sm text-slate-900 outline-none focus:border-sky-500 focus:ring-2 focus:ring-sky-500/20"
+      class="w-full rounded-2xl border border-border bg-surface px-4 py-3 text-sm text-fg outline-none focus:border-accent focus:ring-2 focus:ring-accent/20"
     ></textarea>
 
     <div class="flex flex-wrap items-center gap-3">
@@ -866,7 +866,7 @@
         type="button"
         onclick={() => void analyzeLogs()}
         disabled={logAnalysisLoading || !logInput.trim()}
-        class="inline-flex items-center gap-2 rounded-xl bg-slate-900 px-4 py-2 text-sm font-medium text-white transition hover:bg-slate-800 disabled:cursor-not-allowed disabled:opacity-60"
+        class="inline-flex items-center gap-2 rounded-xl bg-fg px-4 py-2 text-sm font-medium text-bg transition hover:bg-fg-muted disabled:cursor-not-allowed disabled:opacity-60"
       >
         {#if logAnalysisLoading}
           <Spinner size="sm" label="Analyzing" />
@@ -876,28 +876,28 @@
         Analyze
       </button>
       {#if selectedServer}
-        <span class="text-sm text-slate-500">Using {selectedServer.name} as context.</span>
+        <span class="text-sm text-fg-subtle">Using {selectedServer.name} as context.</span>
       {/if}
     </div>
 
     {#if logAnalysisError}
-      <div class="rounded-xl border border-rose-200 bg-rose-50 p-3 text-sm text-rose-700">{logAnalysisError}</div>
+      <div class="rounded-xl border border-error/20 bg-error/10 p-3 text-sm text-error">{logAnalysisError}</div>
     {/if}
 
     {#if logAnalysis}
-      <div class="space-y-3 rounded-2xl border border-slate-200 bg-slate-50 p-4">
+      <div class="space-y-3 rounded-2xl border border-border bg-surface-muted p-4">
         <div class="flex items-center justify-between gap-3">
           <Badge variant={severityBadgeClass(logAnalysis.severity)} size="sm">
             {logAnalysis.severity}
           </Badge>
         </div>
-        <p class="text-sm leading-6 text-slate-700">{logAnalysis.explanation}</p>
+        <p class="text-sm leading-6 text-fg-muted">{logAnalysis.explanation}</p>
         {#if logAnalysis.suggestions.length}
           <div>
-            <p class="mb-2 text-xs font-semibold uppercase tracking-[0.2em] text-slate-500">Suggestions</p>
-            <ul class="space-y-2 text-sm text-slate-600">
+            <p class="mb-2 text-xs font-semibold uppercase tracking-[0.2em] text-fg-subtle">Suggestions</p>
+            <ul class="space-y-2 text-sm text-fg-muted">
               {#each logAnalysis.suggestions as suggestion}
-                <li class="rounded-lg bg-white px-3 py-2 shadow-sm">{suggestion}</li>
+                <li class="rounded-lg bg-surface px-3 py-2 shadow-sm">{suggestion}</li>
               {/each}
             </ul>
           </div>
@@ -910,32 +910,32 @@
 <Modal open={commandHelpOpen} title="Command help" size="lg" onClose={closeCommandHelp}>
   <div class="space-y-4">
     {#if commandHelpLoading}
-      <div class="flex items-center gap-2 text-sm text-slate-600">
+      <div class="flex items-center gap-2 text-sm text-fg-muted">
         <Spinner size="sm" label="Loading command help" />
         Looking up command details...
       </div>
     {:else if commandHelpError}
-      <div class="rounded-xl border border-rose-200 bg-rose-50 p-3 text-sm text-rose-700">{commandHelpError}</div>
+      <div class="rounded-xl border border-error/20 bg-error/10 p-3 text-sm text-error">{commandHelpError}</div>
     {:else if commandHelp}
       <div>
         <div class="mb-2 flex items-center gap-2">
           <Badge variant="info" size="sm">{commandHelp.command}</Badge>
         </div>
-        <p class="text-sm leading-6 text-slate-700">{commandHelp.description}</p>
+        <p class="text-sm leading-6 text-fg-muted">{commandHelp.description}</p>
       </div>
 
       {#if commandHelp.warning}
-        <div class="rounded-xl border border-amber-200 bg-amber-50 p-3 text-sm text-amber-800">
+        <div class="rounded-xl border border-warning/20 bg-warning/10 p-3 text-sm text-warning">
           {commandHelp.warning}
         </div>
       {/if}
 
       {#if commandHelp.examples.length}
         <div>
-          <p class="mb-2 text-xs font-semibold uppercase tracking-[0.2em] text-slate-500">Examples</p>
+          <p class="mb-2 text-xs font-semibold uppercase tracking-[0.2em] text-fg-subtle">Examples</p>
           <div class="space-y-2">
             {#each commandHelp.examples as example}
-              <div class="rounded-xl border border-slate-200 bg-slate-50 p-3 font-mono text-xs leading-6 text-slate-700">
+              <div class="rounded-xl border border-border bg-surface-muted p-3 font-mono text-xs leading-6 text-fg-muted">
                 {example}
               </div>
             {/each}
@@ -943,7 +943,7 @@
         </div>
       {/if}
     {:else}
-      <div class="text-sm text-slate-500">Select a suggested command to see more details.</div>
+      <div class="text-sm text-fg-subtle">Select a suggested command to see more details.</div>
     {/if}
   </div>
 </Modal>

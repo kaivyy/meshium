@@ -347,13 +347,13 @@
   <PageHeader title="File Browser" subtitle={server?.name || `Server #${serverId}`}>
     {#snippet actions()}
       <div class="flex items-center gap-2">
-        <button type="button" onclick={() => showMkdirModal = true} class="inline-flex items-center gap-2 rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50">
+        <button type="button" onclick={() => showMkdirModal = true} class="inline-flex items-center gap-2 rounded-lg border border-border-strong bg-surface px-3 py-2 text-sm font-medium text-fg-muted hover:bg-surface-muted">
           <FolderPlus size={16} /> New Folder
         </button>
-        <button type="button" onclick={() => showUploadModal = true} class="inline-flex items-center gap-2 rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50">
+        <button type="button" onclick={() => showUploadModal = true} class="inline-flex items-center gap-2 rounded-lg border border-border-strong bg-surface px-3 py-2 text-sm font-medium text-fg-muted hover:bg-surface-muted">
           <Upload size={16} /> Upload
         </button>
-        <button type="button" onclick={loadFiles} disabled={loading} class="inline-flex items-center gap-2 rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50 disabled:opacity-60">
+        <button type="button" onclick={loadFiles} disabled={loading} class="inline-flex items-center gap-2 rounded-lg border border-border-strong bg-surface px-3 py-2 text-sm font-medium text-fg-muted hover:bg-surface-muted disabled:opacity-60">
           {#if loading}<Spinner size="sm" label="" />{:else}<RefreshCw size={16} />{/if}
           Refresh
         </button>
@@ -362,30 +362,30 @@
   </PageHeader>
 
   <!-- Breadcrumbs -->
-  <div class="mb-4 flex items-center gap-1 overflow-x-auto whitespace-nowrap rounded-lg border border-slate-200 bg-white px-3 py-2">
+  <div class="mb-4 flex items-center gap-1 overflow-x-auto whitespace-nowrap rounded-lg border border-border bg-surface px-3 py-2">
     {#each breadcrumbs as crumb, i}
-      <button type="button" onclick={() => navigateTo(crumb.path)} class="inline-flex items-center gap-1 text-sm hover:text-blue-600 hover:underline">
+      <button type="button" onclick={() => navigateTo(crumb.path)} class="inline-flex items-center gap-1 text-sm hover:text-accent hover:underline">
         {#if i === 0}<Home size={14} />{/if}
         {crumb.name}
       </button>
-      {#if i < breadcrumbs.length - 1}<ChevronRight size={14} class="text-slate-400" />{/if}
+      {#if i < breadcrumbs.length - 1}<ChevronRight size={14} class="text-fg-subtle" />{/if}
     {/each}
   </div>
 
   <!-- Search and filter bar -->
   <div class="mb-4 flex items-center gap-3">
     <div class="relative flex-1">
-      <Search size={16} class="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
-      <input type="text" bind:value={searchQuery} placeholder="Search files..." class="w-full rounded-lg border border-slate-300 bg-white py-2 pl-10 pr-4 text-sm outline-none focus:border-blue-500" />
+      <Search size={16} class="absolute left-3 top-1/2 -translate-y-1/2 text-fg-subtle" />
+      <input type="text" bind:value={searchQuery} placeholder="Search files..." class="w-full rounded-lg border border-border-strong bg-surface py-2 pl-10 pr-4 text-sm outline-none focus:border-accent" />
     </div>
-    <label class="inline-flex items-center gap-2 text-sm text-slate-600">
+    <label class="inline-flex items-center gap-2 text-sm text-fg-muted">
       <input type="checkbox" bind:checked={showHidden} onchange={loadFiles} class="rounded" />
       Show hidden
     </label>
   </div>
 
   <!-- Stats -->
-  <div class="mb-4 flex items-center gap-4 text-xs text-slate-500">
+  <div class="mb-4 flex items-center gap-4 text-xs text-fg-subtle">
     <span>{stats.dirs} folders</span>
     <span>·</span>
     <span>{stats.filesCount} files</span>
@@ -405,12 +405,12 @@
   {:else}
     <Card padding="none">
       <!-- Table header -->
-      <div class="flex items-center gap-3 border-b border-slate-200 bg-slate-50 px-4 py-2 text-xs font-semibold uppercase tracking-wide text-slate-500">
-        <button type="button" onclick={() => toggleSort('name')} class="flex flex-1 items-center gap-1 hover:text-slate-700">
+      <div class="flex items-center gap-3 border-b border-border bg-surface-muted px-4 py-2 text-xs font-semibold uppercase tracking-wide text-fg-subtle">
+        <button type="button" onclick={() => toggleSort('name')} class="flex flex-1 items-center gap-1 hover:text-fg-muted">
           Name
           {#if sortBy === 'name'}{#if sortDir === 'asc'}<ChevronUp size={12} />{:else}<ChevronDown size={12} />{/if}{/if}
         </button>
-        <button type="button" onclick={() => toggleSort('size')} class="flex w-24 items-center gap-1 hover:text-slate-700">
+        <button type="button" onclick={() => toggleSort('size')} class="flex w-24 items-center gap-1 hover:text-fg-muted">
           Size
           {#if sortBy === 'size'}{#if sortDir === 'asc'}<ChevronUp size={12} />{:else}<ChevronDown size={12} />{/if}{/if}
         </button>
@@ -422,41 +422,41 @@
       <!-- File rows -->
       {#each filteredFiles as file (file.path)}
         {@const Icon = getFileIconComponent(file)}
-        <div class="flex items-center gap-3 border-b border-slate-100 px-4 py-2 hover:bg-slate-50 transition-colors">
+        <div class="flex items-center gap-3 border-b border-border px-4 py-2 hover:bg-surface-muted transition-colors">
           <!-- Name -->
           <button type="button" onclick={() => openFile(file)} class="flex flex-1 items-center gap-2 text-left">
-            <Icon size={18} class={file.isDir ? 'text-blue-500' : 'text-slate-400'} />
-            <span class="text-sm font-medium text-slate-900">{file.name}</span>
+            <Icon size={18} class={file.isDir ? 'text-info' : 'text-fg-subtle'} />
+            <span class="text-sm font-medium text-fg">{file.name}</span>
             {#if file.isSymlink && file.linkTarget}
-              <span class="text-xs text-slate-400">→ {file.linkTarget}</span>
+              <span class="text-xs text-fg-subtle">→ {file.linkTarget}</span>
             {/if}
           </button>
           
           <!-- Size -->
-          <div class="w-24 text-sm text-slate-500">
+          <div class="w-24 text-sm text-fg-subtle">
             {file.isDir ? '—' : formatFileSize(file.size)}
           </div>
           
           <!-- Owner -->
-          <div class="hidden w-32 text-sm text-slate-500 sm:block">{file.owner}</div>
+          <div class="hidden w-32 text-sm text-fg-subtle sm:block">{file.owner}</div>
           
           <!-- Modified -->
-          <div class="hidden w-32 text-xs text-slate-400 sm:block">{formatDate(file.modTime)}</div>
+          <div class="hidden w-32 text-xs text-fg-subtle sm:block">{formatDate(file.modTime)}</div>
           
           <!-- Actions -->
           <div class="flex w-28 items-center justify-end gap-1">
             {#if !file.isDir}
-              <button type="button" onclick={() => openEditor(file)} title="Edit" class="rounded p-1.5 text-slate-400 hover:bg-slate-100 hover:text-green-600">
+              <button type="button" onclick={() => openEditor(file)} title="Edit" class="rounded p-1.5 text-fg-subtle hover:bg-surface-muted hover:text-success">
                 <Edit3 size={14} />
               </button>
-              <button type="button" onclick={() => handleDownload(file)} title="Download" class="rounded p-1.5 text-slate-400 hover:bg-slate-100 hover:text-blue-600">
+              <button type="button" onclick={() => handleDownload(file)} title="Download" class="rounded p-1.5 text-fg-subtle hover:bg-surface-muted hover:text-accent">
                 <Download size={14} />
               </button>
             {/if}
-            <button type="button" onclick={() => openRenameModal(file)} title="Rename" class="rounded p-1.5 text-slate-400 hover:bg-slate-100 hover:text-blue-600">
+            <button type="button" onclick={() => openRenameModal(file)} title="Rename" class="rounded p-1.5 text-fg-subtle hover:bg-surface-muted hover:text-accent">
               <Move size={14} />
             </button>
-            <button type="button" onclick={() => openDeleteModal(file)} title="Delete" class="rounded p-1.5 text-slate-400 hover:bg-slate-100 hover:text-red-600">
+            <button type="button" onclick={() => openDeleteModal(file)} title="Delete" class="rounded p-1.5 text-fg-subtle hover:bg-surface-muted hover:text-error">
               <Trash2 size={14} />
             </button>
           </div>
@@ -475,34 +475,34 @@
       {:else if fileContent}
         {#if fileContent.isBinary}
           <div class="py-8 text-center">
-            <AlertCircle size={32} class="mx-auto text-slate-400" />
-            <p class="mt-2 text-sm text-slate-500">Binary file — preview not available</p>
-            <p class="text-xs text-slate-400">{fileContent.mimeType} · {formatFileSize(fileContent.size)}</p>
+            <AlertCircle size={32} class="mx-auto text-fg-subtle" />
+            <p class="mt-2 text-sm text-fg-subtle">Binary file — preview not available</p>
+            <p class="text-xs text-fg-subtle">{fileContent.mimeType} · {formatFileSize(fileContent.size)}</p>
           </div>
         {:else}
-          <pre class="rounded-lg bg-slate-900 p-4 text-sm text-slate-100 overflow-auto"><code>{fileContent.content}</code></pre>
+          <pre class="rounded-lg bg-surface-muted p-4 text-sm text-fg overflow-auto"><code>{fileContent.content}</code></pre>
           {#if fileContent.truncated}
-            <p class="mt-2 text-xs text-amber-600">File truncated — showing first {fileContent.maxLines} lines of {fileContent.lineCount}+ lines</p>
+            <p class="mt-2 text-xs text-warning">File truncated — showing first {fileContent.maxLines} lines of {fileContent.lineCount}+ lines</p>
           {/if}
         {/if}
       {:else}
-        <p class="py-8 text-center text-sm text-slate-500">Failed to load file content</p>
+        <p class="py-8 text-center text-sm text-fg-subtle">Failed to load file content</p>
       {/if}
     </div>
-    <div class="mt-4 flex items-center justify-between border-t border-slate-200 pt-3">
-      <div class="text-xs text-slate-500">
+    <div class="mt-4 flex items-center justify-between border-t border-border pt-3">
+      <div class="text-xs text-fg-subtle">
         {formatFileSize(fileContent?.size || selectedFile.size)} · {fileContent?.mimeType || 'unknown'}
       </div>
       <div class="flex items-center gap-2">
         {#if fileContent && !fileContent.isBinary}
-          <button type="button" onclick={() => { if (!selectedFile) return; const f = selectedFile; showPreview = false; selectedFile = null; fileContent = null; openEditor(f); }} class="inline-flex items-center gap-2 rounded-lg bg-green-600 px-3 py-1.5 text-sm font-medium text-white hover:bg-green-700">
+          <button type="button" onclick={() => { if (!selectedFile) return; const f = selectedFile; showPreview = false; selectedFile = null; fileContent = null; openEditor(f); }} class="inline-flex items-center gap-2 rounded-lg bg-success px-3 py-1.5 text-sm font-medium text-accent-fg hover:bg-success/90">
             <Edit3 size={14} /> Edit
           </button>
         {/if}
-        <button type="button" onclick={() => { if (selectedFile) handleDownload(selectedFile); }} class="inline-flex items-center gap-2 rounded-lg border border-slate-300 bg-white px-3 py-1.5 text-sm font-medium text-slate-700 hover:bg-slate-50">
+        <button type="button" onclick={() => { if (selectedFile) handleDownload(selectedFile); }} class="inline-flex items-center gap-2 rounded-lg border border-border-strong bg-surface px-3 py-1.5 text-sm font-medium text-fg-muted hover:bg-surface-muted">
           <Download size={14} /> Download
         </button>
-        <button type="button" onclick={() => { showPreview = false; selectedFile = null; fileContent = null; }} class="inline-flex items-center gap-2 rounded-lg bg-slate-900 px-3 py-1.5 text-sm font-medium text-white hover:bg-slate-800">
+        <button type="button" onclick={() => { showPreview = false; selectedFile = null; fileContent = null; }} class="inline-flex items-center gap-2 rounded-lg bg-fg px-3 py-1.5 text-sm font-medium text-bg hover:bg-fg-muted">
           Close
         </button>
       </div>
@@ -515,24 +515,24 @@
   <Modal open={true} title="Upload File" onClose={() => { showUploadModal = false; uploadFile_input = null; uploadPath = ''; }}>
     <div class="space-y-4">
       <div>
-        <label for="upload-file" class="mb-1 block text-sm font-medium text-slate-700">File</label>
-        <input id="upload-file" type="file" onchange={(e) => { const target = e.target as HTMLInputElement; uploadFile_input = target.files?.[0] || null; if (uploadFile_input && !uploadPath) uploadPath = uploadFile_input.name; }} class="block w-full text-sm text-slate-500" />
+        <label for="upload-file" class="mb-1 block text-sm font-medium text-fg-muted">File</label>
+        <input id="upload-file" type="file" onchange={(e) => { const target = e.target as HTMLInputElement; uploadFile_input = target.files?.[0] || null; if (uploadFile_input && !uploadPath) uploadPath = uploadFile_input.name; }} class="block w-full text-sm text-fg-subtle" />
       </div>
       <div>
-        <label for="upload-path" class="mb-1 block text-sm font-medium text-slate-700">Remote Path</label>
+        <label for="upload-path" class="mb-1 block text-sm font-medium text-fg-muted">Remote Path</label>
         <div class="flex items-center gap-2">
-          <span class="text-sm text-slate-500">{currentPath === '/' ? '/' : currentPath + '/'}</span>
-          <input id="upload-path" type="text" bind:value={uploadPath} placeholder="filename" class="flex-1 rounded-lg border border-slate-300 px-3 py-2 text-sm outline-none focus:border-blue-500" />
+          <span class="text-sm text-fg-subtle">{currentPath === '/' ? '/' : currentPath + '/'}</span>
+          <input id="upload-path" type="text" bind:value={uploadPath} placeholder="filename" class="flex-1 rounded-lg border border-border-strong px-3 py-2 text-sm outline-none focus:border-accent" />
         </div>
       </div>
-      <label class="flex items-center gap-2 text-sm text-slate-600">
+      <label class="flex items-center gap-2 text-sm text-fg-muted">
         <input type="checkbox" bind:checked={uploadOverwrite} class="rounded" />
         Overwrite if exists
       </label>
     </div>
     <div class="mt-4 flex justify-end gap-2">
-      <button type="button" onclick={() => { showUploadModal = false; uploadFile_input = null; uploadPath = ''; }} class="rounded-lg border border-slate-300 bg-white px-4 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50">Cancel</button>
-      <button type="button" onclick={handleUpload} disabled={!uploadFile_input || !uploadPath || uploading} class="inline-flex items-center gap-2 rounded-lg bg-blue-600 px-4 py-2 text-sm font-medium text-white hover:bg-blue-700 disabled:opacity-60">
+      <button type="button" onclick={() => { showUploadModal = false; uploadFile_input = null; uploadPath = ''; }} class="rounded-lg border border-border-strong bg-surface px-4 py-2 text-sm font-medium text-fg-muted hover:bg-surface-muted">Cancel</button>
+      <button type="button" onclick={handleUpload} disabled={!uploadFile_input || !uploadPath || uploading} class="inline-flex items-center gap-2 rounded-lg bg-accent px-4 py-2 text-sm font-medium text-accent-fg hover:bg-accent-hover disabled:opacity-60">
         {#if uploading}<Spinner size="sm" label="" />{:else}<Upload size={14} />{/if}
         Upload
       </button>
@@ -545,16 +545,16 @@
   <Modal open={true} title="New Folder" onClose={() => { showMkdirModal = false; mkdirPath = ''; }}>
     <div class="space-y-4">
       <div>
-        <label for="mkdir-path" class="mb-1 block text-sm font-medium text-slate-700">Folder Name</label>
+        <label for="mkdir-path" class="mb-1 block text-sm font-medium text-fg-muted">Folder Name</label>
         <div class="flex items-center gap-2">
-          <span class="text-sm text-slate-500">{currentPath === '/' ? '/' : currentPath + '/'}</span>
-          <input id="mkdir-path" type="text" bind:value={mkdirPath} placeholder="folder-name" class="flex-1 rounded-lg border border-slate-300 px-3 py-2 text-sm outline-none focus:border-blue-500" onkeydown={(e) => { if (e.key === 'Enter') handleMkdir(); }} />
+          <span class="text-sm text-fg-subtle">{currentPath === '/' ? '/' : currentPath + '/'}</span>
+          <input id="mkdir-path" type="text" bind:value={mkdirPath} placeholder="folder-name" class="flex-1 rounded-lg border border-border-strong px-3 py-2 text-sm outline-none focus:border-accent" onkeydown={(e) => { if (e.key === 'Enter') handleMkdir(); }} />
         </div>
       </div>
     </div>
     <div class="mt-4 flex justify-end gap-2">
-      <button type="button" onclick={() => { showMkdirModal = false; mkdirPath = ''; }} class="rounded-lg border border-slate-300 bg-white px-4 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50">Cancel</button>
-      <button type="button" onclick={handleMkdir} disabled={!mkdirPath} class="inline-flex items-center gap-2 rounded-lg bg-blue-600 px-4 py-2 text-sm font-medium text-white hover:bg-blue-700 disabled:opacity-60">
+      <button type="button" onclick={() => { showMkdirModal = false; mkdirPath = ''; }} class="rounded-lg border border-border-strong bg-surface px-4 py-2 text-sm font-medium text-fg-muted hover:bg-surface-muted">Cancel</button>
+      <button type="button" onclick={handleMkdir} disabled={!mkdirPath} class="inline-flex items-center gap-2 rounded-lg bg-accent px-4 py-2 text-sm font-medium text-accent-fg hover:bg-accent-hover disabled:opacity-60">
         <FolderPlus size={14} /> Create
       </button>
     </div>
@@ -566,14 +566,14 @@
   <Modal open={true} title="Rename / Move" onClose={() => { showRenameModal = false; actionTarget = null; renameNewPath = ''; }}>
     <div class="space-y-4">
       <div>
-        <label for="rename-new-path" class="mb-1 block text-sm font-medium text-slate-700">New Path</label>
-        <input id="rename-new-path" type="text" bind:value={renameNewPath} class="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm outline-none focus:border-blue-500" onkeydown={(e) => { if (e.key === 'Enter') handleRename(); }} />
+        <label for="rename-new-path" class="mb-1 block text-sm font-medium text-fg-muted">New Path</label>
+        <input id="rename-new-path" type="text" bind:value={renameNewPath} class="w-full rounded-lg border border-border-strong px-3 py-2 text-sm outline-none focus:border-accent" onkeydown={(e) => { if (e.key === 'Enter') handleRename(); }} />
       </div>
-      <p class="text-xs text-slate-500">Current: {actionTarget.path}</p>
+      <p class="text-xs text-fg-subtle">Current: {actionTarget.path}</p>
     </div>
     <div class="mt-4 flex justify-end gap-2">
-      <button type="button" onclick={() => { showRenameModal = false; actionTarget = null; renameNewPath = ''; }} class="rounded-lg border border-slate-300 bg-white px-4 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50">Cancel</button>
-      <button type="button" onclick={handleRename} disabled={!renameNewPath} class="inline-flex items-center gap-2 rounded-lg bg-blue-600 px-4 py-2 text-sm font-medium text-white hover:bg-blue-700 disabled:opacity-60">
+      <button type="button" onclick={() => { showRenameModal = false; actionTarget = null; renameNewPath = ''; }} class="rounded-lg border border-border-strong bg-surface px-4 py-2 text-sm font-medium text-fg-muted hover:bg-surface-muted">Cancel</button>
+      <button type="button" onclick={handleRename} disabled={!renameNewPath} class="inline-flex items-center gap-2 rounded-lg bg-accent px-4 py-2 text-sm font-medium text-accent-fg hover:bg-accent-hover disabled:opacity-60">
         <Check size={14} /> Rename
       </button>
     </div>
@@ -585,10 +585,10 @@
   <Modal open={true} title="Confirm Delete" onClose={() => { showDeleteModal = false; actionTarget = null; }}>
     <div class="space-y-3">
       <div class="flex items-start gap-3">
-        <div class="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg bg-red-50 text-red-600"><AlertCircle size={20} /></div>
+        <div class="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg bg-error/10 text-error"><AlertCircle size={20} /></div>
         <div>
-          <p class="text-sm font-medium text-slate-900">Delete {actionTarget.isDir ? 'folder' : 'file'}: {actionTarget.name}</p>
-          <p class="mt-1 text-sm text-slate-500">
+          <p class="text-sm font-medium text-fg">Delete {actionTarget.isDir ? 'folder' : 'file'}: {actionTarget.name}</p>
+          <p class="mt-1 text-sm text-fg-subtle">
             {#if actionTarget.isDir}
               This will delete the folder and all its contents recursively.
             {:else}
@@ -599,8 +599,8 @@
       </div>
     </div>
     <div class="mt-4 flex justify-end gap-2">
-      <button type="button" onclick={() => { showDeleteModal = false; actionTarget = null; }} class="rounded-lg border border-slate-300 bg-white px-4 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50">Cancel</button>
-      <button type="button" onclick={handleDelete} class="inline-flex items-center gap-2 rounded-lg bg-red-600 px-4 py-2 text-sm font-medium text-white hover:bg-red-700">
+      <button type="button" onclick={() => { showDeleteModal = false; actionTarget = null; }} class="rounded-lg border border-border-strong bg-surface px-4 py-2 text-sm font-medium text-fg-muted hover:bg-surface-muted">Cancel</button>
+      <button type="button" onclick={handleDelete} class="inline-flex items-center gap-2 rounded-lg bg-error px-4 py-2 text-sm font-medium text-accent-fg hover:bg-error/90">
         <Trash2 size={14} /> Delete
       </button>
     </div>
@@ -615,23 +615,23 @@
   }}>
     <div class="space-y-3">
       <!-- File info bar -->
-      <div class="flex items-center justify-between rounded-lg bg-slate-50 px-3 py-2">
+      <div class="flex items-center justify-between rounded-lg bg-surface-muted px-3 py-2">
         <div class="flex items-center gap-2">
-          <FileText size={16} class="text-slate-400" />
-          <span class="font-mono text-sm text-slate-700">{editFile.path}</span>
+          <FileText size={16} class="text-fg-subtle" />
+          <span class="font-mono text-sm text-fg-muted">{editFile.path}</span>
         </div>
-        <div class="flex items-center gap-3 text-xs text-slate-500">
+        <div class="flex items-center gap-3 text-xs text-fg-subtle">
           <span>{editMimeType}</span>
           <span>·</span>
           <span>{formatFileSize(editFile.size)}</span>
           {#if editDirty}
-            <span class="inline-flex items-center gap-1 text-amber-600">
-              <span class="h-2 w-2 rounded-full bg-amber-500"></span>
+            <span class="inline-flex items-center gap-1 text-warning">
+              <span class="h-2 w-2 rounded-full bg-warning"></span>
               Unsaved
             </span>
           {:else}
-            <span class="inline-flex items-center gap-1 text-green-600">
-              <span class="h-2 w-2 rounded-full bg-green-500"></span>
+            <span class="inline-flex items-center gap-1 text-success">
+              <span class="h-2 w-2 rounded-full bg-success"></span>
               Saved
             </span>
           {/if}
@@ -642,16 +642,16 @@
         <div class="flex items-center justify-center py-12"><Spinner label="Loading file..." /></div>
       {:else if editIsBinary}
         <div class="py-12 text-center">
-          <AlertCircle size={32} class="mx-auto text-slate-400" />
-          <p class="mt-2 text-sm text-slate-500">Binary file cannot be edited</p>
-          <p class="text-xs text-slate-400">{editMimeType}</p>
+          <AlertCircle size={32} class="mx-auto text-fg-subtle" />
+          <p class="mt-2 text-sm text-fg-subtle">Binary file cannot be edited</p>
+          <p class="text-xs text-fg-subtle">{editMimeType}</p>
         </div>
       {:else}
         <!-- Editor textarea with line numbers -->
-        <div class="relative overflow-hidden rounded-lg border border-slate-300">
+        <div class="relative overflow-hidden rounded-lg border border-border-strong">
           <div class="flex" style="max-height: 60vh;">
             <!-- Line numbers gutter -->
-            <div id="line-numbers" class="select-none overflow-hidden bg-slate-50 py-3 text-right font-mono text-xs text-slate-400" style="min-width: 3rem; max-height: 60vh;">
+            <div id="line-numbers" class="select-none overflow-hidden bg-surface-muted py-3 text-right font-mono text-xs text-fg-subtle" style="min-width: 3rem; max-height: 60vh;">
               {#each editContent.split('\n') as _, i}
                 <div class="px-2 leading-6">{i + 1}</div>
               {/each}
@@ -665,7 +665,7 @@
                 if (ln) { ln.scrollTop = (e.target as HTMLTextAreaElement).scrollTop; }
               }}
               id="edit-textarea"
-              class="flex-1 resize-none overflow-auto bg-white p-3 font-mono text-sm leading-6 text-slate-800 outline-none"
+              class="flex-1 resize-none overflow-auto bg-white p-3 font-mono text-sm leading-6 text-fg outline-none"
               style="max-height: 60vh; min-height: 300px;"
               spellcheck="false"
               autocomplete="off"
@@ -674,29 +674,29 @@
             ></textarea>
           </div>
         </div>
-        <p class="text-xs text-slate-400">
-          Press <kbd class="rounded border border-slate-300 bg-slate-50 px-1.5 py-0.5 font-mono text-[10px]">Ctrl+S</kbd> to save · {editContent.split('\n').length} lines
+        <p class="text-xs text-fg-subtle">
+          Press <kbd class="rounded border border-border-strong bg-surface-muted px-1.5 py-0.5 font-mono text-[10px]">Ctrl+S</kbd> to save · {editContent.split('\n').length} lines
         </p>
       {/if}
     </div>
 
     {#if !editLoading && !editIsBinary}
-      <div class="mt-4 flex items-center justify-between border-t border-slate-200 pt-3">
-        <div class="text-xs text-slate-500">
+      <div class="mt-4 flex items-center justify-between border-t border-border pt-3">
+        <div class="text-xs text-fg-subtle">
           {#if editDirty}
-            <span class="text-amber-600">Unsaved changes</span>
+            <span class="text-warning">Unsaved changes</span>
           {:else}
-            <span class="text-green-600">All changes saved</span>
+            <span class="text-success">All changes saved</span>
           {/if}
         </div>
         <div class="flex items-center gap-2">
           <button type="button" onclick={() => {
             if (editDirty && !confirm('Discard unsaved changes?')) return;
             showEditModal = false; editFile = null; editContent = ''; editOriginalContent = '';
-          }} class="rounded-lg border border-slate-300 bg-white px-4 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50">
+          }} class="rounded-lg border border-border-strong bg-surface px-4 py-2 text-sm font-medium text-fg-muted hover:bg-surface-muted">
             Cancel
           </button>
-          <button type="button" onclick={handleSaveEdit} disabled={!editDirty || editSaving} class="inline-flex items-center gap-2 rounded-lg bg-green-600 px-4 py-2 text-sm font-medium text-white hover:bg-green-700 disabled:opacity-60">
+          <button type="button" onclick={handleSaveEdit} disabled={!editDirty || editSaving} class="inline-flex items-center gap-2 rounded-lg bg-success px-4 py-2 text-sm font-medium text-accent-fg hover:bg-success/90 disabled:opacity-60">
             {#if editSaving}<Spinner size="sm" label="" />{:else}<Save size={14} />{/if}
             Save
           </button>

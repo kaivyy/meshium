@@ -325,7 +325,7 @@
       {#snippet actions()}
         <button
           type="button"
-          class="inline-flex items-center gap-2 rounded-lg border border-slate-300 bg-white px-4 py-2 text-sm font-medium text-slate-700 transition hover:bg-slate-50 focus-visible:ring-2 focus-visible:ring-blue-500 focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-50"
+          class="inline-flex items-center gap-2 rounded-lg border border-border-strong bg-surface px-4 py-2 text-sm font-medium text-fg-muted transition hover:bg-surface-muted focus-visible:ring-2 focus-visible:ring-accent focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-50"
           onclick={() => void refreshAll()}
           disabled={!canManage || statusLoading || packagesLoading || isInstalling}
           aria-label="Refresh update status"
@@ -340,7 +340,7 @@
 
         <button
           type="button"
-          class="inline-flex items-center gap-2 rounded-lg bg-blue-600 px-4 py-2 text-sm font-medium text-white transition hover:bg-blue-700 focus-visible:ring-2 focus-visible:ring-blue-500 focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-50"
+          class="inline-flex items-center gap-2 rounded-lg bg-accent px-4 py-2 text-sm font-medium text-accent-fg transition hover:bg-accent-hover focus-visible:ring-2 focus-visible:ring-accent focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-50"
           onclick={() => openInstallModal()}
           disabled={!canManage || isInstalling}
           aria-label="Install a new package"
@@ -364,10 +364,10 @@
         <Card padding="lg">
           <div class="flex flex-col gap-4 sm:flex-row sm:items-end sm:justify-between">
             <div class="flex-1">
-              <label class="mb-2 block text-sm font-medium text-slate-700" for="server-select">Server</label>
+              <label class="mb-2 block text-sm font-medium text-fg-muted" for="server-select">Server</label>
               <select
                 id="server-select"
-                class="w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm text-slate-900 shadow-sm outline-none transition focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20"
+                class="w-full rounded-lg border border-border-strong bg-surface px-3 py-2 text-sm text-fg shadow-sm outline-none transition focus:border-accent focus:ring-2 focus:ring-accent/20"
                 value={selectedServerId ?? ''}
                 onchange={handleServerChange}
                 disabled={isInstalling}
@@ -377,20 +377,20 @@
                 {/each}
               </select>
               {#if selectedServer}
-                <p class="mt-2 text-sm text-slate-500">{selectedServer.username} · {selectedServer.environment || 'no environment'} · {selectedServer.region || 'no region'}</p>
+                <p class="mt-2 text-sm text-fg-subtle">{selectedServer.username} · {selectedServer.environment || 'no environment'} · {selectedServer.region || 'no region'}</p>
               {/if}
             </div>
 
             <div class="flex flex-wrap gap-2">
               {#if isUpToDate && !isInstalling}
-                <div class="inline-flex items-center gap-2 rounded-lg border border-green-200 bg-green-50 px-4 py-2 text-sm font-medium text-green-700">
+                <div class="inline-flex items-center gap-2 rounded-lg border border-success/20 bg-success/15 px-4 py-2 text-sm font-medium text-success">
                   <CheckCircle2 size={16} />
                   Up to Date
                 </div>
               {:else if totalUpdates > 0 && !isInstalling}
                 <button
                   type="button"
-                  class="inline-flex items-center gap-2 rounded-lg border border-red-200 bg-red-50 px-4 py-2 text-sm font-medium text-red-700 transition hover:bg-red-100 focus-visible:ring-2 focus-visible:ring-red-500 focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-50"
+                  class="inline-flex items-center gap-2 rounded-lg border border-error/20 bg-error/15 px-4 py-2 text-sm font-medium text-error transition hover:bg-error/25 focus-visible:ring-2 focus-visible:ring-error focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-50"
                   onclick={() => void installAllUpdates(true)}
                   disabled={!canManage || isInstalling}
                   aria-label="Install security updates only"
@@ -401,7 +401,7 @@
 
                 <button
                   type="button"
-                  class="inline-flex items-center gap-2 rounded-lg bg-slate-900 px-4 py-2 text-sm font-medium text-white transition hover:bg-slate-800 focus-visible:ring-2 focus-visible:ring-slate-500 focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-50"
+                  class="inline-flex items-center gap-2 rounded-lg bg-fg px-4 py-2 text-sm font-medium text-bg transition hover:bg-fg-muted focus-visible:ring-2 focus-visible:ring-border-strong focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-50"
                   onclick={() => void installAllUpdates(false)}
                   disabled={!canManage || isInstalling}
                   aria-label="Install all available updates"
@@ -410,7 +410,7 @@
                   Install All
                 </button>
               {:else if isInstalling}
-                <div class="inline-flex items-center gap-2 rounded-lg border border-blue-200 bg-blue-50 px-4 py-2 text-sm font-medium text-blue-700">
+                <div class="inline-flex items-center gap-2 rounded-lg border border-info/20 bg-info/15 px-4 py-2 text-sm font-medium text-info">
                   <Spinner size="sm" label="Installing" />
                   Installing...
                 </div>
@@ -420,16 +420,16 @@
 
           <!-- Real-time install progress bar -->
           {#if installAllBusy}
-            <div class="mt-4 rounded-xl border border-blue-200 bg-blue-50 p-4">
+            <div class="mt-4 rounded-xl border border-info/20 bg-info/15 p-4">
               <div class="mb-2 flex items-center justify-between">
-                <div class="flex items-center gap-2 text-sm font-medium text-blue-800">
+                <div class="flex items-center gap-2 text-sm font-medium text-info">
                   <Download size={16} class="animate-bounce" />
                   {installAllStatus}
                 </div>
-                <span class="text-sm font-semibold text-blue-700">{installAllProgress}%</span>
+                <span class="text-sm font-semibold text-info">{installAllProgress}%</span>
               </div>
               <ProgressBar value={installAllProgress} variant="default" animated />
-              <p class="mt-2 text-xs text-blue-600">
+              <p class="mt-2 text-xs text-info">
                 {installAllSecurity ? 'Installing security updates only' : 'Installing all available updates'} on {selectedServer?.name ?? 'server'}...
               </p>
             </div>
@@ -439,40 +439,40 @@
         <Card padding="lg">
           <div class="flex items-center justify-between gap-3">
             <div>
-              <p class="text-sm font-medium text-slate-500">Package manager</p>
+              <p class="text-sm font-medium text-fg-subtle">Package manager</p>
               <div class="mt-1 flex items-center gap-2">
                 <Badge variant={managerVariant(packageManager)} size="sm">{packageManager}</Badge>
                 {#if statusLoading}
-                  <span class="text-xs text-slate-400">Refreshing…</span>
+                  <span class="text-xs text-fg-subtle">Refreshing…</span>
                 {/if}
               </div>
             </div>
-            <div class="rounded-full bg-slate-100 p-3 text-slate-500" aria-hidden="true">
+            <div class="rounded-full bg-surface-muted p-3 text-fg-subtle" aria-hidden="true">
               <Package size={20} />
             </div>
           </div>
 
           <div class="mt-5 grid grid-cols-2 gap-3 sm:grid-cols-4">
-            <div class="rounded-xl bg-slate-50 p-3">
-              <p class="text-xs uppercase tracking-wide text-slate-500">Updates</p>
-              <p class="mt-1 text-2xl font-bold text-slate-900">{totalUpdates}</p>
+            <div class="rounded-xl bg-surface-muted p-3">
+              <p class="text-xs uppercase tracking-wide text-fg-subtle">Updates</p>
+              <p class="mt-1 text-2xl font-bold text-fg">{totalUpdates}</p>
             </div>
-            <div class="rounded-xl bg-red-50 p-3">
-              <p class="text-xs uppercase tracking-wide text-red-600">Security</p>
-              <p class="mt-1 text-2xl font-bold text-red-700">{securityUpdates}</p>
+            <div class="rounded-xl bg-error/15 p-3">
+              <p class="text-xs uppercase tracking-wide text-error">Security</p>
+              <p class="mt-1 text-2xl font-bold text-error">{securityUpdates}</p>
             </div>
-            <div class="rounded-xl bg-blue-50 p-3">
-              <p class="text-xs uppercase tracking-wide text-blue-600">Packages</p>
-              <p class="mt-1 text-2xl font-bold text-blue-700">{totalPackages}</p>
+            <div class="rounded-xl bg-info/15 p-3">
+              <p class="text-xs uppercase tracking-wide text-info">Packages</p>
+              <p class="mt-1 text-2xl font-bold text-info">{totalPackages}</p>
             </div>
-            <div class="rounded-xl bg-slate-50 p-3">
-              <p class="text-xs uppercase tracking-wide text-slate-500">Checked</p>
-              <p class="mt-1 text-sm font-medium text-slate-700">{lastChecked ? formatCheckedAt(lastChecked) : 'Never'}</p>
+            <div class="rounded-xl bg-surface-muted p-3">
+              <p class="text-xs uppercase tracking-wide text-fg-subtle">Checked</p>
+              <p class="mt-1 text-sm font-medium text-fg-muted">{lastChecked ? formatCheckedAt(lastChecked) : 'Never'}</p>
             </div>
           </div>
 
           {#if isUpToDate}
-            <div class="mt-4 flex items-center gap-2 rounded-lg border border-green-200 bg-green-50 px-3 py-2 text-sm text-green-700">
+            <div class="mt-4 flex items-center gap-2 rounded-lg border border-success/20 bg-success/15 px-3 py-2 text-sm text-success">
               <CheckCircle2 size={16} />
               All packages are up to date. Last checked {lastChecked ? formatRelativeTime(lastChecked) : 'never'}.
             </div>
@@ -481,7 +481,7 @@
       </div>
 
       {#if statusError || packagesError}
-        <div class="mt-4 rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700" role="alert">
+        <div class="mt-4 rounded-xl border border-error/20 bg-error/15 px-4 py-3 text-sm text-error" role="alert">
           <div class="flex items-start gap-2">
             <AlertCircle size={16} class="mt-0.5 shrink-0" />
             <div>
@@ -501,23 +501,23 @@
         <Card padding="lg">
           <div class="mb-4 flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
             <div>
-              <h2 class="text-lg font-semibold text-slate-900">Available updates</h2>
-              <p class="text-sm text-slate-500">
+              <h2 class="text-lg font-semibold text-fg">Available updates</h2>
+              <p class="text-sm text-fg-subtle">
                 {#if isUpToDate}
-                  <span class="inline-flex items-center gap-1 text-green-600">
+                  <span class="inline-flex items-center gap-1 text-success">
                     <CheckCircle2 size={14} /> System is up to date — no updates available.
                   </span>
                 {:else}
                   {totalUpdates} update{totalUpdates === 1 ? '' : 's'} available on {selectedServer?.name || 'the selected server'}.
                   {#if securityUpdates > 0}
-                    <span class="font-medium text-red-600">{securityUpdates} security update{securityUpdates === 1 ? '' : 's'}</span>
+                    <span class="font-medium text-error">{securityUpdates} security update{securityUpdates === 1 ? '' : 's'}</span>
                   {/if}
                 {/if}
               </p>
             </div>
             <button
               type="button"
-              class="inline-flex items-center gap-2 rounded-lg border border-slate-300 px-3 py-2 text-sm font-medium text-slate-700 transition hover:bg-slate-50 focus-visible:ring-2 focus-visible:ring-blue-500 focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-50"
+              class="inline-flex items-center gap-2 rounded-lg border border-border-strong px-3 py-2 text-sm font-medium text-fg-muted transition hover:bg-surface-muted focus-visible:ring-2 focus-visible:ring-accent focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-50"
               onclick={() => void refreshAll()}
               disabled={!canManage || statusLoading || isInstalling}
               aria-label="Check for updates again"
@@ -532,22 +532,22 @@
           </div>
 
           {#if statusLoading}
-            <div class="flex items-center justify-center gap-3 py-12 text-slate-500">
+            <div class="flex items-center justify-center gap-3 py-12 text-fg-subtle">
               <Spinner size="md" label="Checking for updates" />
               <span class="text-sm">Checking for updates...</span>
             </div>
           {:else if updateRows.length === 0}
-            <div class="rounded-xl border border-green-200 bg-green-50 p-8">
+            <div class="rounded-xl border border-success/20 bg-success/15 p-8">
               <div class="flex flex-col items-center text-center">
-                <div class="flex h-16 w-16 items-center justify-center rounded-full bg-green-100 text-green-600">
+                <div class="flex h-16 w-16 items-center justify-center rounded-full bg-success/15 text-success">
                   <CheckCircle2 size={32} />
                 </div>
-                <h3 class="mt-4 text-lg font-semibold text-green-900">System is up to date</h3>
-                <p class="mt-1 text-sm text-green-700">No updates are currently available for this server.</p>
-                <p class="mt-2 text-xs text-green-600">Last checked: {lastChecked ? formatCheckedAt(lastChecked) : 'Never'}</p>
+                <h3 class="mt-4 text-lg font-semibold text-success">System is up to date</h3>
+                <p class="mt-1 text-sm text-success">No updates are currently available for this server.</p>
+                <p class="mt-2 text-xs text-success">Last checked: {lastChecked ? formatCheckedAt(lastChecked) : 'Never'}</p>
                 <button
                   type="button"
-                  class="mt-4 inline-flex items-center gap-2 rounded-lg border border-green-300 bg-white px-4 py-2 text-sm font-medium text-green-700 transition hover:bg-green-50 focus-visible:ring-2 focus-visible:ring-green-500 focus-visible:ring-offset-2"
+                  class="mt-4 inline-flex items-center gap-2 rounded-lg border border-success/30 bg-surface px-4 py-2 text-sm font-medium text-success transition hover:bg-success/15 focus-visible:ring-2 focus-visible:ring-success focus-visible:ring-offset-2"
                   onclick={() => void refreshAll()}
                 >
                   <RefreshCw size={16} />
@@ -556,27 +556,27 @@
               </div>
             </div>
           {:else}
-            <div class="overflow-x-auto rounded-xl border border-slate-200">
-              <table class="min-w-full divide-y divide-slate-200 bg-white">
-                <thead class="bg-slate-50">
+            <div class="overflow-x-auto rounded-xl border border-border">
+              <table class="min-w-full divide-y divide-border bg-surface">
+                <thead class="bg-surface-muted">
                   <tr>
-                    <th scope="col" class="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wide text-slate-500">Package</th>
-                    <th scope="col" class="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wide text-slate-500">Current</th>
-                    <th scope="col" class="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wide text-slate-500">Available</th>
-                    <th scope="col" class="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wide text-slate-500">Type</th>
-                    <th scope="col" class="px-4 py-3 text-right text-xs font-semibold uppercase tracking-wide text-slate-500">Action</th>
+                    <th scope="col" class="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wide text-fg-subtle">Package</th>
+                    <th scope="col" class="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wide text-fg-subtle">Current</th>
+                    <th scope="col" class="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wide text-fg-subtle">Available</th>
+                    <th scope="col" class="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wide text-fg-subtle">Type</th>
+                    <th scope="col" class="px-4 py-3 text-right text-xs font-semibold uppercase tracking-wide text-fg-subtle">Action</th>
                   </tr>
                 </thead>
-                <tbody class="divide-y divide-slate-100">
+                <tbody class="divide-y divide-border">
                   {#each updateRows as update (update.name)}
                     {@const isUpdated = recentlyUpdated.has(update.name)}
                     {@const isBusy = actionBusyPackage === update.name}
-                    <tr class={isUpdated ? 'bg-green-50' : 'hover:bg-slate-50'}>
+                    <tr class={isUpdated ? 'bg-success/15' : 'hover:bg-surface-muted'}>
                       <td class="px-4 py-4 align-top">
                         <div class="flex items-start gap-3">
-                          <div class={`mt-0.5 rounded-full p-2 ${update.security ? 'bg-red-50 text-red-600' : 'bg-slate-100 text-slate-500'}`} aria-hidden="true">
+                          <div class={`mt-0.5 rounded-full p-2 ${update.security ? 'bg-error/15 text-error' : 'bg-surface-muted text-fg-subtle'}`} aria-hidden="true">
                             {#if isUpdated}
-                              <CheckCircle2 size={16} class="text-green-600" />
+                              <CheckCircle2 size={16} class="text-success" />
                             {:else if update.security}
                               <ShieldAlert size={16} />
                             {:else}
@@ -584,8 +584,8 @@
                             {/if}
                           </div>
                           <div>
-                            <div class="font-medium text-slate-900">{update.name}</div>
-                            <div class="mt-1 text-xs text-slate-500">
+                            <div class="font-medium text-fg">{update.name}</div>
+                            <div class="mt-1 text-xs text-fg-subtle">
                               {#if update.architecture}
                                 <span>{update.architecture}</span>
                               {/if}
@@ -594,28 +594,28 @@
                               {/if}
                             </div>
                             {#if isUpdated}
-                              <span class="mt-1 inline-flex items-center gap-1 text-xs font-medium text-green-600">
+                              <span class="mt-1 inline-flex items-center gap-1 text-xs font-medium text-success">
                                 <Check size={12} /> Updated
                               </span>
                             {/if}
                           </div>
                         </div>
                       </td>
-                      <td class="px-4 py-4 align-top text-sm text-slate-700">{update.currentVersion || '—'}</td>
-                      <td class="px-4 py-4 align-top text-sm font-medium text-slate-900">{update.availableVersion || '—'}</td>
+                      <td class="px-4 py-4 align-top text-sm text-fg-muted">{update.currentVersion || '—'}</td>
+                      <td class="px-4 py-4 align-top text-sm font-medium text-fg">{update.availableVersion || '—'}</td>
                       <td class="px-4 py-4 align-top">
                         <Badge variant={updateTypeVariant(update.type)} size="sm">{updateTypeLabel(update.type)}</Badge>
                       </td>
                       <td class="px-4 py-4 align-top text-right">
                         {#if isUpdated}
-                          <span class="inline-flex items-center gap-1.5 rounded-lg bg-green-100 px-3 py-2 text-sm font-medium text-green-700">
+                          <span class="inline-flex items-center gap-1.5 rounded-lg bg-success/15 px-3 py-2 text-sm font-medium text-success">
                             <CheckCircle2 size={16} />
                             Up to Date
                           </span>
                         {:else}
                           <button
                             type="button"
-                            class="inline-flex items-center gap-2 rounded-lg bg-blue-600 px-3 py-2 text-sm font-medium text-white transition hover:bg-blue-700 focus-visible:ring-2 focus-visible:ring-blue-500 focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-50"
+                            class="inline-flex items-center gap-2 rounded-lg bg-accent px-3 py-2 text-sm font-medium text-accent-fg transition hover:bg-accent-hover focus-visible:ring-2 focus-visible:ring-accent focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-50"
                             onclick={() => void installPackageByName(update.name)}
                             disabled={isBusy || isInstalling}
                             aria-label="Install {update.name}"
@@ -640,7 +640,7 @@
                 {#if securityUpdates > 0}
                   <button
                     type="button"
-                    class="inline-flex items-center gap-2 rounded-lg border border-red-200 bg-red-50 px-4 py-2 text-sm font-medium text-red-700 transition hover:bg-red-100 focus-visible:ring-2 focus-visible:ring-red-500 focus-visible:ring-offset-2"
+                    class="inline-flex items-center gap-2 rounded-lg border border-error/20 bg-error/15 px-4 py-2 text-sm font-medium text-error transition hover:bg-error/25 focus-visible:ring-2 focus-visible:ring-error focus-visible:ring-offset-2"
                     onclick={() => void installAllUpdates(true)}
                   >
                     <ShieldAlert size={16} />
@@ -649,7 +649,7 @@
                 {/if}
                 <button
                   type="button"
-                  class="inline-flex items-center gap-2 rounded-lg bg-slate-900 px-4 py-2 text-sm font-medium text-white transition hover:bg-slate-800 focus-visible:ring-2 focus-visible:ring-slate-500 focus-visible:ring-offset-2"
+                  class="inline-flex items-center gap-2 rounded-lg bg-fg px-4 py-2 text-sm font-medium text-bg transition hover:bg-fg-muted focus-visible:ring-2 focus-visible:ring-border-strong focus-visible:ring-offset-2"
                   onclick={() => void installAllUpdates(false)}
                 >
                   <Wrench size={16} />
@@ -666,24 +666,24 @@
         <Card padding="lg">
           <div class="mb-4 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
             <div>
-              <h2 class="text-lg font-semibold text-slate-900">Package management</h2>
-              <p class="text-sm text-slate-500">Search installed packages, inspect details, and remove packages when needed.</p>
+              <h2 class="text-lg font-semibold text-fg">Package management</h2>
+              <p class="text-sm text-fg-subtle">Search installed packages, inspect details, and remove packages when needed.</p>
             </div>
             <div class="flex w-full gap-2 sm:w-auto sm:min-w-[22rem]">
               <div class="relative flex-1">
-                <Search size={16} class="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" aria-hidden="true" />
+                <Search size={16} class="absolute left-3 top-1/2 -translate-y-1/2 text-fg-subtle" aria-hidden="true" />
                 <input
                   type="text"
                   value={packageSearch}
                   oninput={(event) => (packageSearch = (event.currentTarget as HTMLInputElement).value)}
                   placeholder="Search installed packages..."
-                  class="w-full rounded-lg border border-slate-300 bg-white py-2 pl-9 pr-3 text-sm text-slate-900 shadow-sm outline-none transition focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20"
+                  class="w-full rounded-lg border border-border-strong bg-surface py-2 pl-9 pr-3 text-sm text-fg shadow-sm outline-none transition focus:border-accent focus:ring-2 focus:ring-accent/20"
                   aria-label="Search installed packages"
                 />
               </div>
               <button
                 type="button"
-                class="inline-flex items-center gap-2 rounded-lg border border-slate-300 px-3 py-2 text-sm font-medium text-slate-700 transition hover:bg-slate-50 focus-visible:ring-2 focus-visible:ring-blue-500 focus-visible:ring-offset-2"
+                class="inline-flex items-center gap-2 rounded-lg border border-border-strong px-3 py-2 text-sm font-medium text-fg-muted transition hover:bg-surface-muted focus-visible:ring-2 focus-visible:ring-accent focus-visible:ring-offset-2"
                 onclick={() => openInstallModal()}
                 aria-label="Install a new package"
               >
@@ -694,7 +694,7 @@
           </div>
 
           {#if packagesLoading}
-            <div class="flex items-center justify-center gap-3 py-12 text-slate-500">
+            <div class="flex items-center justify-center gap-3 py-12 text-fg-subtle">
               <Spinner size="md" label="Loading packages" />
               <span class="text-sm">Loading installed packages...</span>
             </div>
@@ -706,52 +706,52 @@
               action={packageEmptyAction}
             />
           {:else}
-            <div class="overflow-x-auto rounded-xl border border-slate-200">
-              <table class="min-w-full divide-y divide-slate-200 bg-white">
-                <thead class="bg-slate-50">
+            <div class="overflow-x-auto rounded-xl border border-border">
+              <table class="min-w-full divide-y divide-border bg-surface">
+                <thead class="bg-surface-muted">
                   <tr>
-                    <th scope="col" class="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wide text-slate-500">Package</th>
-                    <th scope="col" class="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wide text-slate-500">Version</th>
-                    <th scope="col" class="hidden px-4 py-3 text-left text-xs font-semibold uppercase tracking-wide text-slate-500 md:table-cell">Size</th>
-                    <th scope="col" class="hidden px-4 py-3 text-left text-xs font-semibold uppercase tracking-wide text-slate-500 lg:table-cell">Description</th>
-                    <th scope="col" class="px-4 py-3 text-right text-xs font-semibold uppercase tracking-wide text-slate-500">Action</th>
+                    <th scope="col" class="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wide text-fg-subtle">Package</th>
+                    <th scope="col" class="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wide text-fg-subtle">Version</th>
+                    <th scope="col" class="hidden px-4 py-3 text-left text-xs font-semibold uppercase tracking-wide text-fg-subtle md:table-cell">Size</th>
+                    <th scope="col" class="hidden px-4 py-3 text-left text-xs font-semibold uppercase tracking-wide text-fg-subtle lg:table-cell">Description</th>
+                    <th scope="col" class="px-4 py-3 text-right text-xs font-semibold uppercase tracking-wide text-fg-subtle">Action</th>
                   </tr>
                 </thead>
-                <tbody class="divide-y divide-slate-100">
+                <tbody class="divide-y divide-border">
                   {#each visiblePackages as pkg (pkg.name)}
                     {@const isUpdated = recentlyUpdated.has(pkg.name)}
                     {@const isBusy = actionBusyPackage === pkg.name}
-                    <tr class={isUpdated ? 'bg-green-50' : 'hover:bg-slate-50'}>
+                    <tr class={isUpdated ? 'bg-success/15' : 'hover:bg-surface-muted'}>
                       <td class="px-4 py-4 align-top">
                         <div class="flex items-start gap-3">
-                          <div class="rounded-full bg-slate-100 p-2 text-slate-500" aria-hidden="true">
+                          <div class="rounded-full bg-surface-muted p-2 text-fg-subtle" aria-hidden="true">
                             {#if isUpdated}
-                              <CheckCircle2 size={16} class="text-green-600" />
+                              <CheckCircle2 size={16} class="text-success" />
                             {:else}
                               <Package size={16} />
                             {/if}
                           </div>
                           <div>
-                            <div class="font-medium text-slate-900">{pkg.name}</div>
-                            <div class="mt-1 text-xs text-slate-500">{pkg.packageManager}</div>
+                            <div class="font-medium text-fg">{pkg.name}</div>
+                            <div class="mt-1 text-xs text-fg-subtle">{pkg.packageManager}</div>
                           </div>
                         </div>
                       </td>
-                      <td class="px-4 py-4 align-top text-sm text-slate-700">{pkg.version || '—'}</td>
-                      <td class="hidden px-4 py-4 align-top text-sm text-slate-700 md:table-cell">{pkg.size || '—'}</td>
-                      <td class="hidden px-4 py-4 align-top text-sm text-slate-600 lg:table-cell">
+                      <td class="px-4 py-4 align-top text-sm text-fg-muted">{pkg.version || '—'}</td>
+                      <td class="hidden px-4 py-4 align-top text-sm text-fg-muted md:table-cell">{pkg.size || '—'}</td>
+                      <td class="hidden px-4 py-4 align-top text-sm text-fg-muted lg:table-cell">
                         <div class="max-w-xs truncate" title={pkg.description}>{pkg.description || '—'}</div>
                       </td>
                       <td class="px-4 py-4 align-top">
                         <div class="flex items-center justify-end gap-2">
                           {#if isUpdated}
-                            <span class="inline-flex items-center gap-1 text-xs font-medium text-green-600">
+                            <span class="inline-flex items-center gap-1 text-xs font-medium text-success">
                               <Check size={12} /> Updated
                             </span>
                           {/if}
                           <button
                             type="button"
-                            class="inline-flex items-center gap-2 rounded-lg border border-slate-300 px-3 py-2 text-sm font-medium text-slate-700 transition hover:bg-slate-50 focus-visible:ring-2 focus-visible:ring-blue-500 focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-50"
+                            class="inline-flex items-center gap-2 rounded-lg border border-border-strong px-3 py-2 text-sm font-medium text-fg-muted transition hover:bg-surface-muted focus-visible:ring-2 focus-visible:ring-accent focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-50"
                             onclick={() => void installPackageByName(pkg.name)}
                             disabled={isBusy || isInstalling}
                             aria-label="Reinstall {pkg.name}"
@@ -765,7 +765,7 @@
                           </button>
                           <button
                             type="button"
-                            class="inline-flex items-center gap-2 rounded-lg border border-red-200 px-3 py-2 text-sm font-medium text-red-700 transition hover:bg-red-50 focus-visible:ring-2 focus-visible:ring-red-500 focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-50"
+                            class="inline-flex items-center gap-2 rounded-lg border border-error/20 px-3 py-2 text-sm font-medium text-error transition hover:bg-error/15 focus-visible:ring-2 focus-visible:ring-error focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-50"
                             onclick={() => void removePackage(pkg.name)}
                             disabled={isBusy || isInstalling}
                             aria-label="Remove {pkg.name}"
@@ -807,7 +807,7 @@
 {#snippet addServerAction()}
   <a
     href="/servers/new"
-    class="inline-flex items-center justify-center gap-2 rounded-lg bg-blue-600 px-4 py-2 text-sm font-medium text-white transition hover:bg-blue-700 focus-visible:ring-2 focus-visible:ring-blue-500 focus-visible:ring-offset-2"
+    class="inline-flex items-center justify-center gap-2 rounded-lg bg-accent px-4 py-2 text-sm font-medium text-accent-fg transition hover:bg-accent-hover focus-visible:ring-2 focus-visible:ring-accent focus-visible:ring-offset-2"
   >
     Add Server
   </a>
@@ -820,7 +820,7 @@
 {#snippet packageEmptyAction()}
   <button
     type="button"
-    class="inline-flex items-center justify-center gap-2 rounded-lg border border-slate-300 bg-white px-4 py-2 text-sm font-medium text-slate-700 transition hover:bg-slate-50 focus-visible:ring-2 focus-visible:ring-blue-500 focus-visible:ring-offset-2"
+    class="inline-flex items-center justify-center gap-2 rounded-lg border border-border-strong bg-surface px-4 py-2 text-sm font-medium text-fg-muted transition hover:bg-surface-muted focus-visible:ring-2 focus-visible:ring-accent focus-visible:ring-offset-2"
     onclick={() => openInstallModal()}
   >
     <Download size={16} />
@@ -830,13 +830,13 @@
 
 {#snippet installModalBody()}
   <div class="space-y-3">
-    <p class="text-sm text-slate-600">Enter a package name to install on {selectedServer?.name ?? 'the selected server'}.</p>
+    <p class="text-sm text-fg-muted">Enter a package name to install on {selectedServer?.name ?? 'the selected server'}.</p>
     <input
       type="text"
       value={installPackageName}
       oninput={(event) => (installPackageName = (event.currentTarget as HTMLInputElement).value)}
       placeholder="nginx"
-      class="w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm text-slate-900 shadow-sm outline-none transition focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20"
+      class="w-full rounded-lg border border-border-strong bg-surface px-3 py-2 text-sm text-fg shadow-sm outline-none transition focus:border-accent focus:ring-2 focus:ring-accent/20"
       autocomplete="off"
       spellcheck="false"
       aria-label="Package name"
@@ -848,7 +848,7 @@
   <div class="flex items-center justify-end gap-3">
     <button
       type="button"
-      class="rounded-lg border border-slate-300 px-4 py-2 text-sm font-medium text-slate-700 transition hover:bg-slate-50 focus-visible:ring-2 focus-visible:ring-blue-500 focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-50"
+      class="rounded-lg border border-border-strong px-4 py-2 text-sm font-medium text-fg-muted transition hover:bg-surface-muted focus-visible:ring-2 focus-visible:ring-accent focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-50"
       onclick={() => {
         if (!installModalBusy) {
           showInstallModal = false;
@@ -861,7 +861,7 @@
     </button>
     <button
       type="button"
-      class="inline-flex items-center gap-2 rounded-lg bg-blue-600 px-4 py-2 text-sm font-medium text-white transition hover:bg-blue-700 focus-visible:ring-2 focus-visible:ring-blue-500 focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-50"
+      class="inline-flex items-center gap-2 rounded-lg bg-accent px-4 py-2 text-sm font-medium text-accent-fg transition hover:bg-accent-hover focus-visible:ring-2 focus-visible:ring-accent focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-50"
       onclick={() => void confirmInstallModal()}
       disabled={installModalBusy || !installPackageName.trim()}
     >
