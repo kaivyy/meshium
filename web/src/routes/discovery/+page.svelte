@@ -174,7 +174,7 @@
 <div class="p-4 sm:p-6 max-w-7xl mx-auto">
   <PageHeader title="Discovery" subtitle="Infrastructure inventory from discovery scans.">
     {#snippet actions()}
-      <button type="button" onclick={loadServers} disabled={loading} class="inline-flex items-center gap-2 rounded-lg border border-slate-300 bg-white px-4 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50 disabled:opacity-60">
+      <button type="button" onclick={loadServers} disabled={loading} class="inline-flex items-center gap-2 rounded-lg border border-border-strong bg-surface px-4 py-2 text-sm font-medium text-fg-muted hover:bg-surface-muted disabled:opacity-60">
         {#if loading}<Spinner size="sm" label="Refreshing" />{:else}<RefreshCw size={16} />{/if}
         Refresh
       </button>
@@ -186,42 +186,42 @@
     <div class="flex flex-col gap-4">
       <div class="flex items-center gap-3">
         <div class="relative flex-1">
-          <Search size={16} class="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
-          <input type="text" bind:value={searchQuery} placeholder="Search servers..." class="w-full rounded-lg border border-slate-300 bg-white py-2 pl-10 pr-4 text-sm outline-none focus:border-blue-500" />
+          <Search size={16} class="absolute left-3 top-1/2 -translate-y-1/2 text-fg-subtle" />
+          <input type="text" bind:value={searchQuery} placeholder="Search servers..." class="w-full rounded-lg border border-border-strong bg-surface py-2 pl-10 pr-4 text-sm outline-none focus:border-accent" />
         </div>
-        <button type="button" onclick={() => showFilters = !showFilters} class="inline-flex items-center gap-2 rounded-lg border border-slate-300 bg-white px-4 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50">
+        <button type="button" onclick={() => showFilters = !showFilters} class="inline-flex items-center gap-2 rounded-lg border border-border-strong bg-surface px-4 py-2 text-sm font-medium text-fg-muted hover:bg-surface-muted">
           <Filter size={16} />Filters{#if showFilters}<ChevronUp size={16} />{:else}<ChevronDown size={16} />{/if}
         </button>
       </div>
       {#if showFilters}
         <div class="grid gap-4 sm:grid-cols-2 lg:grid-cols-5">
           <label class="block">
-            <span class="mb-1 block text-xs font-semibold uppercase tracking-wide text-slate-500">Environment</span>
-            <select bind:value={filterEnvironment} class="w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm outline-none focus:border-blue-500">
+            <span class="mb-1 block text-xs font-semibold uppercase tracking-wide text-fg-subtle">Environment</span>
+            <select bind:value={filterEnvironment} class="w-full rounded-lg border border-border-strong bg-surface px-3 py-2 text-sm outline-none focus:border-accent">
               {#each environments as env}<option value={env}>{env === 'all' ? 'All' : env}</option>{/each}
             </select>
           </label>
           <label class="block">
-            <span class="mb-1 block text-xs font-semibold uppercase tracking-wide text-slate-500">Provider</span>
-            <select bind:value={filterProvider} class="w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm outline-none focus:border-blue-500">
+            <span class="mb-1 block text-xs font-semibold uppercase tracking-wide text-fg-subtle">Provider</span>
+            <select bind:value={filterProvider} class="w-full rounded-lg border border-border-strong bg-surface px-3 py-2 text-sm outline-none focus:border-accent">
               {#each providers as prov}<option value={prov}>{prov === 'all' ? 'All' : prov}</option>{/each}
             </select>
           </label>
           <label class="block">
-            <span class="mb-1 block text-xs font-semibold uppercase tracking-wide text-slate-500">OS Family</span>
-            <select bind:value={filterOS} class="w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm outline-none focus:border-blue-500">
+            <span class="mb-1 block text-xs font-semibold uppercase tracking-wide text-fg-subtle">OS Family</span>
+            <select bind:value={filterOS} class="w-full rounded-lg border border-border-strong bg-surface px-3 py-2 text-sm outline-none focus:border-accent">
               {#each osFamilies as os}<option value={os}>{os === 'all' ? 'All' : os}</option>{/each}
             </select>
           </label>
           <label class="block">
-            <span class="mb-1 block text-xs font-semibold uppercase tracking-wide text-slate-500">Docker</span>
-            <select bind:value={filterDocker} class="w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm outline-none focus:border-blue-500">
+            <span class="mb-1 block text-xs font-semibold uppercase tracking-wide text-fg-subtle">Docker</span>
+            <select bind:value={filterDocker} class="w-full rounded-lg border border-border-strong bg-surface px-3 py-2 text-sm outline-none focus:border-accent">
               <option value="all">All</option><option value="yes">Has Docker</option><option value="no">No Docker</option>
             </select>
           </label>
           <label class="block">
-            <span class="mb-1 block text-xs font-semibold uppercase tracking-wide text-slate-500">Database</span>
-            <select bind:value={filterDatabase} class="w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm outline-none focus:border-blue-500">
+            <span class="mb-1 block text-xs font-semibold uppercase tracking-wide text-fg-subtle">Database</span>
+            <select bind:value={filterDatabase} class="w-full rounded-lg border border-border-strong bg-surface px-3 py-2 text-sm outline-none focus:border-accent">
               <option value="all">All</option><option value="yes">Has Database</option><option value="no">No Database</option>
             </select>
           </label>
@@ -231,7 +231,7 @@
     </Card>
   </div>
 
-  <div class="mb-4 flex items-center justify-between text-sm text-slate-500">
+  <div class="mb-4 flex items-center justify-between text-sm text-fg-subtle">
     <span>{filteredServers.length} server{filteredServers.length !== 1 ? 's' : ''}</span>
     <span>{Object.keys(snapshots).length} with snapshots</span>
   </div>
@@ -254,10 +254,10 @@
           <div class="mb-3 flex items-start justify-between gap-2">
             <div class="min-w-0 flex-1">
               <div class="flex items-center gap-2">
-                <h3 class="truncate text-sm font-semibold text-slate-900">{server.name}</h3>
+                <h3 class="truncate text-sm font-semibold text-fg">{server.name}</h3>
                 {#if server.environment}<Badge variant="info" size="sm">{server.environment}</Badge>{/if}
               </div>
-              <p class="mt-0.5 truncate text-xs text-slate-500">{server.host}:{server.port}</p>
+              <p class="mt-0.5 truncate text-xs text-fg-subtle">{server.host}:{server.port}</p>
             </div>
             <DropdownMenu items={[
               { label: 'Open server', href: `/servers/${server.id}` },
@@ -269,22 +269,22 @@
             ]} label="Actions" />
           </div>
           {#if isLoading}
-            <div class="flex items-center justify-center py-6 text-slate-400"><Spinner size="md" label="Loading" /></div>
+            <div class="flex items-center justify-center py-6 text-fg-subtle"><Spinner size="md" label="Loading" /></div>
           {:else if !hasSnapshot(server.id)}
-            <div class="rounded-lg border border-dashed border-slate-200 bg-slate-50 p-4 text-center">
-              <ServerIcon size={24} class="mx-auto text-slate-300" />
-              <p class="mt-2 text-sm text-slate-500">Not discovered yet</p>
-              <button type="button" onclick={() => triggerDiscovery(server.id)} class="mt-3 inline-flex items-center gap-1.5 rounded-lg bg-blue-600 px-3 py-1.5 text-xs font-medium text-white hover:bg-blue-700">
+            <div class="rounded-lg border border-dashed border-border bg-surface-muted p-4 text-center">
+              <ServerIcon size={24} class="mx-auto text-fg-subtle" />
+              <p class="mt-2 text-sm text-fg-subtle">Not discovered yet</p>
+              <button type="button" onclick={() => triggerDiscovery(server.id)} class="mt-3 inline-flex items-center gap-1.5 rounded-lg bg-accent px-3 py-1.5 text-xs font-medium text-accent-fg hover:bg-accent-hover">
                 <RefreshCw size={12} />Discover
               </button>
             </div>
           {:else}
             <div class="space-y-3">
               <div class="flex items-center gap-2 text-sm">
-                <Globe size={14} class="shrink-0 text-slate-400" />
-                <span class="truncate font-medium text-slate-700">{snap!.os?.hostname || 'Unknown'}</span>
+                <Globe size={14} class="shrink-0 text-fg-subtle" />
+                <span class="truncate font-medium text-fg-muted">{snap!.os?.hostname || 'Unknown'}</span>
               </div>
-              <div class="text-xs text-slate-500">
+              <div class="text-xs text-fg-subtle">
                 <span class="font-medium">{snap!.os?.distro || 'Unknown'}</span>
                 <span class="mx-1">·</span>
                 <span>{snap!.os?.kernel || ''}</span>
@@ -292,20 +292,20 @@
                 <span>{snap!.os?.architecture || ''}</span>
               </div>
               <div class="grid grid-cols-3 gap-2">
-                <div class="rounded-lg bg-slate-50 p-2 text-center">
-                  <Cpu size={14} class="mx-auto text-slate-400" />
-                  <p class="mt-1 text-xs font-medium text-slate-700">{snap!.hardware?.cpuCores || 0}</p>
-                  <p class="text-[10px] text-slate-400">Cores</p>
+                <div class="rounded-lg bg-surface-muted p-2 text-center">
+                  <Cpu size={14} class="mx-auto text-fg-subtle" />
+                  <p class="mt-1 text-xs font-medium text-fg-muted">{snap!.hardware?.cpuCores || 0}</p>
+                  <p class="text-[10px] text-fg-subtle">Cores</p>
                 </div>
-                <div class="rounded-lg bg-slate-50 p-2 text-center">
-                  <MemoryStick size={14} class="mx-auto text-slate-400" />
-                  <p class="mt-1 text-xs font-medium text-slate-700">{snap!.hardware?.ramTotalMb ? Math.round(snap!.hardware.ramTotalMb / 1024) : 0}</p>
-                  <p class="text-[10px] text-slate-400">GB RAM</p>
+                <div class="rounded-lg bg-surface-muted p-2 text-center">
+                  <MemoryStick size={14} class="mx-auto text-fg-subtle" />
+                  <p class="mt-1 text-xs font-medium text-fg-muted">{snap!.hardware?.ramTotalMb ? Math.round(snap!.hardware.ramTotalMb / 1024) : 0}</p>
+                  <p class="text-[10px] text-fg-subtle">GB RAM</p>
                 </div>
-                <div class="rounded-lg bg-slate-50 p-2 text-center">
-                  <HardDrive size={14} class="mx-auto text-slate-400" />
-                  <p class="mt-1 text-xs font-medium text-slate-700">{Math.round(snap!.hardware?.diskTotalGb || 0)}</p>
-                  <p class="text-[10px] text-slate-400">GB Disk</p>
+                <div class="rounded-lg bg-surface-muted p-2 text-center">
+                  <HardDrive size={14} class="mx-auto text-fg-subtle" />
+                  <p class="mt-1 text-xs font-medium text-fg-muted">{Math.round(snap!.hardware?.diskTotalGb || 0)}</p>
+                  <p class="text-[10px] text-fg-subtle">GB Disk</p>
                 </div>
               </div>
               <div class="flex flex-wrap gap-1.5">
@@ -315,11 +315,11 @@
                 {#if snap!.services && snap!.services.length > 0}<Badge variant="neutral" size="sm">{snap!.services.length} services</Badge>{/if}
               </div>
               {#if errors.length > 0}
-                <div class="flex items-center gap-1.5 text-xs text-yellow-600"><AlertCircle size={12} /><span>{errors.length} error{errors.length !== 1 ? 's' : ''}</span></div>
+                <div class="flex items-center gap-1.5 text-xs text-warning"><AlertCircle size={12} /><span>{errors.length} error{errors.length !== 1 ? 's' : ''}</span></div>
               {/if}
-              <div class="flex items-center justify-between text-xs text-slate-400">
+              <div class="flex items-center justify-between text-xs text-fg-subtle">
                 <div class="flex items-center gap-1"><Clock size={12} /><span>Scanned {getSnapshotAge(snap)}</span></div>
-                <a href="/servers/{server.id}" class="text-blue-600 hover:underline">View →</a>
+                <a href="/servers/{server.id}" class="text-accent hover:underline">View →</a>
               </div>
             </div>
           {/if}
@@ -330,4 +330,4 @@
 </div>
 
 {#snippet emptyIcon()}<ServerIcon size={22} />{/snippet}
-{#snippet addAction()}<a href="/servers/new" class="inline-flex items-center gap-2 rounded-lg bg-blue-600 px-4 py-2 text-sm font-medium text-white hover:bg-blue-700">Add Server</a>{/snippet}
+{#snippet addAction()}<a href="/servers/new" class="inline-flex items-center gap-2 rounded-lg bg-accent px-4 py-2 text-sm font-medium text-accent-fg hover:bg-accent-hover">Add Server</a>{/snippet}

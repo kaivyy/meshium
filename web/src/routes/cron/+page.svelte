@@ -287,7 +287,7 @@
       <div class="flex flex-wrap items-center gap-2">
         <button
           type="button"
-          class="inline-flex items-center gap-2 rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50 disabled:opacity-60"
+          class="inline-flex items-center gap-2 rounded-lg border border-border-strong bg-surface px-3 py-2 text-sm font-medium text-fg-muted hover:bg-surface-muted disabled:opacity-60"
           onclick={() => loadJobs()}
           disabled={loadingJobs || !selectedServerId}
         >
@@ -296,7 +296,7 @@
         </button>
         <button
           type="button"
-          class="inline-flex items-center gap-2 rounded-lg bg-blue-600 px-3 py-2 text-sm font-medium text-white hover:bg-blue-700 disabled:opacity-60"
+          class="inline-flex items-center gap-2 rounded-lg bg-accent px-3 py-2 text-sm font-medium text-accent-fg hover:bg-accent-hover disabled:opacity-60"
           onclick={openAddModal}
           disabled={!selectedServerId}
         >
@@ -309,45 +309,45 @@
   <div class="mb-6 grid gap-4 md:grid-cols-2 xl:grid-cols-4">
     <Card padding="lg">
       <div class="flex items-center gap-3">
-        <div class="flex h-10 w-10 items-center justify-center rounded-lg bg-blue-50 text-blue-600">
+        <div class="flex h-10 w-10 items-center justify-center rounded-lg bg-accent-subtle text-accent">
           <Clock3 size={20} />
         </div>
         <div>
-          <p class="text-2xl font-bold text-slate-900">{stats.total}</p>
-          <p class="text-xs text-slate-500">Total jobs</p>
+          <p class="text-2xl font-bold text-fg">{stats.total}</p>
+          <p class="text-xs text-fg-subtle">Total jobs</p>
         </div>
       </div>
     </Card>
     <Card padding="lg">
       <div class="flex items-center gap-3">
-        <div class="flex h-10 w-10 items-center justify-center rounded-lg bg-green-50 text-green-600">
+        <div class="flex h-10 w-10 items-center justify-center rounded-lg bg-success/15 text-success">
           <Check size={20} />
         </div>
         <div>
-          <p class="text-2xl font-bold text-slate-900">{stats.editable}</p>
-          <p class="text-xs text-slate-500">Editable jobs</p>
+          <p class="text-2xl font-bold text-fg">{stats.editable}</p>
+          <p class="text-xs text-fg-subtle">Editable jobs</p>
         </div>
       </div>
     </Card>
     <Card padding="lg">
       <div class="flex items-center gap-3">
-        <div class="flex h-10 w-10 items-center justify-center rounded-lg bg-amber-50 text-amber-600">
+        <div class="flex h-10 w-10 items-center justify-center rounded-lg bg-warning/15 text-warning">
           <Ban size={20} />
         </div>
         <div>
-          <p class="text-2xl font-bold text-slate-900">{stats.disabled}</p>
-          <p class="text-xs text-slate-500">Disabled jobs</p>
+          <p class="text-2xl font-bold text-fg">{stats.disabled}</p>
+          <p class="text-xs text-fg-subtle">Disabled jobs</p>
         </div>
       </div>
     </Card>
     <Card padding="lg">
       <div class="flex items-center gap-3">
-        <div class="flex h-10 w-10 items-center justify-center rounded-lg bg-slate-100 text-slate-600">
+        <div class="flex h-10 w-10 items-center justify-center rounded-lg bg-surface-muted text-fg-muted">
           <Shield size={20} />
         </div>
         <div>
-          <p class="text-2xl font-bold text-slate-900">{stats.system}</p>
-          <p class="text-xs text-slate-500">System jobs</p>
+          <p class="text-2xl font-bold text-fg">{stats.system}</p>
+          <p class="text-xs text-fg-subtle">System jobs</p>
         </div>
       </div>
     </Card>
@@ -357,10 +357,10 @@
     <Card padding="lg">
       <div class="flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
         <div class="min-w-0 flex-1">
-          <label for="cron-server-select" class="mb-1 block text-xs font-semibold uppercase tracking-wide text-slate-500">Server</label>
+          <label for="cron-server-select" class="mb-1 block text-xs font-semibold uppercase tracking-wide text-fg-subtle">Server</label>
           <select
             id="cron-server-select"
-            class="w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm outline-none focus:border-blue-500"
+            class="w-full rounded-lg border border-border-strong bg-surface px-3 py-2 text-sm outline-none focus:border-accent"
             value={selectedServerId}
             onchange={handleServerChange}
             disabled={loadingServers}
@@ -373,12 +373,12 @@
         </div>
 
         {#if selectedServer}
-          <div class="rounded-xl bg-slate-50 px-4 py-3 text-sm text-slate-600">
-            <div class="flex items-center gap-2 font-medium text-slate-900">
+          <div class="rounded-xl bg-surface-muted px-4 py-3 text-sm text-fg-muted">
+            <div class="flex items-center gap-2 font-medium text-fg">
               <ServerIcon size={16} />
               {selectedServer.name}
             </div>
-            <div class="mt-1 font-mono text-xs text-slate-500">{selectedServer.username}@{selectedServer.host}:{selectedServer.port || 22}</div>
+            <div class="mt-1 font-mono text-xs text-fg-subtle">{selectedServer.username}@{selectedServer.host}:{selectedServer.port || 22}</div>
           </div>
         {/if}
       </div>
@@ -386,19 +386,19 @@
 
     <Card padding="lg">
       <div class="flex items-center gap-3">
-        <div class="flex h-10 w-10 items-center justify-center rounded-lg bg-blue-50 text-blue-600">
+        <div class="flex h-10 w-10 items-center justify-center rounded-lg bg-accent-subtle text-accent">
           <Calendar size={20} />
         </div>
         <div>
-          <p class="text-sm font-semibold text-slate-900">Quick schedule presets</p>
-          <p class="text-xs text-slate-500">Use one of the common schedules below.</p>
+          <p class="text-sm font-semibold text-fg">Quick schedule presets</p>
+          <p class="text-xs text-fg-subtle">Use one of the common schedules below.</p>
         </div>
       </div>
       <div class="mt-4 flex flex-wrap gap-2">
         {#each schedulePresets as preset}
           <button
             type="button"
-            class={`rounded-lg border px-3 py-2 text-xs font-medium transition-colors ${form.schedule === preset.value ? 'border-blue-500 bg-blue-50 text-blue-700' : 'border-slate-300 bg-white text-slate-700 hover:bg-slate-50'}`}
+            class={`rounded-lg border px-3 py-2 text-xs font-medium transition-colors ${form.schedule === preset.value ? 'border-accent bg-accent-subtle text-accent' : 'border-border-strong bg-surface text-fg-muted hover:bg-surface-muted'}`}
             onclick={() => applyPreset(preset.value)}
           >
             {preset.label}
@@ -413,16 +413,16 @@
       <div class="flex flex-col gap-4">
         <div class="flex flex-col gap-3 lg:flex-row lg:items-center">
           <div class="relative flex-1">
-            <Search size={16} class="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
+            <Search size={16} class="absolute left-3 top-1/2 -translate-y-1/2 text-fg-subtle" />
             <input
               type="text"
               bind:value={searchQuery}
               placeholder="Search schedules, commands, comments, users..."
-              class="w-full rounded-lg border border-slate-300 bg-white py-2 pl-10 pr-4 text-sm outline-none focus:border-blue-500"
+              class="w-full rounded-lg border border-border-strong bg-surface py-2 pl-10 pr-4 text-sm outline-none focus:border-accent"
             />
           </div>
           <div class="flex flex-wrap items-center gap-2">
-            <label class="inline-flex items-center gap-2 rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm text-slate-700">
+            <label class="inline-flex items-center gap-2 rounded-lg border border-border-strong bg-surface px-3 py-2 text-sm text-fg-muted">
               <Filter size={16} />
               <select bind:value={sourceFilter} class="bg-transparent text-sm outline-none">
                 {#each sourceOptions as option}
@@ -430,11 +430,11 @@
                 {/each}
               </select>
             </label>
-            <label class="inline-flex items-center gap-2 rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm text-slate-700">
+            <label class="inline-flex items-center gap-2 rounded-lg border border-border-strong bg-surface px-3 py-2 text-sm text-fg-muted">
               <input type="checkbox" bind:checked={editableOnly} />
               Editable only
             </label>
-            <label class="inline-flex items-center gap-2 rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm text-slate-700">
+            <label class="inline-flex items-center gap-2 rounded-lg border border-border-strong bg-surface px-3 py-2 text-sm text-fg-muted">
               <input type="checkbox" bind:checked={showDisabled} />
               Show disabled
             </label>
@@ -473,8 +473,8 @@
   {:else}
     <Card padding="lg">
       <div class="overflow-x-auto">
-        <table class="min-w-full divide-y divide-slate-200 text-left text-sm">
-          <thead class="text-xs uppercase tracking-wide text-slate-500">
+        <table class="min-w-full divide-y divide-border text-left text-sm">
+          <thead class="text-xs uppercase tracking-wide text-fg-subtle">
             <tr>
               <th class="py-3 pr-4">Schedule</th>
               <th class="py-3 pr-4">Command</th>
@@ -484,15 +484,15 @@
               <th class="py-3 pr-4 text-right">Actions</th>
             </tr>
           </thead>
-          <tbody class="divide-y divide-slate-100">
+          <tbody class="divide-y divide-border">
             {#each filteredJobs as job (job.source + '-' + job.id + '-' + job.command)}
-              <tr class={job.enabled ? 'bg-white' : 'bg-slate-50/70'}>
-                <td class="py-4 pr-4 align-top font-mono text-sm text-slate-900">{job.schedule}</td>
+              <tr class={job.enabled ? 'bg-surface' : 'bg-surface-muted/70'}>
+                <td class="py-4 pr-4 align-top font-mono text-sm text-fg">{job.schedule}</td>
                 <td class="py-4 pr-4 align-top">
                   <div class="max-w-2xl">
-                    <p class="font-mono text-sm text-slate-900">{formatJobCommand(job.command)}</p>
+                    <p class="font-mono text-sm text-fg">{formatJobCommand(job.command)}</p>
                     {#if job.comment}
-                      <p class="mt-1 text-xs text-slate-500 whitespace-pre-line">{job.comment}</p>
+                      <p class="mt-1 text-xs text-fg-subtle whitespace-pre-line">{job.comment}</p>
                     {/if}
                   </div>
                 </td>
@@ -506,12 +506,12 @@
                     <Badge variant={statusBadgeVariant(job.enabled)} size="sm">Disabled</Badge>
                   {/if}
                 </td>
-                <td class="py-4 pr-4 align-top font-mono text-xs text-slate-500">{job.user || '—'}</td>
+                <td class="py-4 pr-4 align-top font-mono text-xs text-fg-subtle">{job.user || '—'}</td>
                 <td class="py-4 pl-4 align-top">
                   <div class="flex justify-end gap-2">
                     <button
                       type="button"
-                      class="inline-flex items-center gap-1 rounded-lg border border-slate-300 bg-white px-3 py-1.5 text-xs font-medium text-slate-700 hover:bg-slate-50 disabled:opacity-40"
+                      class="inline-flex items-center gap-1 rounded-lg border border-border-strong bg-surface px-3 py-1.5 text-xs font-medium text-fg-muted hover:bg-surface-muted disabled:opacity-40"
                       onclick={() => openEditModal(job)}
                       disabled={!canModify(job)}
                     >
@@ -519,7 +519,7 @@
                     </button>
                     <button
                       type="button"
-                      class="inline-flex items-center gap-1 rounded-lg border border-slate-300 bg-white px-3 py-1.5 text-xs font-medium text-red-700 hover:bg-red-50 disabled:opacity-40"
+                      class="inline-flex items-center gap-1 rounded-lg border border-border-strong bg-surface px-3 py-1.5 text-xs font-medium text-error hover:bg-error/15 disabled:opacity-40"
                       onclick={() => openDeleteModal(job)}
                       disabled={!canModify(job)}
                     >
@@ -545,27 +545,27 @@
   {#snippet children()}
     <div class="space-y-4">
       <label class="block">
-        <span class="mb-1 block text-xs font-semibold uppercase tracking-wide text-slate-500">Schedule</span>
-        <input bind:value={form.schedule} class={`w-full rounded-lg border px-3 py-2 font-mono text-sm outline-none ${form.schedule.trim() && !scheduleIsValid ? 'border-red-300 focus:border-red-500' : 'border-slate-300 focus:border-blue-500'}`} placeholder="0 * * * *" />
-        <p class={`mt-1 text-xs ${form.schedule.trim() && !scheduleIsValid ? 'text-red-600' : 'text-slate-500'}`}>Five-field cron expressions only. Example: <span class="font-mono">0 0 * * *</span></p>
+        <span class="mb-1 block text-xs font-semibold uppercase tracking-wide text-fg-subtle">Schedule</span>
+        <input bind:value={form.schedule} class={`w-full rounded-lg border px-3 py-2 font-mono text-sm outline-none ${form.schedule.trim() && !scheduleIsValid ? 'border-error focus:border-error' : 'border-border-strong focus:border-accent'}`} placeholder="0 * * * *" />
+        <p class={`mt-1 text-xs ${form.schedule.trim() && !scheduleIsValid ? 'text-error' : 'text-fg-subtle'}`}>Five-field cron expressions only. Example: <span class="font-mono">0 0 * * *</span></p>
       </label>
       <label class="block">
-        <span class="mb-1 block text-xs font-semibold uppercase tracking-wide text-slate-500">Command</span>
-        <textarea bind:value={form.command} rows="4" class={`w-full rounded-lg border px-3 py-2 font-mono text-sm outline-none ${form.command.trim() ? 'border-slate-300 focus:border-blue-500' : 'border-red-300 focus:border-red-500'}`} placeholder="/usr/local/bin/backup.sh"></textarea>
-        <p class={`mt-1 text-xs ${form.command.trim() ? 'text-slate-500' : 'text-red-600'}`}>This is stored exactly as entered and executed by the remote shell.</p>
+        <span class="mb-1 block text-xs font-semibold uppercase tracking-wide text-fg-subtle">Command</span>
+        <textarea bind:value={form.command} rows="4" class={`w-full rounded-lg border px-3 py-2 font-mono text-sm outline-none ${form.command.trim() ? 'border-border-strong focus:border-accent' : 'border-error focus:border-error'}`} placeholder="/usr/local/bin/backup.sh"></textarea>
+        <p class={`mt-1 text-xs ${form.command.trim() ? 'text-fg-subtle' : 'text-error'}`}>This is stored exactly as entered and executed by the remote shell.</p>
       </label>
       <label class="block">
-        <span class="mb-1 block text-xs font-semibold uppercase tracking-wide text-slate-500">Comment</span>
-        <textarea bind:value={form.comment} rows="3" class="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm outline-none focus:border-blue-500" placeholder="Optional note about this job"></textarea>
+        <span class="mb-1 block text-xs font-semibold uppercase tracking-wide text-fg-subtle">Comment</span>
+        <textarea bind:value={form.comment} rows="3" class="w-full rounded-lg border border-border-strong px-3 py-2 text-sm outline-none focus:border-accent" placeholder="Optional note about this job"></textarea>
       </label>
     </div>
   {/snippet}
   {#snippet footer()}
     <div class="flex items-center justify-end gap-2">
-      <button type="button" class="rounded-lg border border-slate-300 px-4 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50" onclick={() => (showAddModal = false)}>
+      <button type="button" class="rounded-lg border border-border-strong px-4 py-2 text-sm font-medium text-fg-muted hover:bg-surface-muted" onclick={() => (showAddModal = false)}>
         Cancel
       </button>
-      <button type="button" class="inline-flex items-center gap-2 rounded-lg bg-blue-600 px-4 py-2 text-sm font-medium text-white hover:bg-blue-700 disabled:opacity-60" onclick={() => submitJob('add')} disabled={saving || !scheduleIsValid || !commandIsValid}>
+      <button type="button" class="inline-flex items-center gap-2 rounded-lg bg-accent px-4 py-2 text-sm font-medium text-accent-fg hover:bg-accent-hover disabled:opacity-60" onclick={() => submitJob('add')} disabled={saving || !scheduleIsValid || !commandIsValid}>
         {#if saving}<Spinner size="sm" label="Saving" />{:else}<Plus size={16} />{/if}
         Save job
       </button>
@@ -581,33 +581,33 @@
 >
   {#snippet children()}
     <div class="space-y-4">
-      <div class="rounded-lg bg-slate-50 px-4 py-3 text-xs text-slate-600">
+      <div class="rounded-lg bg-surface-muted px-4 py-3 text-xs text-fg-muted">
         <div class="flex flex-wrap items-center gap-2">
           <Badge variant="info" size="sm">{activeJob ? sourceLabel(activeJob.source) : 'Cron job'}</Badge>
           <span class="font-mono">Line {activeJob?.id}</span>
         </div>
       </div>
       <label class="block">
-        <span class="mb-1 block text-xs font-semibold uppercase tracking-wide text-slate-500">Schedule</span>
-        <input bind:value={form.schedule} class={`w-full rounded-lg border px-3 py-2 font-mono text-sm outline-none ${form.schedule.trim() && !scheduleIsValid ? 'border-red-300 focus:border-red-500' : 'border-slate-300 focus:border-blue-500'}`} placeholder="0 * * * *" />
-        <p class={`mt-1 text-xs ${form.schedule.trim() && !scheduleIsValid ? 'text-red-600' : 'text-slate-500'}`}>Five-field cron expressions only.</p>
+        <span class="mb-1 block text-xs font-semibold uppercase tracking-wide text-fg-subtle">Schedule</span>
+        <input bind:value={form.schedule} class={`w-full rounded-lg border px-3 py-2 font-mono text-sm outline-none ${form.schedule.trim() && !scheduleIsValid ? 'border-error focus:border-error' : 'border-border-strong focus:border-accent'}`} placeholder="0 * * * *" />
+        <p class={`mt-1 text-xs ${form.schedule.trim() && !scheduleIsValid ? 'text-error' : 'text-fg-subtle'}`}>Five-field cron expressions only.</p>
       </label>
       <label class="block">
-        <span class="mb-1 block text-xs font-semibold uppercase tracking-wide text-slate-500">Command</span>
-        <textarea bind:value={form.command} rows="4" class={`w-full rounded-lg border px-3 py-2 font-mono text-sm outline-none ${form.command.trim() ? 'border-slate-300 focus:border-blue-500' : 'border-red-300 focus:border-red-500'}`}></textarea>
+        <span class="mb-1 block text-xs font-semibold uppercase tracking-wide text-fg-subtle">Command</span>
+        <textarea bind:value={form.command} rows="4" class={`w-full rounded-lg border px-3 py-2 font-mono text-sm outline-none ${form.command.trim() ? 'border-border-strong focus:border-accent' : 'border-error focus:border-error'}`}></textarea>
       </label>
       <label class="block">
-        <span class="mb-1 block text-xs font-semibold uppercase tracking-wide text-slate-500">Comment</span>
-        <textarea bind:value={form.comment} rows="3" class="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm outline-none focus:border-blue-500"></textarea>
+        <span class="mb-1 block text-xs font-semibold uppercase tracking-wide text-fg-subtle">Comment</span>
+        <textarea bind:value={form.comment} rows="3" class="w-full rounded-lg border border-border-strong px-3 py-2 text-sm outline-none focus:border-accent"></textarea>
       </label>
     </div>
   {/snippet}
   {#snippet footer()}
     <div class="flex items-center justify-end gap-2">
-      <button type="button" class="rounded-lg border border-slate-300 px-4 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50" onclick={() => (showEditModal = false)}>
+      <button type="button" class="rounded-lg border border-border-strong px-4 py-2 text-sm font-medium text-fg-muted hover:bg-surface-muted" onclick={() => (showEditModal = false)}>
         Cancel
       </button>
-      <button type="button" class="inline-flex items-center gap-2 rounded-lg bg-blue-600 px-4 py-2 text-sm font-medium text-white hover:bg-blue-700 disabled:opacity-60" onclick={() => submitJob('edit')} disabled={saving || !activeJob || !scheduleIsValid || !commandIsValid}>
+      <button type="button" class="inline-flex items-center gap-2 rounded-lg bg-accent px-4 py-2 text-sm font-medium text-accent-fg hover:bg-accent-hover disabled:opacity-60" onclick={() => submitJob('edit')} disabled={saving || !activeJob || !scheduleIsValid || !commandIsValid}>
         {#if saving}<Spinner size="sm" label="Saving" />{:else}<Pencil size={16} />{/if}
         Update job
       </button>
@@ -622,20 +622,20 @@
   onClose={() => (showDeleteModal = false)}
 >
   {#snippet children()}
-    <p class="text-sm text-slate-600">
+    <p class="text-sm text-fg-muted">
       {#if activeJob}
-        Remove <span class="font-mono font-medium text-slate-900">{activeJob.schedule}</span> for
-        <span class="font-mono font-medium text-slate-900">{formatJobCommand(activeJob.command)}</span>?
+        Remove <span class="font-mono font-medium text-fg">{activeJob.schedule}</span> for
+        <span class="font-mono font-medium text-fg">{formatJobCommand(activeJob.command)}</span>?
       {/if}
     </p>
-    <p class="mt-2 text-xs text-slate-500">This only removes jobs from the editable user crontab.</p>
+    <p class="mt-2 text-xs text-fg-subtle">This only removes jobs from the editable user crontab.</p>
   {/snippet}
   {#snippet footer()}
     <div class="flex items-center justify-end gap-2">
-      <button type="button" class="rounded-lg border border-slate-300 px-4 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50" onclick={() => (showDeleteModal = false)}>
+      <button type="button" class="rounded-lg border border-border-strong px-4 py-2 text-sm font-medium text-fg-muted hover:bg-surface-muted" onclick={() => (showDeleteModal = false)}>
         Cancel
       </button>
-      <button type="button" class="inline-flex items-center gap-2 rounded-lg bg-red-600 px-4 py-2 text-sm font-medium text-white hover:bg-red-700 disabled:opacity-60" onclick={confirmDelete} disabled={deleting || !activeJob}>
+      <button type="button" class="inline-flex items-center gap-2 rounded-lg bg-error px-4 py-2 text-sm font-medium text-accent-fg hover:bg-error/90 disabled:opacity-60" onclick={confirmDelete} disabled={deleting || !activeJob}>
         {#if deleting}<Spinner size="sm" label="Deleting" />{:else}<Trash2 size={16} />{/if}
         Delete job
       </button>
@@ -652,19 +652,19 @@
 {/snippet}
 
 {#snippet serverAction()}
-  <button type="button" class="rounded-lg bg-blue-600 px-4 py-2 text-sm font-medium text-white hover:bg-blue-700" onclick={openServersPage}>
+  <button type="button" class="rounded-lg bg-accent px-4 py-2 text-sm font-medium text-accent-fg hover:bg-accent-hover" onclick={openServersPage}>
     Go to servers
   </button>
 {/snippet}
 
 {#snippet emptyAction()}
-  <button type="button" class="rounded-lg bg-blue-600 px-4 py-2 text-sm font-medium text-white hover:bg-blue-700" onclick={openServersPage}>
+  <button type="button" class="rounded-lg bg-accent px-4 py-2 text-sm font-medium text-accent-fg hover:bg-accent-hover" onclick={openServersPage}>
     Add a server
   </button>
 {/snippet}
 
 {#snippet addAction()}
-  <button type="button" class="rounded-lg bg-blue-600 px-4 py-2 text-sm font-medium text-white hover:bg-blue-700" onclick={openAddModal} disabled={!selectedServerId}>
+  <button type="button" class="rounded-lg bg-accent px-4 py-2 text-sm font-medium text-accent-fg hover:bg-accent-hover" onclick={openAddModal} disabled={!selectedServerId}>
     Add cron job
   </button>
 {/snippet}

@@ -68,28 +68,28 @@
       label: 'Total processes',
       value: totalProcesses.toString(),
       icon: SquareTerminal,
-      color: 'text-slate-700',
+      color: 'text-fg-muted',
       note: `${filteredProcesses.length} visible`
     },
     {
       label: 'CPU usage',
       value: `${formatPercent(totalCpu)}%`,
       icon: Cpu,
-      color: 'text-orange-600',
+      color: 'text-warning',
       note: 'Aggregate across loaded processes'
     },
     {
       label: 'Memory usage',
       value: `${formatPercent(totalMemory)}%`,
       icon: MemoryStick,
-      color: 'text-violet-600',
+      color: 'text-accent',
       note: 'Aggregate across loaded processes'
     },
     {
       label: 'Top consumer',
       value: topConsumer ? `PID ${topConsumer.pid}` : '—',
       icon: Server,
-      color: 'text-blue-600',
+      color: 'text-info',
       note: topConsumer ? topConsumer.command : 'No processes loaded'
     }
   ]);
@@ -220,9 +220,9 @@
   }
 
   function isHighUsage(value: number) {
-    if (value >= 80) return 'text-red-600 bg-red-50';
-    if (value >= 50) return 'text-amber-600 bg-amber-50';
-    return 'text-emerald-600 bg-emerald-50';
+    if (value >= 80) return 'text-error bg-error/15';
+    if (value >= 50) return 'text-warning bg-warning/15';
+    return 'text-success bg-success/15';
   }
 
   function formatPercent(value: number) {
@@ -262,9 +262,9 @@
     <Card>
       <div class="grid gap-4 lg:grid-cols-[minmax(0,1.5fr)_minmax(0,1fr)] lg:items-end">
         <div class="space-y-2">
-          <label for="server-select" class="text-sm font-medium text-slate-700">Server</label>
+          <label for="server-select" class="text-sm font-medium text-fg-muted">Server</label>
           {#if loadingServers}
-            <div class="flex items-center gap-3 rounded-lg border border-slate-200 bg-slate-50 px-4 py-3 text-sm text-slate-500">
+            <div class="flex items-center gap-3 rounded-lg border border-border bg-surface-muted px-4 py-3 text-sm text-fg-subtle">
               <Spinner size="sm" label="Loading servers" />
               Loading servers…
             </div>
@@ -273,7 +273,7 @@
               id="server-select"
               value={selectedServerId}
               onchange={handleServerChange}
-              class="w-full rounded-lg border border-slate-300 bg-white px-4 py-3 text-slate-900 shadow-sm outline-none transition focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20"
+              class="w-full rounded-lg border border-border-strong bg-surface px-4 py-3 text-fg shadow-sm outline-none transition focus:border-accent focus:ring-2 focus:ring-accent/20"
             >
               <option value="">Select a server</option>
               {#each servers as server}
@@ -284,9 +284,9 @@
         </div>
 
         <div class="space-y-2">
-          <label for="process-search" class="text-sm font-medium text-slate-700">Search</label>
+          <label for="process-search" class="text-sm font-medium text-fg-muted">Search</label>
           <div class="relative">
-            <Search size={18} class="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
+            <Search size={18} class="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-fg-subtle" />
             <input
               id="process-search"
               type="text"
@@ -295,13 +295,13 @@
                 searchQuery = (event.currentTarget as HTMLInputElement).value;
               }}
               placeholder="Search by command, PID, or user"
-              class="w-full rounded-lg border border-slate-300 bg-white py-3 pl-10 pr-4 text-slate-900 shadow-sm outline-none transition focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20"
+              class="w-full rounded-lg border border-border-strong bg-surface py-3 pl-10 pr-4 text-fg shadow-sm outline-none transition focus:border-accent focus:ring-2 focus:ring-accent/20"
             />
           </div>
         </div>
       </div>
 
-      <div class="mt-4 flex flex-wrap items-center justify-between gap-3 border-t border-slate-200 pt-4">
+      <div class="mt-4 flex flex-wrap items-center justify-between gap-3 border-t border-border pt-4">
         <div class="flex flex-wrap items-center gap-2">
           {#each sortOptions as option}
             <button
@@ -310,8 +310,8 @@
               onclick={() => changeSort(option.value)}
               class={`inline-flex items-center gap-2 rounded-lg border px-3 py-2 text-sm font-medium transition ${
                 sortBy === option.value
-                  ? 'border-blue-200 bg-blue-50 text-blue-700'
-                  : 'border-slate-200 bg-white text-slate-600 hover:bg-slate-50'
+                  ? 'border-accent bg-accent-subtle text-accent'
+                  : 'border-border bg-surface text-fg-muted hover:bg-surface-muted'
               }`}
             >
               {option.label}
@@ -326,7 +326,7 @@
           {/each}
         </div>
 
-        <div class="flex items-center gap-2 text-sm text-slate-500">
+        <div class="flex items-center gap-2 text-sm text-fg-subtle">
           {#if loadingProcesses}
             <Spinner size="sm" label="Loading processes" />
             Updating…
@@ -343,7 +343,7 @@
     </Card>
 
     {#if serverError}
-      <div class="mt-4 rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
+      <div class="mt-4 rounded-lg border border-error/20 bg-error/10 px-4 py-3 text-sm text-error">
         {serverError}
       </div>
     {/if}
@@ -355,11 +355,11 @@
             {@const Icon = stat.icon}
             <div class="flex items-start justify-between gap-4">
               <div>
-                <p class="text-sm font-medium text-slate-500">{stat.label}</p>
+                <p class="text-sm font-medium text-fg-subtle">{stat.label}</p>
                 <p class={`mt-2 text-2xl font-bold ${stat.color}`}>{stat.value}</p>
-                <p class="mt-1 text-xs text-slate-500">{stat.note}</p>
+                <p class="mt-1 text-xs text-fg-subtle">{stat.note}</p>
               </div>
-              <div class={`rounded-full p-3 ${stat.color === 'text-slate-700' ? 'bg-slate-100' : stat.color === 'text-orange-600' ? 'bg-orange-50' : stat.color === 'text-violet-600' ? 'bg-violet-50' : 'bg-blue-50'}`}>
+              <div class={`rounded-full p-3 ${stat.color === 'text-fg-muted' ? 'bg-surface-muted' : stat.color === 'text-warning' ? 'bg-warning/15' : stat.color === 'text-accent' ? 'bg-accent/15' : 'bg-info/15'}`}>
                 <Icon size={20} class={stat.color} />
               </div>
             </div>
@@ -370,10 +370,10 @@
 
     <div class="mt-6">
       <Card>
-        <div class="flex flex-wrap items-center justify-between gap-3 border-b border-slate-200 pb-4">
+        <div class="flex flex-wrap items-center justify-between gap-3 border-b border-border pb-4">
           <div>
-            <h2 class="text-lg font-semibold text-slate-900">Processes</h2>
-            <p class="mt-1 text-sm text-slate-500">
+            <h2 class="text-lg font-semibold text-fg">Processes</h2>
+            <p class="mt-1 text-sm text-fg-subtle">
               {#if selectedServer}
                 {selectedServer.name} · {filteredProcesses.length} shown of {processes.length} loaded
               {:else}
@@ -390,8 +390,8 @@
           <div class="flex flex-col items-center justify-center gap-3 py-12 text-center">
             <Spinner size="lg" label="Loading processes" />
             <div>
-              <p class="text-sm font-medium text-slate-900">Loading process data</p>
-              <p class="mt-1 text-sm text-slate-500">Choose a server to fetch live process information.</p>
+              <p class="text-sm font-medium text-fg">Loading process data</p>
+              <p class="mt-1 text-sm text-fg-subtle">Choose a server to fetch live process information.</p>
             </div>
           </div>
         {:else if servers.length === 0}
@@ -414,7 +414,7 @@
         {:else if loadingProcesses && processes.length === 0}
           <div class="space-y-3 py-4">
             {#each Array(6) as _}
-              <div class="grid gap-3 rounded-lg border border-slate-200 bg-slate-50 px-4 py-3 sm:grid-cols-7">
+              <div class="grid gap-3 rounded-lg border border-border bg-surface-muted px-4 py-3 sm:grid-cols-7">
                 {#each Array(7) as __}
                   <Skeleton width="100%" height="14px" />
                 {/each}
@@ -431,24 +431,24 @@
           </div>
         {:else}
           <div class="overflow-x-auto">
-            <table class="min-w-full divide-y divide-slate-200">
-              <thead class="bg-slate-50">
+            <table class="min-w-full divide-y divide-border">
+              <thead class="bg-surface-muted">
                 <tr>
-                  <th class="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wide text-slate-500">PID</th>
-                  <th class="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wide text-slate-500">User</th>
-                  <th class="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wide text-slate-500">CPU</th>
-                  <th class="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wide text-slate-500">Memory</th>
-                  <th class="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wide text-slate-500">RSS</th>
-                  <th class="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wide text-slate-500">Stat</th>
-                  <th class="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wide text-slate-500">Command</th>
-                  <th class="px-4 py-3 text-right text-xs font-semibold uppercase tracking-wide text-slate-500">Action</th>
+                  <th class="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wide text-fg-subtle">PID</th>
+                  <th class="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wide text-fg-subtle">User</th>
+                  <th class="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wide text-fg-subtle">CPU</th>
+                  <th class="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wide text-fg-subtle">Memory</th>
+                  <th class="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wide text-fg-subtle">RSS</th>
+                  <th class="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wide text-fg-subtle">Stat</th>
+                  <th class="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wide text-fg-subtle">Command</th>
+                  <th class="px-4 py-3 text-right text-xs font-semibold uppercase tracking-wide text-fg-subtle">Action</th>
                 </tr>
               </thead>
-              <tbody class="divide-y divide-slate-100 bg-white">
+              <tbody class="divide-y divide-border bg-surface">
                 {#each filteredProcesses as process}
-                  <tr class="hover:bg-slate-50">
-                    <td class="whitespace-nowrap px-4 py-3 text-sm font-semibold text-slate-900">{process.pid}</td>
-                    <td class="whitespace-nowrap px-4 py-3 text-sm text-slate-600">{process.user}</td>
+                  <tr class="hover:bg-surface-muted">
+                    <td class="whitespace-nowrap px-4 py-3 text-sm font-semibold text-fg">{process.pid}</td>
+                    <td class="whitespace-nowrap px-4 py-3 text-sm text-fg-muted">{process.user}</td>
                     <td class="whitespace-nowrap px-4 py-3 text-sm">
                       <span class={`inline-flex rounded-full px-2 py-0.5 font-medium ${isHighUsage(process.cpu)}`}>
                         {formatPercent(process.cpu)}%
@@ -459,9 +459,9 @@
                         {formatPercent(process.memory)}%
                       </span>
                     </td>
-                    <td class="whitespace-nowrap px-4 py-3 text-sm text-slate-600">{formatKiB(process.rss)}</td>
-                    <td class="whitespace-nowrap px-4 py-3 text-sm text-slate-600">{process.stat}</td>
-                    <td class="max-w-[34rem] px-4 py-3 text-sm text-slate-700" title={process.command}>
+                    <td class="whitespace-nowrap px-4 py-3 text-sm text-fg-muted">{formatKiB(process.rss)}</td>
+                    <td class="whitespace-nowrap px-4 py-3 text-sm text-fg-muted">{process.stat}</td>
+                    <td class="max-w-[34rem] px-4 py-3 text-sm text-fg-muted" title={process.command}>
                       <div class="truncate font-mono text-[13px]">{formatCommand(process.command)}</div>
                     </td>
                     <td class="whitespace-nowrap px-4 py-3 text-right">
@@ -490,7 +490,7 @@
 {#snippet emptyServersAction()}
   <a
     href="/servers"
-    class="inline-flex items-center justify-center rounded-lg bg-blue-600 px-4 py-2 text-sm font-medium text-white transition hover:bg-blue-700"
+    class="inline-flex items-center justify-center rounded-lg bg-accent px-4 py-2 text-sm font-medium text-accent-fg transition hover:bg-accent-hover"
   >
     View servers
   </a>
@@ -503,30 +503,30 @@
 {#snippet killModalBody()}
   {#if killTarget}
     <div class="space-y-4">
-      <div class="rounded-lg border border-amber-200 bg-amber-50 p-4 text-sm text-amber-800">
+      <div class="rounded-lg border border-warning/20 bg-warning/10 p-4 text-sm text-warning">
         <div class="flex items-start gap-3">
           <ShieldAlert size={18} class="mt-0.5 shrink-0" />
           <div>
             <p class="font-medium">This will send a signal to the selected process.</p>
-            <p class="mt-1 text-amber-700">Choose TERM for a graceful shutdown, or KILL to force termination.</p>
+            <p class="mt-1 text-warning">Choose TERM for a graceful shutdown, or KILL to force termination.</p>
           </div>
         </div>
       </div>
 
-      <div class="rounded-lg border border-slate-200 bg-slate-50 p-4">
-        <p class="text-xs font-semibold uppercase tracking-wide text-slate-500">Target process</p>
-        <p class="mt-1 font-medium text-slate-900">PID {killTarget.pid} · {killTarget.user}</p>
-        <p class="mt-1 max-h-20 overflow-hidden text-sm text-slate-600" title={killTarget.command}>
+      <div class="rounded-lg border border-border bg-surface-muted p-4">
+        <p class="text-xs font-semibold uppercase tracking-wide text-fg-subtle">Target process</p>
+        <p class="mt-1 font-medium text-fg">PID {killTarget.pid} · {killTarget.user}</p>
+        <p class="mt-1 max-h-20 overflow-hidden text-sm text-fg-muted" title={killTarget.command}>
           {killTarget.command}
         </p>
       </div>
 
       <div>
-        <label for="signal-select" class="text-sm font-medium text-slate-700">Signal</label>
+        <label for="signal-select" class="text-sm font-medium text-fg-muted">Signal</label>
         <select
           id="signal-select"
           bind:value={killSignal}
-          class="mt-2 w-full rounded-lg border border-slate-300 bg-white px-4 py-3 text-slate-900 shadow-sm outline-none transition focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20"
+          class="mt-2 w-full rounded-lg border border-border-strong bg-surface px-4 py-3 text-fg shadow-sm outline-none transition focus:border-accent focus:ring-2 focus:ring-accent/20"
         >
           {#each allowedSignals as signal}
             <option value={signal}>{signal}</option>

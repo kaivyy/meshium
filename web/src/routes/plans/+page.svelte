@@ -97,23 +97,23 @@
 <div class="p-4 sm:p-6 max-w-6xl mx-auto">
   <PageHeader title="Plans" subtitle="Migration plans with risk assessment and estimates.">
     {#snippet actions()}
-      <a href="/plans/new" class="inline-flex items-center justify-center gap-2 rounded-lg bg-blue-600 px-4 py-2 text-sm font-medium text-white transition-colors hover:bg-blue-700">
+      <a href="/plans/new" class="inline-flex items-center justify-center gap-2 rounded-lg bg-accent px-4 py-2 text-sm font-medium text-accent-fg transition-colors hover:bg-accent-hover">
         <Plus size={18} /> New Plan
       </a>
     {/snippet}
   </PageHeader>
 
   {#if error}
-    <div class="mb-4 rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
+    <div class="mb-4 rounded-lg border border-error bg-error/10 px-4 py-3 text-sm text-error">
       {error}
     </div>
   {/if}
 
   {#if loading && rows.length === 0}
-    <div class="overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm">
+    <div class="overflow-hidden rounded-2xl border border-border bg-surface shadow-sm">
       <div class="space-y-3 p-4">
         {#each Array(3) as _, index}
-          <div class="grid grid-cols-[200px_80px_40px_100px_80px] items-center gap-4 rounded-lg border border-slate-100 bg-slate-50 px-4 py-3">
+          <div class="grid grid-cols-[200px_80px_40px_100px_80px] items-center gap-4 rounded-lg border border-border bg-surface-muted px-4 py-3">
             <Skeleton width="200px" />
             <Skeleton width="80px" height="20px" rounded />
             <Skeleton width="40px" />
@@ -162,7 +162,7 @@
 {#snippet emptyAction()}
   <a
     href="/plans/new"
-    class="inline-flex items-center justify-center gap-2 rounded-lg bg-blue-600 px-4 py-2 text-sm font-medium text-white transition-colors hover:bg-blue-700"
+    class="inline-flex items-center justify-center gap-2 rounded-lg bg-accent px-4 py-2 text-sm font-medium text-accent-fg transition-colors hover:bg-accent-hover"
   >
     <Plus size={18} />
     Create your first plan
@@ -173,20 +173,20 @@
   {@const plan = row as unknown as PlanRow}
 
   {#if column.key === 'sourceTarget'}
-    <div class="font-medium text-slate-900">{plan.sourceTarget}</div>
+    <div class="font-medium text-fg">{plan.sourceTarget}</div>
   {:else if column.key === 'riskLevel'}
     <Badge variant={riskVariant(plan.riskLevel)}>{plan.riskLevel}</Badge>
   {:else if column.key === 'stepCount'}
-    <span class="font-medium text-slate-700">{plan.stepCount}</span>
+    <span class="font-medium text-fg-muted">{plan.stepCount}</span>
   {:else if column.key === 'createdDisplay'}
-    <span class="text-slate-600">{plan.createdDisplay}</span>
+    <span class="text-fg-muted">{plan.createdDisplay}</span>
   {:else if column.key === 'totalSizeDisplay'}
-    <span class="text-slate-600">{plan.totalSizeDisplay}</span>
+    <span class="text-fg-muted">{plan.totalSizeDisplay}</span>
   {:else if column.key === 'actions'}
     <div class="flex justify-end">
       <button
         type="button"
-        class="inline-flex items-center gap-1 rounded-lg border border-red-200 px-3 py-1.5 text-sm font-medium text-red-600 transition-colors hover:bg-red-50"
+        class="inline-flex items-center gap-1 rounded-lg border border-error px-3 py-1.5 text-sm font-medium text-error transition-colors hover:bg-error/10"
         onclick={(event) => {
           event.stopPropagation();
           deleteTarget = plan;
@@ -201,14 +201,14 @@
 
 {#snippet deleteModalBody()}
   <div class="space-y-3">
-    <p class="text-sm text-slate-600">
+    <p class="text-sm text-fg-muted">
       This will permanently delete the selected migration plan.
     </p>
 
     {#if deleteTarget}
-      <div class="rounded-lg border border-slate-200 bg-slate-50 px-4 py-3 text-sm text-slate-700">
-        <div class="font-medium text-slate-900">{deleteTarget.sourceHost} → {deleteTarget.targetHost}</div>
-        <div class="mt-1 text-slate-500">
+      <div class="rounded-lg border border-border bg-surface-muted px-4 py-3 text-sm text-fg-muted">
+        <div class="font-medium text-fg">{deleteTarget.sourceHost} → {deleteTarget.targetHost}</div>
+        <div class="mt-1 text-fg-subtle">
           {deleteTarget.stepCount} steps · {formatBytes(deleteTarget.totalSizeBytes)}
         </div>
       </div>
@@ -220,7 +220,7 @@
   <div class="flex items-center justify-end gap-3">
     <button
       type="button"
-      class="rounded-lg border border-slate-300 px-4 py-2 text-sm font-medium text-slate-700 transition-colors hover:bg-slate-50"
+      class="rounded-lg border border-border-strong px-4 py-2 text-sm font-medium text-fg-muted transition-colors hover:bg-surface-muted"
       onclick={() => {
         if (!deleting) deleteTarget = null;
       }}
@@ -230,7 +230,7 @@
     </button>
     <button
       type="button"
-      class="inline-flex items-center gap-2 rounded-lg bg-red-600 px-4 py-2 text-sm font-medium text-white transition-colors hover:bg-red-700 disabled:cursor-not-allowed disabled:opacity-50"
+      class="inline-flex items-center gap-2 rounded-lg bg-error px-4 py-2 text-sm font-medium text-accent-fg transition-colors hover:bg-error/90 disabled:cursor-not-allowed disabled:opacity-50"
       onclick={() => void confirmDelete()}
       disabled={deleting}
     >

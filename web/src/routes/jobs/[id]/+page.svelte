@@ -189,14 +189,14 @@
   <PageHeader title="Job Details" backHref="/jobs"></PageHeader>
 
   {#if $loading && !$currentJob}
-    <div class="mt-8 flex items-center gap-3 text-slate-500">
+    <div class="mt-8 flex items-center gap-3 text-fg-subtle">
       <Spinner size="md" label="Loading job" />
       <span class="text-sm">Loading job…</span>
     </div>
   {:else if $jobError && !$currentJob}
     <Card>
-      <div class="rounded-xl border border-red-200 bg-red-50 p-4 text-sm text-red-700">
-        <div class="font-medium text-red-800">Unable to load job</div>
+      <div class="rounded-xl border border-error bg-error/10 p-4 text-sm text-error">
+        <div class="font-medium text-error">Unable to load job</div>
         <div class="mt-1">{$jobError}</div>
       </div>
     </Card>
@@ -205,7 +205,7 @@
 
     <div class="mt-6 flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
       <div class="flex items-start gap-3">
-        <div class="flex h-11 w-11 items-center justify-center rounded-xl bg-blue-50 text-blue-600">
+        <div class="flex h-11 w-11 items-center justify-center rounded-xl bg-info/10 text-info">
           {#if job.type === 'migration'}
             <ArrowRightLeft size={22} />
           {:else if job.type === 'discovery'}
@@ -216,8 +216,8 @@
         </div>
 
         <div>
-          <p class="text-xs font-semibold uppercase tracking-wide text-slate-500">{formatJobType(job.type)}</p>
-          <h1 class="mt-1 text-xl font-bold text-slate-900">Job {job.id}</h1>
+          <p class="text-xs font-semibold uppercase tracking-wide text-fg-subtle">{formatJobType(job.type)}</p>
+          <h1 class="mt-1 text-xl font-bold text-fg">Job {job.id}</h1>
         </div>
       </div>
 
@@ -226,22 +226,22 @@
 
     {#if job.status === 'done'}
       <Card>
-        <div class="flex items-start gap-3 rounded-xl border border-green-200 bg-green-50 p-4">
-          <div class="mt-0.5 flex h-8 w-8 items-center justify-center rounded-full bg-green-100 text-green-700">
+        <div class="flex items-start gap-3 rounded-xl border border-success bg-success/10 p-4">
+          <div class="mt-0.5 flex h-8 w-8 items-center justify-center rounded-full bg-success/15 text-success">
             <CheckCircle size={18} />
           </div>
           <div class="min-w-0">
-            <h2 class="text-sm font-semibold text-green-900">Job completed successfully</h2>
+            <h2 class="text-sm font-semibold text-success">Job completed successfully</h2>
             <div class="mt-3 grid gap-3 sm:grid-cols-2">
               <div>
-                <div class="text-xs font-semibold uppercase tracking-wide text-green-700">Duration</div>
-                <div class="mt-1 text-sm text-green-900">
+                <div class="text-xs font-semibold uppercase tracking-wide text-success">Duration</div>
+                <div class="mt-1 text-sm text-success">
                   {job.startedAt && job.finishedAt ? formatDurationBetween(job.startedAt, job.finishedAt) : '—'}
                 </div>
               </div>
               <div>
-                <div class="text-xs font-semibold uppercase tracking-wide text-green-700">Total bytes</div>
-                <div class="mt-1 text-sm text-green-900">{formatBytes(job.progress.bytesTotal)}</div>
+                <div class="text-xs font-semibold uppercase tracking-wide text-success">Total bytes</div>
+                <div class="mt-1 text-sm text-success">{formatBytes(job.progress.bytesTotal)}</div>
               </div>
             </div>
           </div>
@@ -251,8 +251,8 @@
 
     {#if job.status === 'failed'}
       <Card>
-        <div class="rounded-xl border border-red-200 bg-red-50 p-4 text-sm text-red-700">
-          <div class="font-semibold text-red-800">Job failed</div>
+        <div class="rounded-xl border border-error bg-error/10 p-4 text-sm text-error">
+          <div class="font-semibold text-error">Job failed</div>
           <p class="mt-1 whitespace-pre-wrap">{job.error || 'The job stopped with an unknown error.'}</p>
         </div>
       </Card>
@@ -262,10 +262,10 @@
       <div class="mb-4">
         <div class="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
           <div>
-            <h2 class="text-lg font-semibold text-slate-900">Progress</h2>
-            <p class="mt-1 text-sm text-slate-600">{job.progress.currentName || 'Waiting for the next step…'}</p>
+            <h2 class="text-lg font-semibold text-fg">Progress</h2>
+            <p class="mt-1 text-sm text-fg-muted">{job.progress.currentName || 'Waiting for the next step…'}</p>
           </div>
-          <div class="text-xs text-slate-500">
+          <div class="text-xs text-fg-subtle">
             {job.progress.currentStep}/{job.progress.totalSteps} steps
           </div>
         </div>
@@ -280,23 +280,23 @@
       />
 
       <div class="mt-5 grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
-        <div class="rounded-xl border border-slate-200 bg-slate-50 p-3">
-          <div class="text-xs font-semibold uppercase tracking-wide text-slate-500">Bytes done</div>
-          <div class="mt-1 text-sm font-medium text-slate-900">
+        <div class="rounded-xl border border-border bg-surface-muted p-3">
+          <div class="text-xs font-semibold uppercase tracking-wide text-fg-subtle">Bytes done</div>
+          <div class="mt-1 text-sm font-medium text-fg">
             {formatBytes(job.progress.bytesDone)} / {formatBytes(job.progress.bytesTotal)}
           </div>
         </div>
-        <div class="rounded-xl border border-slate-200 bg-slate-50 p-3">
-          <div class="text-xs font-semibold uppercase tracking-wide text-slate-500">Speed</div>
-          <div class="mt-1 text-sm font-medium text-slate-900">{formatSpeed(job.progress.speedBps)}</div>
+        <div class="rounded-xl border border-border bg-surface-muted p-3">
+          <div class="text-xs font-semibold uppercase tracking-wide text-fg-subtle">Speed</div>
+          <div class="mt-1 text-sm font-medium text-fg">{formatSpeed(job.progress.speedBps)}</div>
         </div>
-        <div class="rounded-xl border border-slate-200 bg-slate-50 p-3">
-          <div class="text-xs font-semibold uppercase tracking-wide text-slate-500">ETA</div>
-          <div class="mt-1 text-sm font-medium text-slate-900">{formatDuration(job.progress.eta)}</div>
+        <div class="rounded-xl border border-border bg-surface-muted p-3">
+          <div class="text-xs font-semibold uppercase tracking-wide text-fg-subtle">ETA</div>
+          <div class="mt-1 text-sm font-medium text-fg">{formatDuration(job.progress.eta)}</div>
         </div>
-        <div class="rounded-xl border border-slate-200 bg-slate-50 p-3">
-          <div class="text-xs font-semibold uppercase tracking-wide text-slate-500">Steps</div>
-          <div class="mt-1 text-sm font-medium text-slate-900">
+        <div class="rounded-xl border border-border bg-surface-muted p-3">
+          <div class="text-xs font-semibold uppercase tracking-wide text-fg-subtle">Steps</div>
+          <div class="mt-1 text-sm font-medium text-fg">
             {job.progress.currentStep}/{job.progress.totalSteps}
           </div>
         </div>
@@ -309,7 +309,7 @@
           <button
             type="button"
             onclick={handlePause}
-            class="inline-flex items-center gap-2 rounded-lg border border-slate-300 bg-white px-4 py-2 text-sm font-medium text-slate-700 transition-colors hover:bg-slate-50"
+            class="inline-flex items-center gap-2 rounded-lg border border-border-strong bg-surface px-4 py-2 text-sm font-medium text-fg-muted transition-colors hover:bg-surface-muted"
           >
             <Pause size={16} />
             Pause
@@ -317,7 +317,7 @@
           <button
             type="button"
             onclick={handleCancel}
-            class="inline-flex items-center gap-2 rounded-lg bg-red-600 px-4 py-2 text-sm font-medium text-white transition-colors hover:bg-red-700"
+            class="inline-flex items-center gap-2 rounded-lg bg-error px-4 py-2 text-sm font-medium text-white transition-colors hover:bg-error/90"
           >
             Cancel
           </button>
@@ -325,7 +325,7 @@
           <button
             type="button"
             onclick={handleResume}
-            class="inline-flex items-center gap-2 rounded-lg bg-blue-600 px-4 py-2 text-sm font-medium text-white transition-colors hover:bg-blue-700"
+            class="inline-flex items-center gap-2 rounded-lg bg-accent px-4 py-2 text-sm font-medium text-accent-fg transition-colors hover:bg-accent-hover"
           >
             <Play size={16} />
             Resume
@@ -333,7 +333,7 @@
           <button
             type="button"
             onclick={handleCancel}
-            class="inline-flex items-center gap-2 rounded-lg bg-red-600 px-4 py-2 text-sm font-medium text-white transition-colors hover:bg-red-700"
+            class="inline-flex items-center gap-2 rounded-lg bg-error px-4 py-2 text-sm font-medium text-white transition-colors hover:bg-error/90"
           >
             Cancel
           </button>
@@ -341,7 +341,7 @@
           <button
             type="button"
             onclick={handleCancel}
-            class="inline-flex items-center gap-2 rounded-lg bg-red-600 px-4 py-2 text-sm font-medium text-white transition-colors hover:bg-red-700"
+            class="inline-flex items-center gap-2 rounded-lg bg-error px-4 py-2 text-sm font-medium text-white transition-colors hover:bg-error/90"
           >
             Cancel
           </button>
@@ -352,12 +352,12 @@
     <Card padding="lg">
       <div class="mb-4 flex items-center justify-between gap-3">
         <div>
-          <h2 class="text-lg font-semibold text-slate-900">Logs</h2>
-          <p class="mt-1 text-sm text-slate-500">Live job output and progress events.</p>
+          <h2 class="text-lg font-semibold text-fg">Logs</h2>
+          <p class="mt-1 text-sm text-fg-subtle">Live job output and progress events.</p>
         </div>
         {#if job.status === 'running'}
-          <div class="inline-flex items-center gap-2 text-xs font-medium text-blue-600">
-            <span class="h-2 w-2 rounded-full bg-blue-600 animate-pulse"></span>
+          <div class="inline-flex items-center gap-2 text-xs font-medium text-info">
+            <span class="h-2 w-2 rounded-full bg-info animate-pulse"></span>
             Streaming
           </div>
         {/if}

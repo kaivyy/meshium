@@ -181,12 +181,12 @@
   <PageHeader title="Plan Details" backHref="/plans"></PageHeader>
 
   {#if loading}
-    <div class="flex items-center gap-3 py-10 text-slate-500">
+    <div class="flex items-center gap-3 py-10 text-fg-subtle">
       <Spinner size="md" label="Loading plan" />
       <span>Loading migration plan...</span>
     </div>
   {:else if error && !plan}
-    <div class="rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
+    <div class="rounded-lg border border-error bg-error/10 px-4 py-3 text-sm text-error">
       {error}
     </div>
   {:else if !plan}
@@ -200,20 +200,20 @@
     <div class="space-y-6">
       <div class="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
         <div class="min-w-0">
-          <div class="mb-2 flex flex-wrap items-center gap-2 text-sm text-slate-500">
+          <div class="mb-2 flex flex-wrap items-center gap-2 text-sm text-fg-subtle">
             <span>{plan.source.hostname}</span>
             <ArrowRight size={14} />
             <span>{plan.target.hostname}</span>
           </div>
-          <h1 class="text-2xl font-semibold text-slate-900">Migration Plan #{plan.id}</h1>
-          <p class="mt-1 text-sm text-slate-500">Created {formatRelativeTime(plan.createdAt)}</p>
+          <h1 class="text-2xl font-semibold text-fg">Migration Plan #{plan.id}</h1>
+          <p class="mt-1 text-sm text-fg-subtle">Created {formatRelativeTime(plan.createdAt)}</p>
         </div>
 
         <div class="flex flex-wrap items-center gap-3">
           <Badge variant={riskVariant(plan.riskLevel)}>{plan.riskLevel}</Badge>
-          <div class="rounded-lg border border-slate-200 bg-white px-4 py-2 text-sm text-slate-600 shadow-sm">
-            <span class="font-medium text-slate-900">{formatBytes(plan.totalEstimate.sizeBytes)}</span>
-            <span class="mx-2 text-slate-300">·</span>
+          <div class="rounded-lg border border-border bg-surface px-4 py-2 text-sm text-fg-muted shadow-sm">
+            <span class="font-medium text-fg">{formatBytes(plan.totalEstimate.sizeBytes)}</span>
+            <span class="mx-2 text-fg-subtle">·</span>
             <span>{formatEstimateDuration(plan.totalEstimate.durationMin)} – {formatEstimateDuration(plan.totalEstimate.durationMax)}</span>
           </div>
         </div>
@@ -222,7 +222,7 @@
       <div class="flex flex-wrap items-center gap-3">
         <button
           type="button"
-          class="inline-flex items-center gap-2 rounded-lg bg-blue-600 px-4 py-2 text-sm font-medium text-white transition-colors hover:bg-blue-700 disabled:cursor-not-allowed disabled:opacity-50"
+          class="inline-flex items-center gap-2 rounded-lg bg-accent px-4 py-2 text-sm font-medium text-accent-fg transition-colors hover:bg-accent-hover disabled:cursor-not-allowed disabled:opacity-50"
           onclick={() => void executePlan()}
           disabled={executing || plan.blockers.length > 0}
         >
@@ -237,7 +237,7 @@
 
         <button
           type="button"
-          class="inline-flex items-center gap-2 rounded-lg border border-slate-300 bg-white px-4 py-2 text-sm font-medium text-slate-700 transition-colors hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-50"
+          class="inline-flex items-center gap-2 rounded-lg border border-border-strong bg-surface px-4 py-2 text-sm font-medium text-fg-muted transition-colors hover:bg-surface-muted disabled:cursor-not-allowed disabled:opacity-50"
           onclick={() => void regeneratePlan()}
           disabled={regenerating}
         >
@@ -252,7 +252,7 @@
 
         <button
           type="button"
-          class="inline-flex items-center gap-2 rounded-lg border border-red-200 bg-white px-4 py-2 text-sm font-medium text-red-600 transition-colors hover:bg-red-50"
+          class="inline-flex items-center gap-2 rounded-lg border border-error bg-surface px-4 py-2 text-sm font-medium text-error transition-colors hover:bg-error/10"
           onclick={() => {
             deleteModalOpen = true;
           }}
@@ -263,7 +263,7 @@
       </div>
 
       {#if error}
-        <div class="rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
+        <div class="rounded-lg border border-error bg-error/10 px-4 py-3 text-sm text-error">
           {error}
         </div>
       {/if}
@@ -272,15 +272,15 @@
         <div class="grid gap-4 lg:grid-cols-2">
           {#if plan.blockers.length > 0}
             <Card padding="lg">
-              <div class="mb-4 flex items-center gap-2 text-sm font-semibold text-red-800">
+              <div class="mb-4 flex items-center gap-2 text-sm font-semibold text-error">
                 <Ban size={16} />
                 Blockers
               </div>
               <div class="space-y-2">
                 {#each plan.blockers as blocker}
-                  <div class="rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-800">
+                  <div class="rounded-lg border border-error bg-error/10 px-4 py-3 text-sm text-error">
                     <div class="font-medium">{blocker.code}</div>
-                    <div class="mt-1 text-red-700">{blocker.message}</div>
+                    <div class="mt-1 text-error">{blocker.message}</div>
                   </div>
                 {/each}
               </div>
@@ -289,15 +289,15 @@
 
           {#if plan.warnings.length > 0}
             <Card padding="lg">
-              <div class="mb-4 flex items-center gap-2 text-sm font-semibold text-yellow-800">
+              <div class="mb-4 flex items-center gap-2 text-sm font-semibold text-warning">
                 <AlertTriangle size={16} />
                 Warnings
               </div>
               <div class="space-y-2">
                 {#each plan.warnings as warning}
-                  <div class="rounded-lg border border-yellow-200 bg-yellow-50 px-4 py-3 text-sm text-yellow-800">
+                  <div class="rounded-lg border border-warning bg-warning/10 px-4 py-3 text-sm text-warning">
                     <div class="font-medium">{warning.code}</div>
-                    <div class="mt-1 text-yellow-700">{warning.message}</div>
+                    <div class="mt-1 text-warning">{warning.message}</div>
                   </div>
                 {/each}
               </div>
@@ -305,20 +305,20 @@
           {/if}
         </div>
       {:else}
-        <div class="rounded-xl border border-green-200 bg-green-50 px-4 py-3 text-green-800">
+        <div class="rounded-xl border border-success bg-success/10 px-4 py-3 text-success">
           <div class="flex items-center gap-2 text-sm font-semibold">
             <CheckCircle2 size={16} />
             All clear
           </div>
-          <div class="mt-1 text-sm text-green-700">No blockers or warnings found. The plan is ready to execute.</div>
+          <div class="mt-1 text-sm text-success">No blockers or warnings found. The plan is ready to execute.</div>
         </div>
       {/if}
 
       <Card padding="lg">
         <div class="mb-5 flex items-center justify-between gap-3">
           <div>
-            <h2 class="text-lg font-semibold text-slate-900">Steps</h2>
-            <p class="mt-1 text-sm text-slate-500">Ordered execution plan with dependency and risk details.</p>
+            <h2 class="text-lg font-semibold text-fg">Steps</h2>
+            <p class="mt-1 text-sm text-fg-subtle">Ordered execution plan with dependency and risk details.</p>
           </div>
         </div>
 
@@ -326,17 +326,17 @@
           {#each plan.steps as step}
             {@const meta = stepTypeMeta[step.type]}
             {@const StepIcon = meta.icon}
-            <li class={`rounded-lg border border-slate-200 bg-white p-4 shadow-sm ${step.dependsOn.length > 0 ? 'ml-6 border-l-4 border-l-blue-200 pl-5' : ''}`}>
+            <li class={`rounded-lg border border-border bg-surface p-4 shadow-sm ${step.dependsOn.length > 0 ? 'ml-6 border-l-4 border-l-accent pl-5' : ''}`}>
               <div class="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
                 <div class="min-w-0">
                   <div class="flex flex-wrap items-center gap-2">
-                    <div class="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-slate-100 text-sm font-semibold text-slate-700">
+                    <div class="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-surface-muted text-sm font-semibold text-fg-muted">
                       {step.order}
                     </div>
                     <div class="min-w-0">
-                      <div class="font-medium text-slate-900">{step.name}</div>
+                      <div class="font-medium text-fg">{step.name}</div>
                       {#if step.dependsOn.length > 0}
-                        <div class="mt-1 text-sm text-slate-500">Depends on step {step.dependsOn.join(', ')}</div>
+                        <div class="mt-1 text-sm text-fg-subtle">Depends on step {step.dependsOn.join(', ')}</div>
                       {/if}
                     </div>
                   </div>
@@ -363,22 +363,22 @@
 
               <div class="mt-4 grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
                 <div>
-                  <div class="text-xs font-semibold uppercase tracking-wide text-slate-500">Size</div>
-                  <div class="mt-1 text-sm font-medium text-slate-900">{formatBytes(step.estimate.sizeBytes)}</div>
+                  <div class="text-xs font-semibold uppercase tracking-wide text-fg-subtle">Size</div>
+                  <div class="mt-1 text-sm font-medium text-fg">{formatBytes(step.estimate.sizeBytes)}</div>
                 </div>
                 <div>
-                  <div class="text-xs font-semibold uppercase tracking-wide text-slate-500">Duration</div>
-                  <div class="mt-1 text-sm font-medium text-slate-900">
+                  <div class="text-xs font-semibold uppercase tracking-wide text-fg-subtle">Duration</div>
+                  <div class="mt-1 text-sm font-medium text-fg">
                     {formatEstimateDuration(step.estimate.durationMin)} – {formatEstimateDuration(step.estimate.durationMax)}
                   </div>
                 </div>
                 <div>
-                  <div class="text-xs font-semibold uppercase tracking-wide text-slate-500">Confidence</div>
-                  <div class="mt-1 text-sm font-medium text-slate-900">{Math.round(step.estimate.confidence * 100)}%</div>
+                  <div class="text-xs font-semibold uppercase tracking-wide text-fg-subtle">Confidence</div>
+                  <div class="mt-1 text-sm font-medium text-fg">{Math.round(step.estimate.confidence * 100)}%</div>
                 </div>
                 <div>
-                  <div class="text-xs font-semibold uppercase tracking-wide text-slate-500">Dependencies</div>
-                  <div class="mt-1 text-sm font-medium text-slate-900">{step.dependsOn.length || 'None'}</div>
+                  <div class="text-xs font-semibold uppercase tracking-wide text-fg-subtle">Dependencies</div>
+                  <div class="mt-1 text-sm font-medium text-fg">{step.dependsOn.length || 'None'}</div>
                 </div>
               </div>
             </li>
@@ -406,7 +406,7 @@
 {#snippet emptyAction()}
   <a
     href="/plans"
-    class="inline-flex items-center justify-center gap-2 rounded-lg bg-blue-600 px-4 py-2 text-sm font-medium text-white transition-colors hover:bg-blue-700"
+    class="inline-flex items-center justify-center gap-2 rounded-lg bg-accent px-4 py-2 text-sm font-medium text-accent-fg transition-colors hover:bg-accent-hover"
   >
     <ArrowLeft size={16} />
     Back to plans
@@ -415,12 +415,12 @@
 
 {#snippet deleteModalBody()}
   <div class="space-y-3">
-    <p class="text-sm text-slate-600">This action will permanently remove the plan from the system.</p>
+    <p class="text-sm text-fg-muted">This action will permanently remove the plan from the system.</p>
 
     {#if plan}
-      <div class="rounded-lg border border-slate-200 bg-slate-50 px-4 py-3 text-sm text-slate-700">
-        <div class="font-medium text-slate-900">{plan.source.hostname} → {plan.target.hostname}</div>
-        <div class="mt-1 text-slate-500">{plan.steps.length} steps · {formatBytes(plan.totalEstimate.sizeBytes)}</div>
+      <div class="rounded-lg border border-border bg-surface-muted px-4 py-3 text-sm text-fg-muted">
+        <div class="font-medium text-fg">{plan.source.hostname} → {plan.target.hostname}</div>
+        <div class="mt-1 text-fg-subtle">{plan.steps.length} steps · {formatBytes(plan.totalEstimate.sizeBytes)}</div>
       </div>
     {/if}
   </div>
@@ -430,7 +430,7 @@
   <div class="flex items-center justify-end gap-3">
     <button
       type="button"
-      class="rounded-lg border border-slate-300 px-4 py-2 text-sm font-medium text-slate-700 transition-colors hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-50"
+      class="rounded-lg border border-border-strong px-4 py-2 text-sm font-medium text-fg-muted transition-colors hover:bg-surface-muted disabled:cursor-not-allowed disabled:opacity-50"
       onclick={() => {
         if (!deleting) deleteModalOpen = false;
       }}
@@ -440,7 +440,7 @@
     </button>
     <button
       type="button"
-      class="inline-flex items-center gap-2 rounded-lg bg-red-600 px-4 py-2 text-sm font-medium text-white transition-colors hover:bg-red-700 disabled:cursor-not-allowed disabled:opacity-50"
+      class="inline-flex items-center gap-2 rounded-lg bg-error px-4 py-2 text-sm font-medium text-accent-fg transition-colors hover:bg-error disabled:cursor-not-allowed disabled:opacity-50"
       onclick={() => void deletePlan()}
       disabled={deleting}
     >

@@ -215,7 +215,7 @@
     {#snippet actions()}
       <div class="flex items-center gap-3">
         {#if lastRefresh}
-          <span class="hidden text-xs text-slate-400 sm:inline">Updated {formatRelativeTime(lastRefresh.toISOString())}</span>
+          <span class="hidden text-xs text-fg-subtle sm:inline">Updated {formatRelativeTime(lastRefresh.toISOString())}</span>
         {/if}
         <button
           type="button"
@@ -223,16 +223,16 @@
             autoRefresh = !autoRefresh;
             startAutoRefresh();
           }}
-          class="inline-flex items-center gap-2 rounded-lg border border-slate-300 bg-white px-3 py-2 text-xs font-medium text-slate-600 hover:bg-slate-50"
+          class="inline-flex items-center gap-2 rounded-lg border border-border-strong bg-surface px-3 py-2 text-xs font-medium text-fg-muted hover:bg-surface-muted"
         >
-          <span class={`inline-block h-2 w-2 rounded-full ${autoRefresh ? 'bg-green-500' : 'bg-slate-300'}`}></span>
+          <span class={`inline-block h-2 w-2 rounded-full ${autoRefresh ? 'bg-success' : 'bg-border-strong'}`}></span>
           Auto {autoRefresh ? 'ON' : 'OFF'}
         </button>
         <button
           type="button"
           onclick={refreshNow}
           disabled={loading || selectedServerId === null}
-          class="inline-flex items-center gap-2 rounded-lg border border-slate-300 bg-white px-4 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-60"
+          class="inline-flex items-center gap-2 rounded-lg border border-border-strong bg-surface px-4 py-2 text-sm font-medium text-fg-muted hover:bg-surface-muted disabled:cursor-not-allowed disabled:opacity-60"
         >
           {#if loading}<Spinner size="sm" label="Refreshing" />{:else}<RefreshCw size={16} />{/if}
           Refresh
@@ -245,11 +245,11 @@
   <Card padding="lg">
     <div class="grid gap-4 lg:grid-cols-2">
       <label class="block">
-        <span class="mb-1 block text-xs font-semibold uppercase tracking-wide text-slate-500">Server</span>
+        <span class="mb-1 block text-xs font-semibold uppercase tracking-wide text-fg-subtle">Server</span>
         <select
           value={selectedServerId ?? ''}
           onchange={handleServerChange}
-          class="w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm text-slate-900 outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20"
+          class="w-full rounded-lg border border-border-strong bg-surface px-3 py-2 text-sm text-fg outline-none focus:border-accent focus:ring-2 focus:ring-accent/20"
         >
           {#each servers as server}
             <option value={server.id}>{server.name} — {server.host}:{server.port}</option>
@@ -258,22 +258,22 @@
       </label>
 
       <label class="block">
-        <span class="mb-1 block text-xs font-semibold uppercase tracking-wide text-slate-500">Search services</span>
+        <span class="mb-1 block text-xs font-semibold uppercase tracking-wide text-fg-subtle">Search services</span>
         <div class="relative">
-          <Search size={16} class="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
+          <Search size={16} class="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-fg-subtle" />
           <input
             type="text"
             bind:value={searchQuery}
             placeholder="Filter by service name"
-            class="w-full rounded-lg border border-slate-300 bg-white py-2 pl-10 pr-4 text-sm text-slate-900 outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20"
+            class="w-full rounded-lg border border-border-strong bg-surface py-2 pl-10 pr-4 text-sm text-fg outline-none focus:border-accent focus:ring-2 focus:ring-accent/20"
           />
         </div>
       </label>
     </div>
 
     {#if selectedServer}
-      <div class="mt-4 flex flex-wrap items-center gap-2 text-xs text-slate-500">
-        <span class="font-medium text-slate-700">{selectedServer.name}</span>
+      <div class="mt-4 flex flex-wrap items-center gap-2 text-xs text-fg-subtle">
+        <span class="font-medium text-fg-muted">{selectedServer.name}</span>
         <span>·</span>
         <span>{selectedServer.host}:{selectedServer.port}</span>
         <span>·</span>
@@ -286,37 +286,37 @@
   <div class="mb-6 grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
     <Card padding="lg">
       <div class="flex items-center gap-3">
-        <div class="flex h-10 w-10 items-center justify-center rounded-lg bg-blue-50 text-blue-600"><ServerIcon size={20} /></div>
+        <div class="flex h-10 w-10 items-center justify-center rounded-lg bg-accent-subtle text-accent"><ServerIcon size={20} /></div>
         <div>
-          <p class="text-2xl font-bold text-slate-900">{stats.total}</p>
-          <p class="text-xs text-slate-500">Total Services</p>
+          <p class="text-2xl font-bold text-fg">{stats.total}</p>
+          <p class="text-xs text-fg-subtle">Total Services</p>
         </div>
       </div>
     </Card>
     <Card padding="lg">
       <div class="flex items-center gap-3">
-        <div class="flex h-10 w-10 items-center justify-center rounded-lg bg-green-50 text-green-600"><Play size={20} /></div>
+        <div class="flex h-10 w-10 items-center justify-center rounded-lg bg-success/15 text-success"><Play size={20} /></div>
         <div>
-          <p class="text-2xl font-bold text-slate-900">{stats.active}</p>
-          <p class="text-xs text-slate-500">Active</p>
+          <p class="text-2xl font-bold text-fg">{stats.active}</p>
+          <p class="text-xs text-fg-subtle">Active</p>
         </div>
       </div>
     </Card>
     <Card padding="lg">
       <div class="flex items-center gap-3">
-        <div class="flex h-10 w-10 items-center justify-center rounded-lg bg-red-50 text-red-600"><AlertCircle size={20} /></div>
+        <div class="flex h-10 w-10 items-center justify-center rounded-lg bg-error/15 text-error"><AlertCircle size={20} /></div>
         <div>
-          <p class="text-2xl font-bold text-slate-900">{stats.failed}</p>
-          <p class="text-xs text-slate-500">Failed</p>
+          <p class="text-2xl font-bold text-fg">{stats.failed}</p>
+          <p class="text-xs text-fg-subtle">Failed</p>
         </div>
       </div>
     </Card>
     <Card padding="lg">
       <div class="flex items-center gap-3">
-        <div class="flex h-10 w-10 items-center justify-center rounded-lg bg-slate-50 text-slate-500"><Square size={20} /></div>
+        <div class="flex h-10 w-10 items-center justify-center rounded-lg bg-surface-muted text-fg-subtle"><Square size={20} /></div>
         <div>
-          <p class="text-2xl font-bold text-slate-900">{stats.inactive}</p>
-          <p class="text-xs text-slate-500">Inactive</p>
+          <p class="text-2xl font-bold text-fg">{stats.inactive}</p>
+          <p class="text-xs text-fg-subtle">Inactive</p>
         </div>
       </div>
     </Card>
@@ -329,7 +329,7 @@
         <Skeleton width="70%" />
         <div class="space-y-2 pt-2">
           {#each Array(5) as _}
-            <div class="grid grid-cols-5 gap-3 rounded-lg border border-slate-100 p-3">
+            <div class="grid grid-cols-5 gap-3 rounded-lg border border-border p-3">
               <Skeleton width="80%" />
               <Skeleton width="100%" />
               <Skeleton width="80px" height="20px" rounded />
@@ -351,29 +351,29 @@
   {:else}
     <Card padding="sm">
       <div class="overflow-x-auto">
-        <table class="min-w-full divide-y divide-slate-200">
-          <thead class="bg-slate-50">
+        <table class="min-w-full divide-y divide-border">
+          <thead class="bg-surface-muted">
             <tr>
-              <th class="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wide text-slate-500">Name</th>
-              <th class="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wide text-slate-500">Description</th>
-              <th class="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wide text-slate-500">State</th>
-              <th class="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wide text-slate-500">Enabled</th>
-              <th class="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wide text-slate-500">Actions</th>
+              <th class="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wide text-fg-subtle">Name</th>
+              <th class="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wide text-fg-subtle">Description</th>
+              <th class="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wide text-fg-subtle">State</th>
+              <th class="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wide text-fg-subtle">Enabled</th>
+              <th class="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wide text-fg-subtle">Actions</th>
             </tr>
           </thead>
-          <tbody class="divide-y divide-slate-100 bg-white">
+          <tbody class="divide-y divide-border bg-surface">
             {#each filteredServices as service (service.name)}
-              <tr class="align-top hover:bg-slate-50">
+              <tr class="align-top hover:bg-surface-muted">
                 <td class="whitespace-nowrap px-4 py-4">
-                  <div class="font-medium text-slate-900">{service.name}</div>
-                  <div class="mt-1 text-xs text-slate-400">{service.type || 'service'}</div>
+                  <div class="font-medium text-fg">{service.name}</div>
+                  <div class="mt-1 text-xs text-fg-subtle">{service.type || 'service'}</div>
                 </td>
-                <td class="px-4 py-4 text-sm text-slate-600">{formatServiceDescription(service)}</td>
+                <td class="px-4 py-4 text-sm text-fg-muted">{formatServiceDescription(service)}</td>
                 <td class="whitespace-nowrap px-4 py-4">
                   <div class="flex flex-col gap-1">
                     <Badge variant={stateVariant(service)} size="sm">{service.activeState}</Badge>
                     {#if service.subState && service.subState !== service.activeState}
-                      <span class="text-xs text-slate-400">{service.subState}</span>
+                      <span class="text-xs text-fg-subtle">{service.subState}</span>
                     {/if}
                   </div>
                 </td>
@@ -387,7 +387,7 @@
                         type="button"
                         onclick={() => performAction(service, 'start')}
                         disabled={serviceBusy(service.name)}
-                        class="inline-flex items-center gap-1.5 rounded-lg border border-slate-300 bg-white px-3 py-1.5 text-xs font-medium text-slate-700 hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-60"
+                        class="inline-flex items-center gap-1.5 rounded-lg border border-border-strong bg-surface px-3 py-1.5 text-xs font-medium text-fg-muted hover:bg-surface-muted disabled:cursor-not-allowed disabled:opacity-60"
                       >
                         {#if isBusy(service.name, 'start')}<Spinner size="sm" label="" />{:else}<Play size={12} />{/if}
                         Start
@@ -399,7 +399,7 @@
                         type="button"
                         onclick={() => performAction(service, 'stop')}
                         disabled={serviceBusy(service.name)}
-                        class="inline-flex items-center gap-1.5 rounded-lg border border-slate-300 bg-white px-3 py-1.5 text-xs font-medium text-slate-700 hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-60"
+                        class="inline-flex items-center gap-1.5 rounded-lg border border-border-strong bg-surface px-3 py-1.5 text-xs font-medium text-fg-muted hover:bg-surface-muted disabled:cursor-not-allowed disabled:opacity-60"
                       >
                         {#if isBusy(service.name, 'stop')}<Spinner size="sm" label="" />{:else}<Square size={12} />{/if}
                         Stop
@@ -411,7 +411,7 @@
                         type="button"
                         onclick={() => performAction(service, 'restart')}
                         disabled={serviceBusy(service.name)}
-                        class="inline-flex items-center gap-1.5 rounded-lg border border-slate-300 bg-white px-3 py-1.5 text-xs font-medium text-slate-700 hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-60"
+                        class="inline-flex items-center gap-1.5 rounded-lg border border-border-strong bg-surface px-3 py-1.5 text-xs font-medium text-fg-muted hover:bg-surface-muted disabled:cursor-not-allowed disabled:opacity-60"
                       >
                         {#if isBusy(service.name, 'restart')}<Spinner size="sm" label="" />{:else}<RotateCcw size={12} />{/if}
                         Restart
@@ -424,7 +424,7 @@
                           type="button"
                           onclick={() => performAction(service, 'disable')}
                           disabled={serviceBusy(service.name)}
-                          class="inline-flex items-center gap-1.5 rounded-lg border border-slate-300 bg-white px-3 py-1.5 text-xs font-medium text-slate-700 hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-60"
+                          class="inline-flex items-center gap-1.5 rounded-lg border border-border-strong bg-surface px-3 py-1.5 text-xs font-medium text-fg-muted hover:bg-surface-muted disabled:cursor-not-allowed disabled:opacity-60"
                         >
                           {#if isBusy(service.name, 'disable')}<Spinner size="sm" label="" />{:else}<ToggleLeft size={12} />{/if}
                           Disable
@@ -434,7 +434,7 @@
                           type="button"
                           onclick={() => performAction(service, 'enable')}
                           disabled={serviceBusy(service.name)}
-                          class="inline-flex items-center gap-1.5 rounded-lg border border-slate-300 bg-white px-3 py-1.5 text-xs font-medium text-slate-700 hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-60"
+                          class="inline-flex items-center gap-1.5 rounded-lg border border-border-strong bg-surface px-3 py-1.5 text-xs font-medium text-fg-muted hover:bg-surface-muted disabled:cursor-not-allowed disabled:opacity-60"
                         >
                           {#if isBusy(service.name, 'enable')}<Spinner size="sm" label="" />{:else}<ToggleRight size={12} />{/if}
                           Enable

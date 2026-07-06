@@ -123,14 +123,14 @@
 
 <div class="p-6">
   <div class="mx-auto flex max-w-5xl flex-col gap-6">
-    <div class="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm">
+    <div class="rounded-2xl border border-border bg-surface p-6 shadow-sm">
       <div class="flex flex-col gap-4 lg:flex-row lg:items-end lg:justify-between">
         <div>
-          <div class="inline-flex items-center gap-2 rounded-full bg-blue-50 px-3 py-1 text-xs font-medium text-blue-700">
+          <div class="inline-flex items-center gap-2 rounded-full bg-accent-subtle px-3 py-1 text-xs font-medium text-accent">
             <ToggleRight size={14} /> SSH Auth Flow
           </div>
-          <h1 class="mt-3 text-2xl font-bold tracking-tight text-slate-900">Auth Priority</h1>
-          <p class="mt-2 max-w-3xl text-sm text-slate-500">
+          <h1 class="mt-3 text-2xl font-bold tracking-tight text-fg">Auth Priority</h1>
+          <p class="mt-2 max-w-3xl text-sm text-fg-subtle">
             Drag to reorder authentication methods and toggle strategies on or off.
           </p>
         </div>
@@ -139,7 +139,7 @@
           <button
             type="button"
             on:click={resetToRecommended}
-            class="inline-flex items-center gap-2 rounded-lg border border-slate-300 bg-white px-4 py-2 text-sm font-medium text-slate-700 transition hover:bg-slate-50"
+            class="inline-flex items-center gap-2 rounded-lg border border-border-strong bg-surface px-4 py-2 text-sm font-medium text-fg-muted transition hover:bg-surface-muted"
           >
             <RotateCcw size={16} /> Reset
           </button>
@@ -147,7 +147,7 @@
             type="button"
             on:click={saveEntries}
             disabled={!dirty || saving}
-            class="inline-flex items-center gap-2 rounded-lg bg-blue-600 px-4 py-2 text-sm font-medium text-white transition hover:bg-blue-700 disabled:cursor-not-allowed disabled:opacity-50"
+            class="inline-flex items-center gap-2 rounded-lg bg-accent px-4 py-2 text-sm font-medium text-accent-fg transition hover:bg-accent-hover disabled:cursor-not-allowed disabled:opacity-50"
           >
             <Save size={16} />
             {saving ? 'Saving...' : 'Save Changes'}
@@ -156,42 +156,42 @@
       </div>
 
       <div class="mt-6 grid gap-4 md:grid-cols-3">
-        <div class="rounded-xl border border-slate-200 bg-slate-50 p-4">
-          <p class="text-xs font-semibold uppercase tracking-wide text-slate-500">Enabled Methods</p>
-          <p class="mt-2 text-2xl font-bold text-slate-900">{entries.filter((entry) => entry.enabled).length}</p>
+        <div class="rounded-xl border border-border bg-surface-muted p-4">
+          <p class="text-xs font-semibold uppercase tracking-wide text-fg-subtle">Enabled Methods</p>
+          <p class="mt-2 text-2xl font-bold text-fg">{entries.filter((entry) => entry.enabled).length}</p>
         </div>
-        <div class="rounded-xl border border-slate-200 bg-slate-50 p-4">
-          <p class="text-xs font-semibold uppercase tracking-wide text-slate-500">Disabled Methods</p>
-          <p class="mt-2 text-2xl font-bold text-slate-900">{entries.filter((entry) => !entry.enabled).length}</p>
+        <div class="rounded-xl border border-border bg-surface-muted p-4">
+          <p class="text-xs font-semibold uppercase tracking-wide text-fg-subtle">Disabled Methods</p>
+          <p class="mt-2 text-2xl font-bold text-fg">{entries.filter((entry) => !entry.enabled).length}</p>
         </div>
-        <div class="rounded-xl border border-slate-200 bg-slate-50 p-4">
-          <p class="text-xs font-semibold uppercase tracking-wide text-slate-500">Order Changes</p>
-          <p class="mt-2 text-2xl font-bold text-slate-900">{dirty ? 'Unsaved' : 'Saved'}</p>
+        <div class="rounded-xl border border-border bg-surface-muted p-4">
+          <p class="text-xs font-semibold uppercase tracking-wide text-fg-subtle">Order Changes</p>
+          <p class="mt-2 text-2xl font-bold text-fg">{dirty ? 'Unsaved' : 'Saved'}</p>
         </div>
       </div>
     </div>
 
     {#if error}
-      <div class="rounded-2xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700" role="alert">{error}</div>
+      <div class="rounded-2xl border border-error bg-error/10 px-4 py-3 text-sm text-error" role="alert">{error}</div>
     {/if}
 
     {#if success}
-      <div class="rounded-2xl border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm text-emerald-700">{success}</div>
+      <div class="rounded-2xl border border-success bg-success/10 px-4 py-3 text-sm text-success">{success}</div>
     {/if}
 
     {#if loading}
-      <div class="rounded-2xl border border-dashed border-slate-300 bg-white px-4 py-8 text-center text-slate-500">Loading auth methods...</div>
+      <div class="rounded-2xl border border-dashed border-border-strong bg-surface px-4 py-8 text-center text-fg-subtle">Loading auth methods...</div>
     {:else}
-      <div class="rounded-2xl border border-slate-200 bg-white shadow-sm">
-        <div class="border-b border-slate-200 px-5 py-4">
-          <h2 class="text-sm font-semibold uppercase tracking-wide text-slate-500">Priority Order</h2>
-          <p class="mt-1 text-sm text-slate-500">The top-most enabled method is attempted first.</p>
+      <div class="rounded-2xl border border-border bg-surface shadow-sm">
+        <div class="border-b border-border px-5 py-4">
+          <h2 class="text-sm font-semibold uppercase tracking-wide text-fg-subtle">Priority Order</h2>
+          <p class="mt-1 text-sm text-fg-subtle">The top-most enabled method is attempted first.</p>
         </div>
 
-        <div class="divide-y divide-slate-100" role="list">
+        <div class="divide-y divide-border" role="list">
           {#each entries as entry, index}
             <div
-              class={`flex flex-col gap-4 p-5 transition ${dragIndex === index ? 'bg-blue-50/50' : ''}`}
+              class={`flex flex-col gap-4 p-5 transition ${dragIndex === index ? 'bg-accent-subtle' : ''}`}
               role="listitem"
               draggable="true"
               on:dragstart={() => onDragStart(index)}
@@ -200,18 +200,18 @@
             >
               <div class="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
                 <div class="flex items-start gap-4">
-                  <div class="flex items-center gap-2 rounded-xl border border-slate-200 bg-slate-50 px-3 py-2 text-slate-500">
+                  <div class="flex items-center gap-2 rounded-xl border border-border bg-surface-muted px-3 py-2 text-fg-subtle">
                     <GripVertical size={18} />
                     <span class="text-xs font-medium uppercase tracking-wide">{entry.priority}</span>
                   </div>
                   <div>
                     <div class="flex flex-wrap items-center gap-2">
-                      <p class="font-medium text-slate-900">{entry.method}</p>
-                      <span class="rounded-full bg-slate-100 px-2.5 py-1 text-[11px] font-semibold uppercase tracking-wide text-slate-600">
+                      <p class="font-medium text-fg">{entry.method}</p>
+                      <span class="rounded-full bg-surface-muted px-2.5 py-1 text-[11px] font-semibold uppercase tracking-wide text-fg-muted">
                         {entry.enabled ? 'Enabled' : 'Disabled'}
                       </span>
                     </div>
-                    <p class="mt-1 text-sm text-slate-500">{methodDescriptions[entry.method] || 'Custom or unsupported authentication method.'}</p>
+                    <p class="mt-1 text-sm text-fg-subtle">{methodDescriptions[entry.method] || 'Custom or unsupported authentication method.'}</p>
                   </div>
                 </div>
 
@@ -219,7 +219,7 @@
                   <button
                     type="button"
                     on:click={() => toggleEnabled(index)}
-                    class="inline-flex items-center gap-2 rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm font-medium text-slate-700 transition hover:bg-slate-50"
+                    class="inline-flex items-center gap-2 rounded-lg border border-border-strong bg-surface px-3 py-2 text-sm font-medium text-fg-muted transition hover:bg-surface-muted"
                   >
                     {#if entry.enabled}
                       <ToggleRight size={16} /> Disable
@@ -231,7 +231,7 @@
                     type="button"
                     on:click={() => moveUp(index)}
                     disabled={index === 0}
-                    class="inline-flex items-center gap-2 rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm font-medium text-slate-700 transition hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-50"
+                    class="inline-flex items-center gap-2 rounded-lg border border-border-strong bg-surface px-3 py-2 text-sm font-medium text-fg-muted transition hover:bg-surface-muted disabled:cursor-not-allowed disabled:opacity-50"
                   >
                     <ArrowUp size={16} /> Up
                   </button>
@@ -239,7 +239,7 @@
                     type="button"
                     on:click={() => moveDown(index)}
                     disabled={index === entries.length - 1}
-                    class="inline-flex items-center gap-2 rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm font-medium text-slate-700 transition hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-50"
+                    class="inline-flex items-center gap-2 rounded-lg border border-border-strong bg-surface px-3 py-2 text-sm font-medium text-fg-muted transition hover:bg-surface-muted disabled:cursor-not-allowed disabled:opacity-50"
                   >
                     <ArrowDown size={16} /> Down
                   </button>
@@ -250,8 +250,8 @@
         </div>
       </div>
 
-      <div class="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
-        <p class="text-sm text-slate-500">
+      <div class="rounded-2xl border border-border bg-surface p-5 shadow-sm">
+        <p class="text-sm text-fg-subtle">
           Drag and drop rows to reorder them, then save to update the backend priority list. Disabled methods remain in the list but will not be attempted.
         </p>
       </div>

@@ -96,25 +96,25 @@
         event.preventDefault();
         goto('/');
       }}
-      class="inline-flex items-center gap-2 text-sm text-slate-600 transition hover:text-slate-900"
+      class="inline-flex items-center gap-2 text-sm text-fg-muted transition hover:text-fg"
     >
       <ArrowLeft size={16} /> Back to Servers
     </a>
   </div>
 
   <div class="mb-6">
-    <h1 class="text-2xl font-bold tracking-tight text-slate-900">Compare Servers</h1>
-    <p class="mt-1 text-sm text-slate-500">Check compatibility before planning a migration.</p>
+    <h1 class="text-2xl font-bold tracking-tight text-fg">Compare Servers</h1>
+    <p class="mt-1 text-sm text-fg-subtle">Check compatibility before planning a migration.</p>
   </div>
 
   <Card padding="lg">
     <div class="grid gap-4 md:grid-cols-2">
       <div>
-        <label class="mb-2 block text-sm font-medium text-slate-700" for="source-server">Source server</label>
+        <label class="mb-2 block text-sm font-medium text-fg-muted" for="source-server">Source server</label>
         <select
           id="source-server"
           bind:value={sourceID}
-          class="w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm text-slate-900 shadow-sm outline-none transition focus:border-blue-500 focus:ring-2 focus:ring-blue-100"
+          class="w-full rounded-lg border border-border-strong bg-surface px-3 py-2 text-sm text-fg shadow-sm outline-none transition focus:border-accent focus:ring-2 focus:ring-accent-subtle"
         >
           <option value="">Select a source server</option>
           {#each servers as server}
@@ -124,11 +124,11 @@
       </div>
 
       <div>
-        <label class="mb-2 block text-sm font-medium text-slate-700" for="target-server">Target server</label>
+        <label class="mb-2 block text-sm font-medium text-fg-muted" for="target-server">Target server</label>
         <select
           id="target-server"
           bind:value={targetID}
-          class="w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm text-slate-900 shadow-sm outline-none transition focus:border-blue-500 focus:ring-2 focus:ring-blue-100"
+          class="w-full rounded-lg border border-border-strong bg-surface px-3 py-2 text-sm text-fg shadow-sm outline-none transition focus:border-accent focus:ring-2 focus:ring-accent-subtle"
         >
           <option value="">Select a target server</option>
           {#each servers as server}
@@ -139,16 +139,16 @@
     </div>
 
     <div class="mt-4 flex flex-wrap items-center justify-between gap-3">
-      <div class="text-sm text-slate-500">
+      <div class="text-sm text-fg-subtle">
         {#if sourceServer || targetServer}
           {#if sourceServer}
-            <span class="font-medium text-slate-700">Source:</span> {sourceServer.name}
+            <span class="font-medium text-fg-muted">Source:</span> {sourceServer.name}
           {/if}
           {#if sourceServer && targetServer}
-            <span class="mx-2 text-slate-300">•</span>
+            <span class="mx-2 text-fg-subtle">•</span>
           {/if}
           {#if targetServer}
-            <span class="font-medium text-slate-700">Target:</span> {targetServer.name}
+            <span class="font-medium text-fg-muted">Target:</span> {targetServer.name}
           {/if}
         {:else if serversLoading}
           Loading available servers...
@@ -161,7 +161,7 @@
         type="button"
         onclick={checkCompatibility}
         disabled={!canCheck}
-        class="inline-flex items-center justify-center gap-2 rounded-lg bg-blue-600 px-4 py-2 text-sm font-medium text-white transition hover:bg-blue-700 disabled:cursor-not-allowed disabled:opacity-50"
+        class="inline-flex items-center justify-center gap-2 rounded-lg bg-accent px-4 py-2 text-sm font-medium text-accent-fg transition hover:bg-accent-hover disabled:cursor-not-allowed disabled:opacity-50"
       >
         {#if checking}
           <Spinner size="sm" label="Checking compatibility" />
@@ -174,19 +174,19 @@
   </Card>
 
   {#if compareError}
-    <div class="mt-4 rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700" role="alert">
-      <p class="font-semibold text-red-900">Compatibility check failed</p>
+    <div class="mt-4 rounded-xl border border-error bg-error/10 px-4 py-3 text-sm text-error" role="alert">
+      <p class="font-semibold text-error">Compatibility check failed</p>
       <p class="mt-1">{compareError}</p>
     </div>
   {/if}
 
   {#if checking}
     <Card padding="lg">
-      <div class="flex items-center gap-3 text-slate-600">
+      <div class="flex items-center gap-3 text-fg-muted">
         <Spinner size="md" label="Loading compatibility report" />
         <div>
-          <p class="font-medium text-slate-900">Checking compatibility...</p>
-          <p class="text-sm text-slate-500">Analyzing source and target snapshots.</p>
+          <p class="font-medium text-fg">Checking compatibility...</p>
+          <p class="text-sm text-fg-subtle">Analyzing source and target snapshots.</p>
         </div>
       </div>
     </Card>
@@ -194,11 +194,11 @@
 
   {#if report}
     <section class="mt-6 space-y-4">
-      <div class={`rounded-2xl border p-5 shadow-sm ${report.compatible ? 'border-green-200 bg-green-50' : 'border-red-200 bg-red-50'}`}>
-        <p class={`text-lg font-semibold ${report.compatible ? 'text-green-900' : 'text-red-900'}`}>
+      <div class={`rounded-2xl border p-5 shadow-sm ${report.compatible ? 'border-success bg-success/15' : 'border-error bg-error/15'}`}>
+        <p class={`text-lg font-semibold ${report.compatible ? 'text-success' : 'text-error'}`}>
           {report.compatible ? 'Compatible ✓' : 'Not Compatible ✗'}
         </p>
-        <p class={`mt-1 text-sm ${report.compatible ? 'text-green-700' : 'text-red-700'}`}>
+        <p class={`mt-1 text-sm ${report.compatible ? 'text-success' : 'text-error'}`}>
           {report.compatible
             ? 'The selected servers appear ready for migration.'
             : 'One or more blockers must be resolved before migration can continue.'}
@@ -207,20 +207,20 @@
 
       <div class="grid gap-4">
         <section>
-          <h2 class="mb-3 text-sm font-semibold uppercase tracking-wide text-red-600">Blockers</h2>
+          <h2 class="mb-3 text-sm font-semibold uppercase tracking-wide text-error">Blockers</h2>
           {#if report.blockers.length}
             <div class="space-y-3">
               {#each report.blockers as blocker}
                 <Card padding="md">
                   <div class="flex gap-3">
-                    <div class="mt-0.5 flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-red-100 text-red-700">
+                    <div class="mt-0.5 flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-error/15 text-error">
                       ✗
                     </div>
                     <div>
                       <div class="flex flex-wrap items-center gap-2">
                         <Badge variant="error">{blocker.category}</Badge>
                       </div>
-                      <p class="mt-2 text-sm text-slate-700">{blocker.message}</p>
+                      <p class="mt-2 text-sm text-fg-muted">{blocker.message}</p>
                     </div>
                   </div>
                 </Card>
@@ -232,18 +232,18 @@
         </section>
 
         <section>
-          <h2 class="mb-3 text-sm font-semibold uppercase tracking-wide text-yellow-700">Warnings</h2>
+          <h2 class="mb-3 text-sm font-semibold uppercase tracking-wide text-warning">Warnings</h2>
           {#if report.warnings.length}
             <div class="space-y-3">
               {#each report.warnings as warning}
                 <Card padding="md">
                   <div class="flex gap-3">
-                    <div class="mt-0.5 flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-yellow-100 text-yellow-700">
+                    <div class="mt-0.5 flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-warning/15 text-warning">
                       ⚠
                     </div>
                     <div>
                       <Badge variant="warning">{warning.category}</Badge>
-                      <p class="mt-2 text-sm text-slate-700">{warning.message}</p>
+                      <p class="mt-2 text-sm text-fg-muted">{warning.message}</p>
                     </div>
                   </div>
                 </Card>
@@ -261,7 +261,7 @@
           <button
             type="button"
             onclick={navigateToPlan}
-            class="inline-flex items-center justify-center rounded-lg bg-blue-600 px-4 py-2 text-sm font-medium text-white transition hover:bg-blue-700"
+            class="inline-flex items-center justify-center rounded-lg bg-accent px-4 py-2 text-sm font-medium text-accent-fg transition hover:bg-accent-hover"
           >
             Create Migration Plan
           </button>

@@ -265,7 +265,7 @@
 <div class="p-4 sm:p-6 max-w-7xl mx-auto">
   <PageHeader title="Alerts" subtitle="Infrastructure alerts derived from server snapshots, jobs, and migrations.">
     {#snippet actions()}
-      <button type="button" onclick={loadAll} disabled={loading} class="inline-flex items-center gap-2 rounded-lg border border-slate-300 bg-white px-4 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50 disabled:opacity-60">
+      <button type="button" onclick={loadAll} disabled={loading} class="inline-flex items-center gap-2 rounded-lg border border-border-strong bg-surface px-4 py-2 text-sm font-medium text-fg-muted hover:bg-surface-muted disabled:opacity-60">
         {#if loading}<Spinner size="sm" label="Refreshing" />{:else}<RefreshCw size={16} />{/if}
         Refresh
       </button>
@@ -276,28 +276,28 @@
   <div class="mb-6 grid gap-4 sm:grid-cols-3">
     <Card padding="lg">
       <div class="flex items-center gap-3">
-        <div class="flex h-10 w-10 items-center justify-center rounded-lg bg-red-50 text-red-600"><AlertCircle size={20} /></div>
+        <div class="flex h-10 w-10 items-center justify-center rounded-lg bg-error/15 text-error"><AlertCircle size={20} /></div>
         <div>
-          <p class="text-2xl font-bold text-slate-900">{alertStats.critical}</p>
-          <p class="text-xs text-slate-500">Critical</p>
+          <p class="text-2xl font-bold text-fg">{alertStats.critical}</p>
+          <p class="text-xs text-fg-subtle">Critical</p>
         </div>
       </div>
     </Card>
     <Card padding="lg">
       <div class="flex items-center gap-3">
-        <div class="flex h-10 w-10 items-center justify-center rounded-lg bg-yellow-50 text-yellow-600"><AlertTriangle size={20} /></div>
+        <div class="flex h-10 w-10 items-center justify-center rounded-lg bg-warning/15 text-warning"><AlertTriangle size={20} /></div>
         <div>
-          <p class="text-2xl font-bold text-slate-900">{alertStats.warning}</p>
-          <p class="text-xs text-slate-500">Warnings</p>
+          <p class="text-2xl font-bold text-fg">{alertStats.warning}</p>
+          <p class="text-xs text-fg-subtle">Warnings</p>
         </div>
       </div>
     </Card>
     <Card padding="lg">
       <div class="flex items-center gap-3">
-        <div class="flex h-10 w-10 items-center justify-center rounded-lg bg-green-50 text-green-600"><CheckCircle2 size={20} /></div>
+        <div class="flex h-10 w-10 items-center justify-center rounded-lg bg-success/15 text-success"><CheckCircle2 size={20} /></div>
         <div>
-          <p class="text-2xl font-bold text-slate-900">{alertStats.total === 0 ? 'All Clear' : alertStats.total}</p>
-          <p class="text-xs text-slate-500">{alertStats.total === 0 ? 'No alerts' : 'Total Alerts'}</p>
+          <p class="text-2xl font-bold text-fg">{alertStats.total === 0 ? 'All Clear' : alertStats.total}</p>
+          <p class="text-xs text-fg-subtle">{alertStats.total === 0 ? 'No alerts' : 'Total Alerts'}</p>
         </div>
       </div>
     </Card>
@@ -306,7 +306,7 @@
   <!-- Filter -->
   <div class="mb-4 flex gap-2">
     {#each ['all', 'critical', 'warning'] as sev}
-      <button type="button" onclick={() => filterSeverity = sev} class={`rounded-lg border px-4 py-2 text-sm font-medium transition ${filterSeverity === sev ? 'border-slate-300 bg-white text-slate-900 shadow-sm' : 'border-transparent text-slate-500 hover:bg-slate-50'}`}>
+      <button type="button" onclick={() => filterSeverity = sev} class={`rounded-lg border px-4 py-2 text-sm font-medium transition ${filterSeverity === sev ? 'border-border-strong bg-surface text-fg shadow-sm' : 'border-transparent text-fg-subtle hover:bg-surface-muted'}`}>
         {sev === 'all' ? 'All' : sev === 'critical' ? 'Critical' : 'Warnings'}
       </button>
     {/each}
@@ -327,19 +327,19 @@
         {@const Icon = severityIcon(alert.severity)}
         <Card padding="lg" hoverable>
           <div class="flex items-start gap-4">
-            <div class={`flex h-10 w-10 shrink-0 items-center justify-center rounded-lg ${alert.severity === 'critical' ? 'bg-red-50 text-red-600' : 'bg-yellow-50 text-yellow-600'}`}>
+            <div class={`flex h-10 w-10 shrink-0 items-center justify-center rounded-lg ${alert.severity === 'critical' ? 'bg-error/15 text-error' : 'bg-warning/15 text-warning'}`}>
               <Icon size={20} />
             </div>
             <div class="min-w-0 flex-1">
               <div class="flex items-center gap-2">
-                <h3 class="text-sm font-semibold text-slate-900">{alert.title}</h3>
+                <h3 class="text-sm font-semibold text-fg">{alert.title}</h3>
                 <Badge variant={severityVariant(alert.severity)} size="sm">{alert.severity}</Badge>
                 <Badge variant="neutral" size="sm">{alert.category}</Badge>
               </div>
-              <p class="mt-1 text-sm text-slate-600">{alert.message}</p>
-              <div class="mt-2 flex items-center gap-3 text-xs text-slate-400">
+              <p class="mt-1 text-sm text-fg-muted">{alert.message}</p>
+              <div class="mt-2 flex items-center gap-3 text-xs text-fg-subtle">
                 {#if alert.serverName}
-                  <button type="button" onclick={() => goto(`/servers/${alert.serverId}`)} class="hover:text-blue-600 hover:underline">{alert.serverName} →</button>
+                  <button type="button" onclick={() => goto(`/servers/${alert.serverId}`)} class="hover:text-accent hover:underline">{alert.serverName} →</button>
                 {/if}
                 <span>{formatRelativeTime(alert.timestamp)}</span>
               </div>

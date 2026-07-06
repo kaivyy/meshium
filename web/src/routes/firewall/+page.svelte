@@ -243,7 +243,7 @@
     {#snippet actions()}
       <button
         type="button"
-        class="inline-flex items-center gap-2 rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm font-medium text-slate-700 transition-colors hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-50"
+        class="inline-flex items-center gap-2 rounded-lg border border-border-strong bg-surface px-3 py-2 text-sm font-medium text-fg-muted transition-colors hover:bg-surface-muted disabled:cursor-not-allowed disabled:opacity-50"
         onclick={refreshFirewall}
         disabled={loading || selectedServerId === null}
       >
@@ -252,7 +252,7 @@
       </button>
       <button
         type="button"
-        class="inline-flex items-center gap-2 rounded-lg bg-blue-600 px-3 py-2 text-sm font-medium text-white transition-colors hover:bg-blue-700 disabled:cursor-not-allowed disabled:opacity-50"
+        class="inline-flex items-center gap-2 rounded-lg bg-accent px-3 py-2 text-sm font-medium text-accent-fg transition-colors hover:bg-accent-hover disabled:cursor-not-allowed disabled:opacity-50"
         onclick={openAddModal}
         disabled={!ruleSupportsEditing()}
       >
@@ -264,7 +264,7 @@
 
   {#if $serverStore.loading}
     <Card padding="lg">
-      <div class="flex items-center justify-center gap-3 py-12 text-slate-500">
+      <div class="flex items-center justify-center gap-3 py-12 text-fg-subtle">
         <Spinner size="md" label="Loading servers" />
         <span>Loading server list...</span>
       </div>
@@ -277,7 +277,7 @@
     {#snippet serversEmptyAction()}
       <a
         href="/servers"
-        class="inline-flex items-center gap-2 rounded-lg bg-blue-600 px-4 py-2 text-sm font-medium text-white transition-colors hover:bg-blue-700"
+        class="inline-flex items-center gap-2 rounded-lg bg-accent px-4 py-2 text-sm font-medium text-accent-fg transition-colors hover:bg-accent-hover"
       >
         Go to servers
       </a>
@@ -294,15 +294,15 @@
       <Card padding="lg">
         <div class="space-y-4">
           <div>
-            <h2 class="text-base font-semibold text-slate-900">Server</h2>
-            <p class="mt-1 text-sm text-slate-500">Select the server you want to inspect.</p>
+            <h2 class="text-base font-semibold text-fg">Server</h2>
+            <p class="mt-1 text-sm text-fg-subtle">Select the server you want to inspect.</p>
           </div>
 
           <div class="space-y-2">
-            <label for="firewall-server" class="text-sm font-medium text-slate-900">Remote server</label>
+            <label for="firewall-server" class="text-sm font-medium text-fg">Remote server</label>
             <select
               id="firewall-server"
-              class="w-full rounded-lg border border-slate-300 bg-white px-3 py-2.5 text-sm text-slate-900 shadow-sm outline-none transition focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20"
+              class="w-full rounded-lg border border-border-strong bg-surface px-3 py-2.5 text-sm text-fg shadow-sm outline-none transition focus:border-accent focus:ring-2 focus:ring-accent/20"
               value={selectedServerId ?? ''}
               onchange={(event) => selectServer((event.currentTarget as HTMLSelectElement).value)}
             >
@@ -313,12 +313,12 @@
           </div>
 
           {#if selectedServer}
-            <div class="rounded-xl border border-slate-200 bg-slate-50 p-4 text-sm text-slate-600">
-              <div class="flex items-center gap-2 font-medium text-slate-900">
+            <div class="rounded-xl border border-border bg-surface-muted p-4 text-sm text-fg-muted">
+              <div class="flex items-center gap-2 font-medium text-fg">
                 <Shield size={16} />
                 {selectedServer.name}
               </div>
-              <div class="mt-2 space-y-1 text-xs text-slate-500">
+              <div class="mt-2 space-y-1 text-xs text-fg-subtle">
                 <div>{selectedServer.username}@{selectedServer.host}:{selectedServer.port ?? 22}</div>
                 <div>Firewall type: {firewall?.status.type ?? 'loading...'}</div>
               </div>
@@ -326,12 +326,12 @@
           {/if}
 
           {#if isFirewalld}
-            <div class="rounded-xl border border-yellow-200 bg-yellow-50 p-4 text-sm text-yellow-800">
+            <div class="rounded-xl border border-warning/20 bg-warning/10 p-4 text-sm text-warning">
               <div class="flex items-start gap-2">
                 <AlertTriangle size={16} class="mt-0.5 shrink-0" />
                 <div>
                   <div class="font-medium">firewalld detected</div>
-                  <p class="mt-1 text-xs leading-5 text-yellow-700">
+                  <p class="mt-1 text-xs leading-5 text-warning">
                     The current UI can display the firewall state, but rule editing is limited for firewalld.
                   </p>
                 </div>
@@ -341,7 +341,7 @@
 
           <button
             type="button"
-            class={`inline-flex w-full items-center justify-center gap-2 rounded-lg px-3 py-2.5 text-sm font-medium text-white transition-colors disabled:cursor-not-allowed disabled:opacity-50 ${firewall?.status.active ? 'bg-rose-600 hover:bg-rose-700' : 'bg-emerald-600 hover:bg-emerald-700'}`}
+            class={`inline-flex w-full items-center justify-center gap-2 rounded-lg px-3 py-2.5 text-sm font-medium text-accent-fg transition-colors disabled:cursor-not-allowed disabled:opacity-50 ${firewall?.status.active ? 'bg-error hover:bg-error/90' : 'bg-success hover:bg-success/90'}`}
             onclick={toggleFirewall}
             disabled={!firewall || selectedServerId === null || firewall.status.type === 'none'}
           >
@@ -368,58 +368,58 @@
           </div>
         {:else if error}
           <Card padding="lg">
-            <div class="flex items-start gap-3 text-red-700">
+            <div class="flex items-start gap-3 text-error">
               <AlertTriangle size={18} class="mt-0.5 shrink-0" />
               <div>
                 <div class="font-semibold">Unable to load firewall</div>
-                <p class="mt-1 text-sm text-red-600">{error}</p>
+                <p class="mt-1 text-sm text-error">{error}</p>
               </div>
             </div>
           </Card>
         {:else if firewall}
           <div class="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
             <Card padding="md">
-              <div class="text-xs font-medium uppercase tracking-wide text-slate-500">Firewall type</div>
-              <div class="mt-2 text-lg font-semibold text-slate-900">{firewall.status.type}</div>
+              <div class="text-xs font-medium uppercase tracking-wide text-fg-subtle">Firewall type</div>
+              <div class="mt-2 text-lg font-semibold text-fg">{firewall.status.type}</div>
               <Badge variant={badgeVariantForStatus(firewall.status.active, firewall.status.type)}>
                 {firewall.status.active ? 'Active' : 'Inactive'}
               </Badge>
             </Card>
 
             <Card padding="md">
-              <div class="text-xs font-medium uppercase tracking-wide text-slate-500">Default policy</div>
-              <div class="mt-2 text-lg font-semibold text-slate-900">{firewall.status.default || '—'}</div>
-              <div class="mt-1 text-sm text-slate-500">Current remote policy</div>
+              <div class="text-xs font-medium uppercase tracking-wide text-fg-subtle">Default policy</div>
+              <div class="mt-2 text-lg font-semibold text-fg">{firewall.status.default || '—'}</div>
+              <div class="mt-1 text-sm text-fg-subtle">Current remote policy</div>
             </Card>
 
             <Card padding="md">
-              <div class="text-xs font-medium uppercase tracking-wide text-slate-500">Rules</div>
-              <div class="mt-2 text-lg font-semibold text-slate-900">{totalRules}</div>
-              <div class="mt-1 text-sm text-slate-500">IPv4 and IPv6 combined</div>
+              <div class="text-xs font-medium uppercase tracking-wide text-fg-subtle">Rules</div>
+              <div class="mt-2 text-lg font-semibold text-fg">{totalRules}</div>
+              <div class="mt-1 text-sm text-fg-subtle">IPv4 and IPv6 combined</div>
             </Card>
 
             <Card padding="md">
-              <div class="text-xs font-medium uppercase tracking-wide text-slate-500">Action mix</div>
+              <div class="text-xs font-medium uppercase tracking-wide text-fg-subtle">Action mix</div>
               <div class="mt-2 flex gap-2">
                 <Badge variant="success">Allow {allowCount}</Badge>
                 <Badge variant="error">Block {blockCount}</Badge>
               </div>
-              <div class="mt-1 text-sm text-slate-500">Counted from parsed rules</div>
+              <div class="mt-1 text-sm text-fg-subtle">Counted from parsed rules</div>
             </Card>
           </div>
 
           <Card padding="lg">
             <div class="flex items-center justify-between gap-3">
               <div>
-                <h3 class="text-base font-semibold text-slate-900">Rules</h3>
-                <p class="mt-1 text-sm text-slate-500">Manage parsed firewall rules from the remote server.</p>
+                <h3 class="text-base font-semibold text-fg">Rules</h3>
+                <p class="mt-1 text-sm text-fg-subtle">Manage parsed firewall rules from the remote server.</p>
               </div>
               <Badge variant="info">IPv6: {ipv6Rules.length}</Badge>
             </div>
 
-            <div class="mt-5 overflow-x-auto rounded-xl border border-slate-200">
-              <table class="min-w-full divide-y divide-slate-200 text-sm">
-                <thead class="bg-slate-50 text-slate-600">
+            <div class="mt-5 overflow-x-auto rounded-xl border border-border">
+              <table class="min-w-full divide-y divide-border text-sm">
+                <thead class="bg-surface-muted text-fg-muted">
                   <tr>
                     <th class="px-4 py-3 text-left font-medium">Action</th>
                     <th class="px-4 py-3 text-left font-medium">Port</th>
@@ -430,10 +430,10 @@
                     <th class="px-4 py-3 text-right font-medium">Actions</th>
                   </tr>
                 </thead>
-                <tbody class="divide-y divide-slate-200 bg-white">
+                <tbody class="divide-y divide-border bg-surface">
                   {#if firewall.rules.length === 0}
                     <tr>
-                      <td colspan="7" class="px-4 py-8 text-center text-slate-500">No IPv4 rules found.</td>
+                      <td colspan="7" class="px-4 py-8 text-center text-fg-subtle">No IPv4 rules found.</td>
                     </tr>
                   {:else}
                     {#each firewall.rules as rule}
@@ -441,23 +441,23 @@
                         <td class="px-4 py-3">
                           <Badge variant={badgeVariantForAction(rule.action)}>{rule.action}</Badge>
                         </td>
-                        <td class="px-4 py-3 font-medium text-slate-900">{rule.port}</td>
-                        <td class="px-4 py-3 text-slate-600">{rule.protocol}</td>
-                        <td class="px-4 py-3 text-slate-600">{rule.source || 'any'}</td>
-                        <td class="px-4 py-3 text-slate-600">{rule.direction}</td>
-                        <td class="px-4 py-3 text-xs text-slate-500">{rule.id}</td>
+                        <td class="px-4 py-3 font-medium text-fg">{rule.port}</td>
+                        <td class="px-4 py-3 text-fg-muted">{rule.protocol}</td>
+                        <td class="px-4 py-3 text-fg-muted">{rule.source || 'any'}</td>
+                        <td class="px-4 py-3 text-fg-muted">{rule.direction}</td>
+                        <td class="px-4 py-3 text-xs text-fg-subtle">{rule.id}</td>
                         <td class="px-4 py-3 text-right">
                           {#if canEditRules}
                             <button
                               type="button"
-                              class="inline-flex items-center gap-1.5 rounded-lg border border-slate-300 bg-white px-3 py-1.5 text-xs font-medium text-slate-700 transition-colors hover:bg-slate-50"
+                              class="inline-flex items-center gap-1.5 rounded-lg border border-border-strong bg-surface px-3 py-1.5 text-xs font-medium text-fg-muted transition-colors hover:bg-surface-muted"
                               onclick={() => openDeleteConfirm(rule)}
                             >
                               <Trash2 size={14} />
                               Delete
                             </button>
                           {:else}
-                            <span class="text-xs text-slate-400">Read only</span>
+                            <span class="text-xs text-fg-subtle">Read only</span>
                           {/if}
                         </td>
                       </tr>
@@ -472,15 +472,15 @@
             <Card padding="lg">
               <div class="flex items-center justify-between gap-3">
                 <div>
-                  <h3 class="text-base font-semibold text-slate-900">IPv6 rules</h3>
-                  <p class="mt-1 text-sm text-slate-500">Additional parsed rules detected for IPv6.</p>
+                  <h3 class="text-base font-semibold text-fg">IPv6 rules</h3>
+                  <p class="mt-1 text-sm text-fg-subtle">Additional parsed rules detected for IPv6.</p>
                 </div>
                 <Badge variant="neutral">{ipv6Rules.length} rules</Badge>
               </div>
 
-              <div class="mt-5 overflow-x-auto rounded-xl border border-slate-200">
-                <table class="min-w-full divide-y divide-slate-200 text-sm">
-                  <thead class="bg-slate-50 text-slate-600">
+              <div class="mt-5 overflow-x-auto rounded-xl border border-border">
+                <table class="min-w-full divide-y divide-border text-sm">
+                  <thead class="bg-surface-muted text-fg-muted">
                     <tr>
                       <th class="px-4 py-3 text-left font-medium">Action</th>
                       <th class="px-4 py-3 text-left font-medium">Port</th>
@@ -490,17 +490,17 @@
                       <th class="px-4 py-3 text-left font-medium">ID</th>
                     </tr>
                   </thead>
-                  <tbody class="divide-y divide-slate-200 bg-white">
+                  <tbody class="divide-y divide-border bg-surface">
                     {#each ipv6Rules as rule}
                       <tr>
                         <td class="px-4 py-3">
                           <Badge variant={badgeVariantForAction(rule.action)}>{rule.action}</Badge>
                         </td>
-                        <td class="px-4 py-3 font-medium text-slate-900">{rule.port}</td>
-                        <td class="px-4 py-3 text-slate-600">{rule.protocol}</td>
-                        <td class="px-4 py-3 text-slate-600">{rule.source || 'any'}</td>
-                        <td class="px-4 py-3 text-slate-600">{rule.direction}</td>
-                        <td class="px-4 py-3 text-xs text-slate-500">{rule.id}</td>
+                        <td class="px-4 py-3 font-medium text-fg">{rule.port}</td>
+                        <td class="px-4 py-3 text-fg-muted">{rule.protocol}</td>
+                        <td class="px-4 py-3 text-fg-muted">{rule.source || 'any'}</td>
+                        <td class="px-4 py-3 text-fg-muted">{rule.direction}</td>
+                        <td class="px-4 py-3 text-xs text-fg-subtle">{rule.id}</td>
                       </tr>
                     {/each}
                   </tbody>
@@ -510,7 +510,7 @@
           {/if}
         {:else}
           <Card padding="lg">
-            <div class="flex items-center justify-center gap-3 py-12 text-slate-500">
+            <div class="flex items-center justify-center gap-3 py-12 text-fg-subtle">
               <Spinner size="md" label="Loading firewall" />
               <span>Loading firewall status...</span>
             </div>
@@ -541,12 +541,12 @@
 
 {#snippet addModalBody()}
   <div class="space-y-4">
-    <p class="text-sm text-slate-500">Create a new rule for the selected server.</p>
+    <p class="text-sm text-fg-subtle">Create a new rule for the selected server.</p>
 
     <div class="grid gap-4 sm:grid-cols-2">
-      <label class="space-y-1 text-sm font-medium text-slate-900">
+      <label class="space-y-1 text-sm font-medium text-fg">
         <span>Action</span>
-        <select bind:value={form.action} class="w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm">
+        <select bind:value={form.action} class="w-full rounded-lg border border-border-strong bg-surface px-3 py-2 text-sm text-fg">
           <option value="ALLOW">ALLOW</option>
           <option value="DENY">DENY</option>
           <option value="REJECT">REJECT</option>
@@ -554,23 +554,23 @@
         </select>
       </label>
 
-      <label class="space-y-1 text-sm font-medium text-slate-900">
+      <label class="space-y-1 text-sm font-medium text-fg">
         <span>Protocol</span>
-        <select bind:value={form.protocol} class="w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm">
+        <select bind:value={form.protocol} class="w-full rounded-lg border border-border-strong bg-surface px-3 py-2 text-sm text-fg">
           <option value="tcp">tcp</option>
           <option value="udp">udp</option>
           <option value="both">both</option>
         </select>
       </label>
 
-      <label class="space-y-1 text-sm font-medium text-slate-900">
+      <label class="space-y-1 text-sm font-medium text-fg">
         <span>Port</span>
-        <input bind:value={form.port} class="w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm" placeholder="22 or 8000:8100" />
+        <input bind:value={form.port} class="w-full rounded-lg border border-border-strong bg-surface px-3 py-2 text-sm text-fg" placeholder="22 or 8000:8100" />
       </label>
 
-      <label class="space-y-1 text-sm font-medium text-slate-900">
+      <label class="space-y-1 text-sm font-medium text-fg">
         <span>Direction</span>
-        <select bind:value={form.direction} class="w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm">
+        <select bind:value={form.direction} class="w-full rounded-lg border border-border-strong bg-surface px-3 py-2 text-sm text-fg">
           <option value="IN">IN</option>
           <option value="OUT">OUT</option>
           <option value="FORWARD">FORWARD</option>
@@ -578,11 +578,11 @@
       </label>
     </div>
 
-    <label class="block space-y-1 text-sm font-medium text-slate-900">
+    <label class="block space-y-1 text-sm font-medium text-fg">
       <span>Source</span>
       <input
         bind:value={form.source}
-        class="w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm"
+        class="w-full rounded-lg border border-border-strong bg-surface px-3 py-2 text-sm text-fg"
         placeholder="any, 10.0.0.0/8, 192.168.1.10"
       />
     </label>
@@ -593,7 +593,7 @@
   <div class="flex items-center justify-end gap-2">
     <button
       type="button"
-      class="rounded-lg border border-slate-300 bg-white px-4 py-2 text-sm font-medium text-slate-700 transition-colors hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-50"
+      class="rounded-lg border border-border-strong bg-surface px-4 py-2 text-sm font-medium text-fg-muted transition-colors hover:bg-surface-muted disabled:cursor-not-allowed disabled:opacity-50"
       onclick={closeAddModal}
       disabled={saving}
     >
@@ -601,7 +601,7 @@
     </button>
     <button
       type="button"
-      class="inline-flex items-center gap-2 rounded-lg bg-blue-600 px-4 py-2 text-sm font-medium text-white transition-colors hover:bg-blue-700 disabled:cursor-not-allowed disabled:opacity-50"
+      class="inline-flex items-center gap-2 rounded-lg bg-accent px-4 py-2 text-sm font-medium text-accent-fg transition-colors hover:bg-accent-hover disabled:cursor-not-allowed disabled:opacity-50"
       onclick={submitRule}
       disabled={saving}
     >
@@ -616,16 +616,16 @@
 {#snippet confirmModalBody()}
   <div class="space-y-4">
     {#if confirmAction?.kind === 'delete' && confirmAction.rule}
-      <div class="rounded-lg border border-red-200 bg-red-50 p-4 text-sm text-red-700">
+      <div class="rounded-lg border border-error/20 bg-error/10 p-4 text-sm text-error">
         This will remove the rule <span class="font-semibold">{selectedRuleTitle(confirmAction.rule)}</span>.
       </div>
-      <div class="text-sm text-slate-600">
-        <div><span class="font-medium text-slate-900">Source:</span> {confirmAction.rule.source || 'any'}</div>
-        <div><span class="font-medium text-slate-900">Direction:</span> {confirmAction.rule.direction}</div>
-        <div><span class="font-medium text-slate-900">ID:</span> {confirmAction.rule.id}</div>
+      <div class="text-sm text-fg-muted">
+        <div><span class="font-medium text-fg">Source:</span> {confirmAction.rule.source || 'any'}</div>
+        <div><span class="font-medium text-fg">Direction:</span> {confirmAction.rule.direction}</div>
+        <div><span class="font-medium text-fg">ID:</span> {confirmAction.rule.id}</div>
       </div>
     {:else if confirmAction?.kind === 'disable'}
-      <div class="rounded-lg border border-amber-200 bg-amber-50 p-4 text-sm text-amber-800">
+      <div class="rounded-lg border border-warning/20 bg-warning/10 p-4 text-sm text-warning">
         Disabling the firewall will remove the active protection on this server.
       </div>
     {/if}
@@ -636,7 +636,7 @@
   <div class="flex items-center justify-end gap-2">
     <button
       type="button"
-      class="rounded-lg border border-slate-300 bg-white px-4 py-2 text-sm font-medium text-slate-700 transition-colors hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-50"
+      class="rounded-lg border border-border-strong bg-surface px-4 py-2 text-sm font-medium text-fg-muted transition-colors hover:bg-surface-muted disabled:cursor-not-allowed disabled:opacity-50"
       onclick={closeConfirmModal}
       disabled={saving}
     >
@@ -644,8 +644,8 @@
     </button>
     <button
       type="button"
-      class={`inline-flex items-center gap-2 rounded-lg px-4 py-2 text-sm font-medium text-white transition-colors disabled:cursor-not-allowed disabled:opacity-50 ${
-        confirmAction?.kind === 'delete' ? 'bg-red-600 hover:bg-red-700' : 'bg-amber-600 hover:bg-amber-700'
+      class={`inline-flex items-center gap-2 rounded-lg px-4 py-2 text-sm font-medium text-accent-fg transition-colors disabled:cursor-not-allowed disabled:opacity-50 ${
+        confirmAction?.kind === 'delete' ? 'bg-error hover:bg-error/90' : 'bg-warning hover:bg-warning/90'
       }`}
       onclick={confirmAction?.kind === 'delete' ? deleteSelectedRule : disableFirewall}
       disabled={saving || confirmAction === null}

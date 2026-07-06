@@ -151,13 +151,13 @@
   }
 
   function healthClass(score: number) {
-    if (score >= 85) return 'bg-emerald-100 text-emerald-700 ring-1 ring-emerald-200';
-    if (score >= 65) return 'bg-amber-100 text-amber-700 ring-1 ring-amber-200';
-    return 'bg-rose-100 text-rose-700 ring-1 ring-rose-200';
+    if (score >= 85) return 'bg-success/15 text-success ring-1 ring-success/30';
+    if (score >= 65) return 'bg-warning/15 text-warning ring-1 ring-warning/30';
+    return 'bg-error/15 text-error ring-1 ring-error/30';
   }
 
   function booleanBadge(value: boolean) {
-    return value ? 'bg-emerald-100 text-emerald-700 ring-1 ring-emerald-200' : 'bg-slate-100 text-slate-600 ring-1 ring-slate-200';
+    return value ? 'bg-success/15 text-success ring-1 ring-success/30' : 'bg-surface-muted text-fg-muted ring-1 ring-border';
   }
 
   async function callAction<T>(method: 'POST' | 'PUT' | 'PATCH' | 'DELETE', path: string, body?: unknown) {
@@ -325,32 +325,32 @@
 
 <div class="p-6">
   <div class="mx-auto flex max-w-7xl flex-col gap-6">
-    <div class="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm">
-      <a href={server ? `/servers/${serverId}` : '/'} class="inline-flex items-center gap-2 text-sm text-slate-600 transition hover:text-slate-900">
+    <div class="rounded-2xl border border-border bg-surface p-6 shadow-sm">
+      <a href={server ? `/servers/${serverId}` : '/'} class="inline-flex items-center gap-2 text-sm text-fg-muted transition hover:text-fg">
         <ArrowLeft size={16} /> Back to Server
       </a>
 
       <div class="mt-4 flex flex-col gap-4 lg:flex-row lg:items-end lg:justify-between">
         <div>
-          <div class="inline-flex items-center gap-2 rounded-full bg-blue-50 px-3 py-1 text-xs font-medium text-blue-700">
+          <div class="inline-flex items-center gap-2 rounded-full bg-accent-subtle px-3 py-1 text-xs font-medium text-accent">
             <ShieldCheck size={14} /> Server SSH
           </div>
-          <h1 class="mt-3 text-2xl font-bold tracking-tight text-slate-900">
+          <h1 class="mt-3 text-2xl font-bold tracking-tight text-fg">
             {server?.name || `Server #${serverId}`}
           </h1>
-          <p class="mt-2 text-sm text-slate-500">
+          <p class="mt-2 text-sm text-fg-subtle">
             {server?.host}:{server?.port} · {server?.username}
           </p>
         </div>
 
         <div class="flex flex-wrap gap-3">
-          <button type="button" on:click={refreshAll} class="inline-flex items-center gap-2 rounded-lg border border-slate-300 bg-white px-4 py-2 text-sm font-medium text-slate-700 transition hover:bg-slate-50">
+          <button type="button" on:click={refreshAll} class="inline-flex items-center gap-2 rounded-lg border border-border-strong bg-surface px-4 py-2 text-sm font-medium text-fg-muted transition hover:bg-surface-muted">
             <RefreshCw size={16} /> Refresh
           </button>
-          <button type="button" on:click={() => goto('/ssh/known-hosts')} class="inline-flex items-center gap-2 rounded-lg border border-slate-300 bg-white px-4 py-2 text-sm font-medium text-slate-700 transition hover:bg-slate-50">
+          <button type="button" on:click={() => goto('/ssh/known-hosts')} class="inline-flex items-center gap-2 rounded-lg border border-border-strong bg-surface px-4 py-2 text-sm font-medium text-fg-muted transition hover:bg-surface-muted">
             <Fingerprint size={16} /> Known Hosts
           </button>
-          <button type="button" on:click={() => goto('/ssh/history')} class="inline-flex items-center gap-2 rounded-lg border border-slate-300 bg-white px-4 py-2 text-sm font-medium text-slate-700 transition hover:bg-slate-50">
+          <button type="button" on:click={() => goto('/ssh/history')} class="inline-flex items-center gap-2 rounded-lg border border-border-strong bg-surface px-4 py-2 text-sm font-medium text-fg-muted transition hover:bg-surface-muted">
             <History size={16} /> History
           </button>
         </div>
@@ -358,70 +358,70 @@
     </div>
 
     {#if error}
-      <div class="rounded-2xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700" role="alert">{error}</div>
+      <div class="rounded-2xl border border-error bg-error/10 px-4 py-3 text-sm text-error" role="alert">{error}</div>
     {/if}
 
     {#if message}
-      <div class="rounded-2xl border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm text-emerald-700">{message}</div>
+      <div class="rounded-2xl border border-success bg-success/10 px-4 py-3 text-sm text-success">{message}</div>
     {/if}
 
     {#if loading}
-      <div class="rounded-2xl border border-dashed border-slate-300 bg-white px-4 py-8 text-center text-slate-500">Loading server SSH details...</div>
+      <div class="rounded-2xl border border-dashed border-border-strong bg-surface px-4 py-8 text-center text-fg-subtle">Loading server SSH details...</div>
     {:else if !server}
-      <div class="rounded-2xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">Server not found.</div>
+      <div class="rounded-2xl border border-error bg-error/10 px-4 py-3 text-sm text-error">Server not found.</div>
     {:else}
       <section class="grid gap-4 xl:grid-cols-2">
-        <div class="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
+        <div class="rounded-2xl border border-border bg-surface p-5 shadow-sm">
           <div class="mb-4 flex items-center gap-2">
-            <FileKey size={18} class="text-slate-500" />
+            <FileKey size={18} class="text-fg-subtle" />
             <div>
-              <h2 class="text-sm font-semibold uppercase tracking-wide text-slate-500">Auth Status</h2>
-              <p class="mt-1 text-sm text-slate-500">Current credential state and fingerprint details.</p>
+              <h2 class="text-sm font-semibold uppercase tracking-wide text-fg-subtle">Auth Status</h2>
+              <p class="mt-1 text-sm text-fg-subtle">Current credential state and fingerprint details.</p>
             </div>
           </div>
 
           <div class="grid gap-3 md:grid-cols-2">
-            <div class="rounded-xl border border-slate-200 bg-slate-50 p-4">
-              <p class="text-xs font-semibold uppercase tracking-wide text-slate-500">Method</p>
-              <p class="mt-2 text-xl font-bold text-slate-900">{authStatus?.authMethod || '—'}</p>
-              <p class="mt-2 text-sm text-slate-500">Credential status: {authStatus?.credentialStatus || 'unknown'}</p>
+            <div class="rounded-xl border border-border bg-surface-muted p-4">
+              <p class="text-xs font-semibold uppercase tracking-wide text-fg-subtle">Method</p>
+              <p class="mt-2 text-xl font-bold text-fg">{authStatus?.authMethod || '—'}</p>
+              <p class="mt-2 text-sm text-fg-subtle">Credential status: {authStatus?.credentialStatus || 'unknown'}</p>
             </div>
-            <div class="rounded-xl border border-slate-200 bg-slate-50 p-4">
-              <p class="text-xs font-semibold uppercase tracking-wide text-slate-500">Fingerprint</p>
-              <p class="mt-2 break-all text-sm font-medium text-slate-900">{authStatus?.fingerprint || server.fingerprint || '—'}</p>
-              <p class="mt-2 text-sm text-slate-500">Key type: {authStatus?.keyType || server.keyType || '—'}</p>
+            <div class="rounded-xl border border-border bg-surface-muted p-4">
+              <p class="text-xs font-semibold uppercase tracking-wide text-fg-subtle">Fingerprint</p>
+              <p class="mt-2 break-all text-sm font-medium text-fg">{authStatus?.fingerprint || server.fingerprint || '—'}</p>
+              <p class="mt-2 text-sm text-fg-subtle">Key type: {authStatus?.keyType || server.keyType || '—'}</p>
             </div>
-            <div class="rounded-xl border border-slate-200 bg-slate-50 p-4">
-              <p class="text-xs font-semibold uppercase tracking-wide text-slate-500">Credential Flags</p>
+            <div class="rounded-xl border border-border bg-surface-muted p-4">
+              <p class="text-xs font-semibold uppercase tracking-wide text-fg-subtle">Credential Flags</p>
               <div class="mt-3 flex flex-wrap gap-2">
                 <span class={`rounded-full px-2.5 py-1 text-xs font-medium ${booleanBadge(!!authStatus?.hasPassword)}`}>Password {authStatus?.hasPassword ? 'Yes' : 'No'}</span>
                 <span class={`rounded-full px-2.5 py-1 text-xs font-medium ${booleanBadge(!!authStatus?.hasSSHKey)}`}>SSH Key {authStatus?.hasSSHKey ? 'Yes' : 'No'}</span>
                 <span class={`rounded-full px-2.5 py-1 text-xs font-medium ${booleanBadge(!!authStatus?.hasPassphrase)}`}>Passphrase {authStatus?.hasPassphrase ? 'Yes' : 'No'}</span>
               </div>
             </div>
-            <div class="rounded-xl border border-slate-200 bg-slate-50 p-4">
-              <p class="text-xs font-semibold uppercase tracking-wide text-slate-500">Server Stats</p>
-              <p class="mt-2 text-sm text-slate-700">Successes: {server.successCount}</p>
-              <p class="mt-1 text-sm text-slate-700">Failures: {server.failureCount}</p>
-              <p class="mt-1 text-sm text-slate-700">Last success: {formatDate(server.lastSuccess || '')}</p>
-              <p class="mt-1 text-sm text-slate-700">Last failure: {formatDate(server.lastFailure || '')}</p>
+            <div class="rounded-xl border border-border bg-surface-muted p-4">
+              <p class="text-xs font-semibold uppercase tracking-wide text-fg-subtle">Server Stats</p>
+              <p class="mt-2 text-sm text-fg-muted">Successes: {server.successCount}</p>
+              <p class="mt-1 text-sm text-fg-muted">Failures: {server.failureCount}</p>
+              <p class="mt-1 text-sm text-fg-muted">Last success: {formatDate(server.lastSuccess || '')}</p>
+              <p class="mt-1 text-sm text-fg-muted">Last failure: {formatDate(server.lastFailure || '')}</p>
             </div>
           </div>
         </div>
 
-        <div class="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
+        <div class="rounded-2xl border border-border bg-surface p-5 shadow-sm">
           <div class="mb-4 flex items-center gap-2">
-            <UserCheck size={18} class="text-slate-500" />
+            <UserCheck size={18} class="text-fg-subtle" />
             <div>
-              <h2 class="text-sm font-semibold uppercase tracking-wide text-slate-500">Credential Health</h2>
-              <p class="mt-1 text-sm text-slate-500">Calculated score and health signals.</p>
+              <h2 class="text-sm font-semibold uppercase tracking-wide text-fg-subtle">Credential Health</h2>
+              <p class="mt-1 text-sm text-fg-subtle">Calculated score and health signals.</p>
             </div>
           </div>
 
-          <div class="flex items-center justify-between gap-4 rounded-2xl border border-slate-200 bg-slate-50 p-4">
+          <div class="flex items-center justify-between gap-4 rounded-2xl border border-border bg-surface-muted p-4">
             <div>
-              <p class="text-sm text-slate-500">Health Grade</p>
-              <p class="mt-1 text-3xl font-bold text-slate-900">{healthGradeLabel(credentialHealth)}</p>
+              <p class="text-sm text-fg-subtle">Health Grade</p>
+              <p class="mt-1 text-3xl font-bold text-fg">{healthGradeLabel(credentialHealth)}</p>
             </div>
             <span class={`rounded-full px-3 py-1 text-xs font-medium ${healthClass(credentialHealth?.score || 0)}`}>
               {credentialHealth?.score ?? 0}/100
@@ -429,9 +429,9 @@
           </div>
 
           <div class="mt-4 grid gap-3 md:grid-cols-2">
-            <div class="rounded-xl border border-slate-200 bg-slate-50 p-4 text-sm text-slate-700">
-              <p class="font-medium text-slate-900">Signals</p>
-              <ul class="mt-3 space-y-2 text-sm text-slate-600">
+            <div class="rounded-xl border border-border bg-surface-muted p-4 text-sm text-fg-muted">
+              <p class="font-medium text-fg">Signals</p>
+              <ul class="mt-3 space-y-2 text-sm text-fg-muted">
                 <li>Password exists: {credentialHealth?.passwordExists ? 'Yes' : 'No'}</li>
                 <li>Key installed: {credentialHealth?.keyInstalled ? 'Yes' : 'No'}</li>
                 <li>Fingerprint verified: {credentialHealth?.fingerprintVerified ? 'Yes' : 'No'}</li>
@@ -440,9 +440,9 @@
                 <li>Recent failure: {credentialHealth?.recentFailure ? 'Yes' : 'No'}</li>
               </ul>
             </div>
-            <div class="rounded-xl border border-slate-200 bg-slate-50 p-4 text-sm text-slate-700">
-              <p class="font-medium text-slate-900">Additional Context</p>
-              <ul class="mt-3 space-y-2 text-sm text-slate-600">
+            <div class="rounded-xl border border-border bg-surface-muted p-4 text-sm text-fg-muted">
+              <p class="font-medium text-fg">Additional Context</p>
+              <ul class="mt-3 space-y-2 text-sm text-fg-muted">
                 <li>Key age: {credentialHealth?.keyAge || '—'}</li>
                 <li>Passphrase enabled: {credentialHealth?.passphraseEnabled ? 'Yes' : 'No'}</li>
                 <li>Bastion healthy: {credentialHealth?.bastionHealthy ? 'Yes' : 'No'}</li>
@@ -454,50 +454,50 @@
       </section>
 
       <section class="grid gap-4 xl:grid-cols-2">
-        <div class="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
+        <div class="rounded-2xl border border-border bg-surface p-5 shadow-sm">
           <div class="mb-4 flex items-center justify-between gap-3">
             <div>
-              <h2 class="text-sm font-semibold uppercase tracking-wide text-slate-500">Server Keys</h2>
-              <p class="mt-1 text-sm text-slate-500">Add, remove, and set the default server key.</p>
+              <h2 class="text-sm font-semibold uppercase tracking-wide text-fg-subtle">Server Keys</h2>
+              <p class="mt-1 text-sm text-fg-subtle">Add, remove, and set the default server key.</p>
             </div>
-            <button type="button" on:click={() => (showKeyForm = !showKeyForm)} class="inline-flex items-center gap-2 rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm font-medium text-slate-700 transition hover:bg-slate-50">
+            <button type="button" on:click={() => (showKeyForm = !showKeyForm)} class="inline-flex items-center gap-2 rounded-lg border border-border-strong bg-surface px-3 py-2 text-sm font-medium text-fg-muted transition hover:bg-surface-muted">
               <Plus size={16} /> {showKeyForm ? 'Hide Form' : 'Add Key'}
             </button>
           </div>
 
           {#if showKeyForm}
-            <div class="mb-5 rounded-2xl border border-slate-200 bg-slate-50 p-4">
+            <div class="mb-5 rounded-2xl border border-border bg-surface-muted p-4">
               <div class="grid gap-4 md:grid-cols-2">
                 <div>
-                  <label for="server-key-label" class="mb-1 block text-sm font-medium text-slate-700">Label *</label>
-                  <input id="server-key-label" bind:value={newKeyLabel} class="w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-slate-900 shadow-sm outline-none transition focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20" placeholder="Production deploy key" />
+                  <label for="server-key-label" class="mb-1 block text-sm font-medium text-fg-muted">Label *</label>
+                  <input id="server-key-label" bind:value={newKeyLabel} class="w-full rounded-lg border border-border-strong bg-surface px-3 py-2 text-fg shadow-sm outline-none transition focus:border-accent focus:ring-2 focus:ring-accent/20" placeholder="Production deploy key" />
                 </div>
                 <div>
-                  <label for="server-key-type" class="mb-1 block text-sm font-medium text-slate-700">Key Type</label>
-                  <select id="server-key-type" bind:value={newKeyType} class="w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-slate-900 shadow-sm outline-none transition focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20">
+                  <label for="server-key-type" class="mb-1 block text-sm font-medium text-fg-muted">Key Type</label>
+                  <select id="server-key-type" bind:value={newKeyType} class="w-full rounded-lg border border-border-strong bg-surface px-3 py-2 text-fg shadow-sm outline-none transition focus:border-accent focus:ring-2 focus:ring-accent/20">
                     <option value="ed25519">ed25519</option>
                     <option value="rsa">rsa</option>
                     <option value="ecdsa">ecdsa</option>
                   </select>
                 </div>
                 <div class="md:col-span-2">
-                  <label for="server-private-key" class="mb-1 block text-sm font-medium text-slate-700">Private Key *</label>
-                  <textarea id="server-private-key" bind:value={newPrivateKey} rows="6" class="w-full rounded-lg border border-slate-300 bg-white px-3 py-2 font-mono text-sm text-slate-900 shadow-sm outline-none transition focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20" placeholder="-----BEGIN OPENSSH PRIVATE KEY-----"></textarea>
+                  <label for="server-private-key" class="mb-1 block text-sm font-medium text-fg-muted">Private Key *</label>
+                  <textarea id="server-private-key" bind:value={newPrivateKey} rows="6" class="w-full rounded-lg border border-border-strong bg-surface px-3 py-2 font-mono text-sm text-fg shadow-sm outline-none transition focus:border-accent focus:ring-2 focus:ring-accent/20" placeholder="-----BEGIN OPENSSH PRIVATE KEY-----"></textarea>
                 </div>
                 <div>
-                  <label for="server-key-passphrase" class="mb-1 block text-sm font-medium text-slate-700">Passphrase</label>
-                  <input id="server-key-passphrase" type="password" bind:value={newPassphrase} class="w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-slate-900 shadow-sm outline-none transition focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20" placeholder="Optional passphrase" />
+                  <label for="server-key-passphrase" class="mb-1 block text-sm font-medium text-fg-muted">Passphrase</label>
+                  <input id="server-key-passphrase" type="password" bind:value={newPassphrase} class="w-full rounded-lg border border-border-strong bg-surface px-3 py-2 text-fg shadow-sm outline-none transition focus:border-accent focus:ring-2 focus:ring-accent/20" placeholder="Optional passphrase" />
                 </div>
                 <div>
-                  <label for="server-key-notes" class="mb-1 block text-sm font-medium text-slate-700">Notes</label>
-                  <input id="server-key-notes" bind:value={newNotes} class="w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-slate-900 shadow-sm outline-none transition focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20" placeholder="Who uses this key" />
+                  <label for="server-key-notes" class="mb-1 block text-sm font-medium text-fg-muted">Notes</label>
+                  <input id="server-key-notes" bind:value={newNotes} class="w-full rounded-lg border border-border-strong bg-surface px-3 py-2 text-fg shadow-sm outline-none transition focus:border-accent focus:ring-2 focus:ring-accent/20" placeholder="Who uses this key" />
                 </div>
               </div>
               <div class="mt-4 flex flex-wrap gap-3">
-                <button type="button" on:click={addServerKey} disabled={loadingAction === `/servers/${serverId}/keys`} class="inline-flex items-center gap-2 rounded-lg bg-blue-600 px-4 py-2 text-sm font-medium text-white transition hover:bg-blue-700 disabled:cursor-not-allowed disabled:opacity-50">
+                <button type="button" on:click={addServerKey} disabled={loadingAction === `/servers/${serverId}/keys`} class="inline-flex items-center gap-2 rounded-lg bg-accent px-4 py-2 text-sm font-medium text-accent-fg transition hover:bg-accent-hover disabled:cursor-not-allowed disabled:opacity-50">
                   <Upload size={16} /> Add Key
                 </button>
-                <button type="button" on:click={() => (showKeyForm = false)} class="inline-flex items-center gap-2 rounded-lg border border-slate-300 bg-white px-4 py-2 text-sm font-medium text-slate-700 transition hover:bg-slate-50">
+                <button type="button" on:click={() => (showKeyForm = false)} class="inline-flex items-center gap-2 rounded-lg border border-border-strong bg-surface px-4 py-2 text-sm font-medium text-fg-muted transition hover:bg-surface-muted">
                   Cancel
                 </button>
               </div>
@@ -505,34 +505,34 @@
           {/if}
 
           {#if serverKeys.length === 0}
-            <div class="rounded-2xl border border-dashed border-slate-300 bg-slate-50 px-4 py-8 text-center text-slate-500">No server keys stored yet.</div>
+            <div class="rounded-2xl border border-dashed border-border-strong bg-surface-muted px-4 py-8 text-center text-fg-subtle">No server keys stored yet.</div>
           {:else}
             <div class="space-y-3">
               {#each serverKeys as key}
-                <div class="rounded-2xl border border-slate-200 bg-slate-50 p-4">
+                <div class="rounded-2xl border border-border bg-surface-muted p-4">
                   <div class="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
                     <div>
                       <div class="flex flex-wrap items-center gap-2">
-                        <p class="font-medium text-slate-900">{key.label}</p>
+                        <p class="font-medium text-fg">{key.label}</p>
                         {#if key.isDefault}
-                          <span class="rounded-full bg-blue-100 px-2.5 py-1 text-[11px] font-semibold uppercase tracking-wide text-blue-700">Default</span>
+                          <span class="rounded-full bg-accent-subtle px-2.5 py-1 text-[11px] font-semibold uppercase tracking-wide text-accent">Default</span>
                         {/if}
-                        <span class="rounded-full bg-slate-100 px-2.5 py-1 text-[11px] font-semibold uppercase tracking-wide text-slate-600">{key.keyType}</span>
-                        <span class={`rounded-full px-2.5 py-1 text-[11px] font-semibold uppercase tracking-wide ${key.enabled ? 'bg-emerald-100 text-emerald-700' : 'bg-rose-100 text-rose-700'}`}>{key.enabled ? 'Enabled' : 'Disabled'}</span>
+                        <span class="rounded-full bg-surface-muted px-2.5 py-1 text-[11px] font-semibold uppercase tracking-wide text-fg-muted">{key.keyType}</span>
+                        <span class={`rounded-full px-2.5 py-1 text-[11px] font-semibold uppercase tracking-wide ${key.enabled ? 'bg-success/15 text-success' : 'bg-error/15 text-error'}`}>{key.enabled ? 'Enabled' : 'Disabled'}</span>
                       </div>
-                      <p class="mt-2 break-all font-mono text-xs text-slate-500">{key.fingerprint || 'No fingerprint stored'}</p>
+                      <p class="mt-2 break-all font-mono text-xs text-fg-subtle">{key.fingerprint || 'No fingerprint stored'}</p>
                       {#if key.notes}
-                        <p class="mt-2 text-sm text-slate-600">{key.notes}</p>
+                        <p class="mt-2 text-sm text-fg-muted">{key.notes}</p>
                       {/if}
-                      <div class="mt-2 text-xs text-slate-500">
+                      <div class="mt-2 text-xs text-fg-subtle">
                         Priority {key.priority} · Last used {formatDate(key.lastUsed)} · Updated {formatDate(key.updatedAt)}
                       </div>
                     </div>
                     <div class="flex flex-wrap gap-2">
-                      <button type="button" on:click={() => setDefaultServerKey(key)} disabled={key.isDefault} class="inline-flex items-center gap-2 rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm font-medium text-slate-700 transition hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-50">
+                      <button type="button" on:click={() => setDefaultServerKey(key)} disabled={key.isDefault} class="inline-flex items-center gap-2 rounded-lg border border-border-strong bg-surface px-3 py-2 text-sm font-medium text-fg-muted transition hover:bg-surface-muted disabled:cursor-not-allowed disabled:opacity-50">
                         <KeyRound size={16} /> Set Default
                       </button>
-                      <button type="button" on:click={() => removeServerKey(key)} class="inline-flex items-center gap-2 rounded-lg border border-red-200 bg-white px-3 py-2 text-sm font-medium text-red-600 transition hover:bg-red-50">
+                      <button type="button" on:click={() => removeServerKey(key)} class="inline-flex items-center gap-2 rounded-lg border border-error bg-surface px-3 py-2 text-sm font-medium text-error transition hover:bg-error/10">
                         <Trash2 size={16} /> Remove
                       </button>
                     </div>
@@ -544,109 +544,109 @@
         </div>
 
         <div class="space-y-4">
-          <div class="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
+          <div class="rounded-2xl border border-border bg-surface p-5 shadow-sm">
             <div class="mb-4 flex items-center gap-2">
-              <PlugZap size={18} class="text-slate-500" />
+              <PlugZap size={18} class="text-fg-subtle" />
               <div>
-                <h2 class="text-sm font-semibold uppercase tracking-wide text-slate-500">Actions</h2>
-                <p class="mt-1 text-sm text-slate-500">Run SSH operations against this server.</p>
+                <h2 class="text-sm font-semibold uppercase tracking-wide text-fg-subtle">Actions</h2>
+                <p class="mt-1 text-sm text-fg-subtle">Run SSH operations against this server.</p>
               </div>
             </div>
 
             <div class="grid gap-3 sm:grid-cols-2">
-              <button type="button" on:click={installKey} class="inline-flex items-center justify-center gap-2 rounded-lg border border-slate-300 bg-white px-4 py-2 text-sm font-medium text-slate-700 transition hover:bg-slate-50"><Upload size={16} /> Install Key</button>
-              <button type="button" on:click={verifyKey} class="inline-flex items-center justify-center gap-2 rounded-lg border border-slate-300 bg-white px-4 py-2 text-sm font-medium text-slate-700 transition hover:bg-slate-50"><ShieldCheck size={16} /> Verify Key</button>
-              <button type="button" on:click={rotateKey} class="inline-flex items-center justify-center gap-2 rounded-lg border border-slate-300 bg-white px-4 py-2 text-sm font-medium text-slate-700 transition hover:bg-slate-50"><RotateCw size={16} /> Rotate Key</button>
-              <button type="button" on:click={testAuth} class="inline-flex items-center justify-center gap-2 rounded-lg border border-slate-300 bg-white px-4 py-2 text-sm font-medium text-slate-700 transition hover:bg-slate-50"><TestTube2 size={16} /> Test Auth</button>
-              <button type="button" on:click={removePassword} class="inline-flex items-center justify-center gap-2 rounded-lg border border-red-200 bg-white px-4 py-2 text-sm font-medium text-red-600 transition hover:bg-red-50"><Trash2 size={16} /> Remove Password</button>
-              <button type="button" on:click={clearKey} class="inline-flex items-center justify-center gap-2 rounded-lg border border-red-200 bg-white px-4 py-2 text-sm font-medium text-red-600 transition hover:bg-red-50"><FileKey size={16} /> Clear Key</button>
+              <button type="button" on:click={installKey} class="inline-flex items-center justify-center gap-2 rounded-lg border border-border-strong bg-surface px-4 py-2 text-sm font-medium text-fg-muted transition hover:bg-surface-muted"><Upload size={16} /> Install Key</button>
+              <button type="button" on:click={verifyKey} class="inline-flex items-center justify-center gap-2 rounded-lg border border-border-strong bg-surface px-4 py-2 text-sm font-medium text-fg-muted transition hover:bg-surface-muted"><ShieldCheck size={16} /> Verify Key</button>
+              <button type="button" on:click={rotateKey} class="inline-flex items-center justify-center gap-2 rounded-lg border border-border-strong bg-surface px-4 py-2 text-sm font-medium text-fg-muted transition hover:bg-surface-muted"><RotateCw size={16} /> Rotate Key</button>
+              <button type="button" on:click={testAuth} class="inline-flex items-center justify-center gap-2 rounded-lg border border-border-strong bg-surface px-4 py-2 text-sm font-medium text-fg-muted transition hover:bg-surface-muted"><TestTube2 size={16} /> Test Auth</button>
+              <button type="button" on:click={removePassword} class="inline-flex items-center justify-center gap-2 rounded-lg border border-error bg-surface px-4 py-2 text-sm font-medium text-error transition hover:bg-error/10"><Trash2 size={16} /> Remove Password</button>
+              <button type="button" on:click={clearKey} class="inline-flex items-center justify-center gap-2 rounded-lg border border-error bg-surface px-4 py-2 text-sm font-medium text-error transition hover:bg-error/10"><FileKey size={16} /> Clear Key</button>
             </div>
           </div>
 
-          <div class="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
+          <div class="rounded-2xl border border-border bg-surface p-5 shadow-sm">
             <div class="mb-4 flex items-center gap-2">
-              <Settings2 size={18} class="text-slate-500" />
+              <Settings2 size={18} class="text-fg-subtle" />
               <div>
-                <h2 class="text-sm font-semibold uppercase tracking-wide text-slate-500">Retry Config</h2>
-                <p class="mt-1 text-sm text-slate-500">Adjust retry behavior and auth fallback order.</p>
+                <h2 class="text-sm font-semibold uppercase tracking-wide text-fg-subtle">Retry Config</h2>
+                <p class="mt-1 text-sm text-fg-subtle">Adjust retry behavior and auth fallback order.</p>
               </div>
             </div>
 
             <div class="grid gap-4 md:grid-cols-2">
               <div>
-                <label for="server-retry-count" class="mb-1 block text-sm font-medium text-slate-700">Retry Count</label>
-                <input id="server-retry-count" type="number" bind:value={retryCount} min="0" class="w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-slate-900 shadow-sm outline-none transition focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20" />
+                <label for="server-retry-count" class="mb-1 block text-sm font-medium text-fg-muted">Retry Count</label>
+                <input id="server-retry-count" type="number" bind:value={retryCount} min="0" class="w-full rounded-lg border border-border-strong bg-surface px-3 py-2 text-fg shadow-sm outline-none transition focus:border-accent focus:ring-2 focus:ring-accent/20" />
               </div>
               <div>
-                <label for="server-retry-delay" class="mb-1 block text-sm font-medium text-slate-700">Retry Delay (ms)</label>
-                <input id="server-retry-delay" type="number" bind:value={retryDelayMs} min="0" class="w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-slate-900 shadow-sm outline-none transition focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20" />
+                <label for="server-retry-delay" class="mb-1 block text-sm font-medium text-fg-muted">Retry Delay (ms)</label>
+                <input id="server-retry-delay" type="number" bind:value={retryDelayMs} min="0" class="w-full rounded-lg border border-border-strong bg-surface px-3 py-2 text-fg shadow-sm outline-none transition focus:border-accent focus:ring-2 focus:ring-accent/20" />
               </div>
               <div>
-                <label for="server-backoff-strategy" class="mb-1 block text-sm font-medium text-slate-700">Backoff Strategy</label>
-                <select id="server-backoff-strategy" bind:value={backoffStrategy} class="w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-slate-900 shadow-sm outline-none transition focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20">
+                <label for="server-backoff-strategy" class="mb-1 block text-sm font-medium text-fg-muted">Backoff Strategy</label>
+                <select id="server-backoff-strategy" bind:value={backoffStrategy} class="w-full rounded-lg border border-border-strong bg-surface px-3 py-2 text-fg shadow-sm outline-none transition focus:border-accent focus:ring-2 focus:ring-accent/20">
                   <option value="exponential">Exponential</option>
                   <option value="linear">Linear</option>
                   <option value="fixed">Fixed</option>
                 </select>
               </div>
               <div>
-                <label for="server-jitter" class="mb-1 block text-sm font-medium text-slate-700">Jitter (ms)</label>
-                <input id="server-jitter" type="number" bind:value={jitterMs} min="0" class="w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-slate-900 shadow-sm outline-none transition focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20" />
+                <label for="server-jitter" class="mb-1 block text-sm font-medium text-fg-muted">Jitter (ms)</label>
+                <input id="server-jitter" type="number" bind:value={jitterMs} min="0" class="w-full rounded-lg border border-border-strong bg-surface px-3 py-2 text-fg shadow-sm outline-none transition focus:border-accent focus:ring-2 focus:ring-accent/20" />
               </div>
               <div class="md:col-span-2">
-                <label for="server-reconnect-policy" class="mb-1 block text-sm font-medium text-slate-700">Reconnect Policy</label>
-                <select id="server-reconnect-policy" bind:value={reconnectPolicy} class="w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-slate-900 shadow-sm outline-none transition focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20">
+                <label for="server-reconnect-policy" class="mb-1 block text-sm font-medium text-fg-muted">Reconnect Policy</label>
+                <select id="server-reconnect-policy" bind:value={reconnectPolicy} class="w-full rounded-lg border border-border-strong bg-surface px-3 py-2 text-fg shadow-sm outline-none transition focus:border-accent focus:ring-2 focus:ring-accent/20">
                   <option value="always">Always</option>
                   <option value="on-failure">On failure</option>
                   <option value="never">Never</option>
                 </select>
               </div>
               <div class="md:col-span-2">
-                <label for="server-auth-retry-order" class="mb-1 block text-sm font-medium text-slate-700">Auth Retry Order</label>
-                <input id="server-auth-retry-order" bind:value={authRetryOrder} class="w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-slate-900 shadow-sm outline-none transition focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20" placeholder="agent,ed25519,rsa,password" />
+                <label for="server-auth-retry-order" class="mb-1 block text-sm font-medium text-fg-muted">Auth Retry Order</label>
+                <input id="server-auth-retry-order" bind:value={authRetryOrder} class="w-full rounded-lg border border-border-strong bg-surface px-3 py-2 text-fg shadow-sm outline-none transition focus:border-accent focus:ring-2 focus:ring-accent/20" placeholder="agent,ed25519,rsa,password" />
               </div>
             </div>
 
             <div class="mt-4 flex flex-wrap gap-3">
-              <button type="button" on:click={saveRetryConfig} class="inline-flex items-center gap-2 rounded-lg bg-blue-600 px-4 py-2 text-sm font-medium text-white transition hover:bg-blue-700">
+              <button type="button" on:click={saveRetryConfig} class="inline-flex items-center gap-2 rounded-lg bg-accent px-4 py-2 text-sm font-medium text-accent-fg transition hover:bg-accent-hover">
                 <Save size={16} /> Save Retry Config
               </button>
             </div>
           </div>
 
-          <div class="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
+          <div class="rounded-2xl border border-border bg-surface p-5 shadow-sm">
             <div class="mb-4 flex items-center gap-2">
-              <ServerCog size={18} class="text-slate-500" />
+              <ServerCog size={18} class="text-fg-subtle" />
               <div>
-                <h2 class="text-sm font-semibold uppercase tracking-wide text-slate-500">SSH Agent Config</h2>
-                <p class="mt-1 text-sm text-slate-500">Configure use of the local SSH agent for this server.</p>
+                <h2 class="text-sm font-semibold uppercase tracking-wide text-fg-subtle">SSH Agent Config</h2>
+                <p class="mt-1 text-sm text-fg-subtle">Configure use of the local SSH agent for this server.</p>
               </div>
             </div>
 
-            <div class="space-y-4 rounded-2xl border border-slate-200 bg-slate-50 p-4">
-              <label class="flex items-center gap-2 text-sm font-medium text-slate-700">
+            <div class="space-y-4 rounded-2xl border border-border bg-surface-muted p-4">
+              <label class="flex items-center gap-2 text-sm font-medium text-fg-muted">
                 <input type="checkbox" bind:checked={useAgent} /> Use agent
               </label>
               <div>
-                <label for="server-preferred-identity" class="mb-1 block text-sm font-medium text-slate-700">Preferred Identity</label>
-                <input id="server-preferred-identity" bind:value={preferredIdentity} class="w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-slate-900 shadow-sm outline-none transition focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20" placeholder="Fingerprint or comment" />
+                <label for="server-preferred-identity" class="mb-1 block text-sm font-medium text-fg-muted">Preferred Identity</label>
+                <input id="server-preferred-identity" bind:value={preferredIdentity} class="w-full rounded-lg border border-border-strong bg-surface px-3 py-2 text-fg shadow-sm outline-none transition focus:border-accent focus:ring-2 focus:ring-accent/20" placeholder="Fingerprint or comment" />
               </div>
-              <label class="flex items-center gap-2 text-sm font-medium text-slate-700">
+              <label class="flex items-center gap-2 text-sm font-medium text-fg-muted">
                 <input type="checkbox" bind:checked={agentForwarding} /> Agent forwarding
               </label>
             </div>
 
             <div class="mt-4 flex flex-wrap gap-3">
-              <button type="button" on:click={saveAgentConfig} class="inline-flex items-center gap-2 rounded-lg bg-blue-600 px-4 py-2 text-sm font-medium text-white transition hover:bg-blue-700">
+              <button type="button" on:click={saveAgentConfig} class="inline-flex items-center gap-2 rounded-lg bg-accent px-4 py-2 text-sm font-medium text-accent-fg transition hover:bg-accent-hover">
                 <Save size={16} /> Save Agent Config
               </button>
             </div>
           </div>
 
-          <div class="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
+          <div class="rounded-2xl border border-border bg-surface p-5 shadow-sm">
             <div class="flex items-start gap-3">
-              <AlertTriangle size={18} class="mt-0.5 text-amber-500" />
-              <p class="text-sm text-slate-500">
+              <AlertTriangle size={18} class="mt-0.5 text-warning" />
+              <p class="text-sm text-fg-subtle">
                 Buttons such as install, verify, rotate, and auth test call the SSH backend directly. Use them to validate credentials and recovery workflows.
               </p>
             </div>

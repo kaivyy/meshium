@@ -181,18 +181,18 @@
 </svelte:head>
 
 <div class="p-4 sm:p-6 max-w-6xl mx-auto">
-  <a href={migration ? `/migrations/${migration.id}` : `/migrations/${migrationId}`} class="mb-4 inline-flex items-center gap-2 text-sm text-slate-600 transition-colors hover:text-slate-900">
+  <a href={migration ? `/migrations/${migration.id}` : `/migrations/${migrationId}`} class="mb-4 inline-flex items-center gap-2 text-sm text-fg-muted transition-colors hover:text-fg">
     <ArrowLeft size={16} />
     Back to migration
   </a>
 
   {#if loading}
-    <div class="flex items-center gap-3 py-10 text-slate-500">
+    <div class="flex items-center gap-3 py-10 text-fg-subtle">
       <Spinner size="md" label="Loading diff" />
       <span>Loading server diff...</span>
     </div>
   {:else if error}
-    <div class="rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
+    <div class="rounded-lg border border-error bg-error/10 px-4 py-3 text-sm text-error">
       {error}
     </div>
   {:else if sections.length === 0}
@@ -205,8 +205,8 @@
     <div class="space-y-6">
       <div class="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
         <div>
-          <h1 class="text-2xl font-semibold text-slate-900">Server Diff</h1>
-          <p class="mt-1 text-sm text-slate-500">
+          <h1 class="text-2xl font-semibold text-fg">Server Diff</h1>
+          <p class="mt-1 text-sm text-fg-subtle">
             {migration ? `${migration.sourceServerId} → ${migration.targetServerId}` : `Migration ${migrationId}`}
           </p>
         </div>
@@ -219,16 +219,16 @@
       </div>
 
       <Card padding="lg">
-        <div class="flex flex-wrap items-center gap-3 text-sm text-slate-600">
-          <div class="inline-flex items-center gap-2 rounded-lg bg-green-50 px-3 py-2 text-green-800">
+        <div class="flex flex-wrap items-center gap-3 text-sm text-fg-muted">
+          <div class="inline-flex items-center gap-2 rounded-lg bg-success/10 px-3 py-2 text-success">
             <Plus size={16} />
             {summary.added} added
           </div>
-          <div class="inline-flex items-center gap-2 rounded-lg bg-red-50 px-3 py-2 text-red-800">
+          <div class="inline-flex items-center gap-2 rounded-lg bg-error/10 px-3 py-2 text-error">
             <Minus size={16} />
             {summary.removed} removed
           </div>
-          <div class="inline-flex items-center gap-2 rounded-lg bg-yellow-50 px-3 py-2 text-yellow-800">
+          <div class="inline-flex items-center gap-2 rounded-lg bg-warning/10 px-3 py-2 text-warning">
             <Pencil size={16} />
             {summary.changed} changed
           </div>
@@ -239,7 +239,7 @@
         {#each sections as section}
           <Card padding="lg">
             <div class="mb-4 flex items-center justify-between gap-3">
-              <h2 class="text-lg font-semibold text-slate-900">{section.name}</h2>
+              <h2 class="text-lg font-semibold text-fg">{section.name}</h2>
               <div class="flex flex-wrap items-center gap-2 text-xs font-medium">
                 {#if section.added.length > 0}
                   <Badge variant="success">{section.added.length} added</Badge>
@@ -255,14 +255,14 @@
 
             <div class="grid gap-4 lg:grid-cols-3">
               {#if section.added.length > 0}
-                <div class="rounded-lg border border-green-200 bg-green-50 p-4">
-                  <div class="mb-3 flex items-center gap-2 text-sm font-semibold text-green-800">
+                <div class="rounded-lg border border-success bg-success/10 p-4">
+                  <div class="mb-3 flex items-center gap-2 text-sm font-semibold text-success">
                     <Plus size={16} />
                     Added
                   </div>
                   <div class="space-y-2">
                     {#each section.added as item}
-                      <div class="rounded-lg border border-green-200 bg-white/80 px-3 py-2 text-sm text-green-800">
+                      <div class="rounded-lg border border-success bg-surface/80 px-3 py-2 text-sm text-success">
                         {item}
                       </div>
                     {/each}
@@ -271,14 +271,14 @@
               {/if}
 
               {#if section.removed.length > 0}
-                <div class="rounded-lg border border-red-200 bg-red-50 p-4">
-                  <div class="mb-3 flex items-center gap-2 text-sm font-semibold text-red-800">
+                <div class="rounded-lg border border-error bg-error/10 p-4">
+                  <div class="mb-3 flex items-center gap-2 text-sm font-semibold text-error">
                     <Minus size={16} />
                     Removed
                   </div>
                   <div class="space-y-2">
                     {#each section.removed as item}
-                      <div class="rounded-lg border border-red-200 bg-white/80 px-3 py-2 text-sm text-red-800">
+                      <div class="rounded-lg border border-error bg-surface/80 px-3 py-2 text-sm text-error">
                         {item}
                       </div>
                     {/each}
@@ -287,14 +287,14 @@
               {/if}
 
               {#if section.changed.length > 0}
-                <div class="rounded-lg border border-yellow-200 bg-yellow-50 p-4">
-                  <div class="mb-3 flex items-center gap-2 text-sm font-semibold text-yellow-800">
+                <div class="rounded-lg border border-warning bg-warning/10 p-4">
+                  <div class="mb-3 flex items-center gap-2 text-sm font-semibold text-warning">
                     <Pencil size={16} />
                     Changed
                   </div>
                   <div class="space-y-2">
                     {#each section.changed as item}
-                      <div class="rounded-lg border border-yellow-200 bg-white/80 px-3 py-2 text-sm text-yellow-800">
+                      <div class="rounded-lg border border-warning bg-surface/80 px-3 py-2 text-sm text-warning">
                         {item}
                       </div>
                     {/each}

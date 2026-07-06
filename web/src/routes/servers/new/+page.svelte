@@ -90,78 +90,78 @@
 </script>
 
 <div class="p-4 sm:p-6">
-  <a href="/" class="inline-flex items-center gap-2 text-sm text-slate-600 transition hover:text-slate-900">
+  <a href="/" class="inline-flex items-center gap-2 text-sm text-fg-muted transition hover:text-fg">
     <ArrowLeft size={16} /> Back to Servers
   </a>
-  <h1 class="mt-2 text-xl font-bold tracking-tight text-slate-900">Add Server</h1>
+  <h1 class="mt-2 text-xl font-bold tracking-tight text-fg">Add Server</h1>
 
   <div class="mt-4 max-w-3xl mx-auto">
     {#if error}
-      <div class="mb-4 rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">{error}</div>
+      <div class="mb-4 rounded-lg border border-error bg-error/10 px-4 py-3 text-sm text-error">{error}</div>
     {/if}
 
-    <form class="space-y-5 rounded-2xl border border-slate-200 bg-white p-4 sm:p-6 shadow-sm" on:submit|preventDefault={handleSubmit}>
+    <form class="space-y-5 rounded-2xl border border-border bg-surface p-4 sm:p-6 shadow-sm" on:submit|preventDefault={handleSubmit}>
       <div class="grid gap-5 md:grid-cols-2">
         <div class="md:col-span-2">
-          <label for="name" class="mb-1 block text-sm font-medium text-slate-700">Name *</label>
+          <label for="name" class="mb-1 block text-sm font-medium text-fg-muted">Name *</label>
           <input
             id="name"
             bind:value={name}
-            class="w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-slate-900 shadow-sm outline-none transition focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20"
+            class="w-full rounded-lg border border-border-strong bg-surface px-3 py-2 text-fg shadow-sm outline-none transition focus:border-accent focus:ring-2 focus:ring-accent/20"
             placeholder="Web Server 01"
           />
         </div>
 
         <div class="md:col-span-2">
-          <label for="description" class="mb-1 block text-sm font-medium text-slate-700">Notes</label>
+          <label for="description" class="mb-1 block text-sm font-medium text-fg-muted">Notes</label>
           <textarea
             id="description"
             bind:value={description}
             rows="4"
-            class="w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-slate-900 shadow-sm outline-none transition focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20"
+            class="w-full rounded-lg border border-border-strong bg-surface px-3 py-2 text-fg shadow-sm outline-none transition focus:border-accent focus:ring-2 focus:ring-accent/20"
             placeholder="Main production web server"
           ></textarea>
         </div>
 
         <div class="md:col-span-1">
-          <label for="host" class="mb-1 block text-sm font-medium text-slate-700">Host / IP *</label>
+          <label for="host" class="mb-1 block text-sm font-medium text-fg-muted">Host / IP *</label>
           <input
             id="host"
             bind:value={host}
-            class="w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-slate-900 shadow-sm outline-none transition focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20"
+            class="w-full rounded-lg border border-border-strong bg-surface px-3 py-2 text-fg shadow-sm outline-none transition focus:border-accent focus:ring-2 focus:ring-accent/20"
             placeholder="192.168.1.100"
           />
         </div>
 
         <div>
-          <label for="port" class="mb-1 block text-sm font-medium text-slate-700">Port</label>
+          <label for="port" class="mb-1 block text-sm font-medium text-fg-muted">Port</label>
           <input
             id="port"
             type="number"
             bind:value={port}
-            class="w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-slate-900 shadow-sm outline-none transition focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20"
+            class="w-full rounded-lg border border-border-strong bg-surface px-3 py-2 text-fg shadow-sm outline-none transition focus:border-accent focus:ring-2 focus:ring-accent/20"
             min="1"
           />
         </div>
 
         <div class="md:col-span-2">
-          <label for="username" class="mb-1 block text-sm font-medium text-slate-700">Username *</label>
+          <label for="username" class="mb-1 block text-sm font-medium text-fg-muted">Username *</label>
           <input
             id="username"
             bind:value={username}
-            class="w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-slate-900 shadow-sm outline-none transition focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20"
+            class="w-full rounded-lg border border-border-strong bg-surface px-3 py-2 text-fg shadow-sm outline-none transition focus:border-accent focus:ring-2 focus:ring-accent/20"
             placeholder="root"
           />
         </div>
 
         <div class="md:col-span-2">
-          <span class="mb-2 block text-sm font-medium text-slate-700">Authentication</span>
+          <span class="mb-2 block text-sm font-medium text-fg-muted">Authentication</span>
           <div class="flex flex-wrap gap-4">
-            <label class="inline-flex items-center gap-2 text-sm text-slate-700">
+            <label class="inline-flex items-center gap-2 text-sm text-fg-muted">
               <input type="radio" bind:group={authMethod} value="password" />
               Password
             </label>
-            <label class="inline-flex items-center gap-2 text-sm text-slate-700">
+            <label class="inline-flex items-center gap-2 text-sm text-fg-muted">
               <input type="radio" bind:group={authMethod} value="key" />
               SSH Key
             </label>
@@ -170,84 +170,84 @@
 
         {#if authMethod === 'password'}
           <div class="md:col-span-2">
-            <label for="password" class="mb-1 block text-sm font-medium text-slate-700">Password</label>
+            <label for="password" class="mb-1 block text-sm font-medium text-fg-muted">Password</label>
             <input
               id="password"
               type="password"
               bind:value={password}
-              class="w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-slate-900 shadow-sm outline-none transition focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20"
+              class="w-full rounded-lg border border-border-strong bg-surface px-3 py-2 text-fg shadow-sm outline-none transition focus:border-accent focus:ring-2 focus:ring-accent/20"
               placeholder="SSH password"
             />
           </div>
         {:else}
           <div class="md:col-span-2">
-            <label for="keyType" class="mb-1 block text-sm font-medium text-slate-700">Key Type</label>
+            <label for="keyType" class="mb-1 block text-sm font-medium text-fg-muted">Key Type</label>
             <select
               id="keyType"
               bind:value={keyType}
-              class="w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-slate-900 shadow-sm outline-none transition focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20"
+              class="w-full rounded-lg border border-border-strong bg-surface px-3 py-2 text-fg shadow-sm outline-none transition focus:border-accent focus:ring-2 focus:ring-accent/20"
             >
               <option value="ed25519">ED25519 (Recommended)</option>
               <option value="rsa">RSA 4096-bit</option>
               <option value="ecdsa">ECDSA 521-bit</option>
             </select>
-            <p class="mt-1 text-xs text-slate-500">ED25519 is recommended for new keys — faster and more secure than RSA</p>
+            <p class="mt-1 text-xs text-fg-subtle">ED25519 is recommended for new keys — faster and more secure than RSA</p>
           </div>
 
           <div class="md:col-span-2">
-            <label for="sshKey" class="mb-1 block text-sm font-medium text-slate-700">SSH Key</label>
+            <label for="sshKey" class="mb-1 block text-sm font-medium text-fg-muted">SSH Key</label>
             <textarea
               id="sshKey"
               bind:value={sshKey}
               rows="6"
-              class="w-full rounded-lg border border-slate-300 bg-white px-3 py-2 font-mono text-sm text-slate-900 shadow-sm outline-none transition focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20"
+              class="w-full rounded-lg border border-border-strong bg-surface px-3 py-2 font-mono text-sm text-fg shadow-sm outline-none transition focus:border-accent focus:ring-2 focus:ring-accent/20"
               placeholder="-----BEGIN OPENSSH PRIVATE KEY-----"
             ></textarea>
           </div>
 
           <div class="md:col-span-2">
-            <label for="passphrase" class="mb-1 block text-sm font-medium text-slate-700">Passphrase</label>
+            <label for="passphrase" class="mb-1 block text-sm font-medium text-fg-muted">Passphrase</label>
             <input
               id="passphrase"
               type="password"
               bind:value={passphrase}
-              class="w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-slate-900 shadow-sm outline-none transition focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20"
+              class="w-full rounded-lg border border-border-strong bg-surface px-3 py-2 text-fg shadow-sm outline-none transition focus:border-accent focus:ring-2 focus:ring-accent/20"
               placeholder="Optional passphrase"
             />
           </div>
         {/if}
 
         <div class="md:col-span-2">
-          <label for="bastion" class="mb-1 block text-sm font-medium text-slate-700">Bastion / Jump Host</label>
+          <label for="bastion" class="mb-1 block text-sm font-medium text-fg-muted">Bastion / Jump Host</label>
           <select
             id="bastion"
             bind:value={bastionId}
-            class="w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-slate-900 shadow-sm outline-none transition focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20"
+            class="w-full rounded-lg border border-border-strong bg-surface px-3 py-2 text-fg shadow-sm outline-none transition focus:border-accent focus:ring-2 focus:ring-accent/20"
           >
             <option value={0}>None (Direct Connection)</option>
             {#each availableServers as srv}
               <option value={srv.id}>{srv.name} ({srv.host}:{srv.port})</option>
             {/each}
           </select>
-          <p class="mt-1 text-xs text-slate-500">Route SSH connections through this server as a jump host</p>
+          <p class="mt-1 text-xs text-fg-subtle">Route SSH connections through this server as a jump host</p>
         </div>
 
         <div class="md:col-span-2">
-          <label for="tags" class="mb-1 block text-sm font-medium text-slate-700">Tags</label>
+          <label for="tags" class="mb-1 block text-sm font-medium text-fg-muted">Tags</label>
           <input
             id="tags"
             bind:value={tags}
-            class="w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-slate-900 shadow-sm outline-none transition focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20"
+            class="w-full rounded-lg border border-border-strong bg-surface px-3 py-2 text-fg shadow-sm outline-none transition focus:border-accent focus:ring-2 focus:ring-accent/20"
             placeholder="web, nginx, production"
           />
         </div>
 
         <div>
-          <label for="environment" class="mb-1 block text-sm font-medium text-slate-700">Environment</label>
+          <label for="environment" class="mb-1 block text-sm font-medium text-fg-muted">Environment</label>
           <select
             id="environment"
             bind:value={environment}
-            class="w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-slate-900 shadow-sm outline-none transition focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20"
+            class="w-full rounded-lg border border-border-strong bg-surface px-3 py-2 text-fg shadow-sm outline-none transition focus:border-accent focus:ring-2 focus:ring-accent/20"
           >
             <option value="">None</option>
             <option value="production">Production</option>
@@ -257,11 +257,11 @@
         </div>
 
         <div>
-          <label for="region" class="mb-1 block text-sm font-medium text-slate-700">Region</label>
+          <label for="region" class="mb-1 block text-sm font-medium text-fg-muted">Region</label>
           <select
             id="region"
             bind:value={region}
-            class="w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-slate-900 shadow-sm outline-none transition focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20"
+            class="w-full rounded-lg border border-border-strong bg-surface px-3 py-2 text-fg shadow-sm outline-none transition focus:border-accent focus:ring-2 focus:ring-accent/20"
           >
             <option value="">None</option>
             <option value="indonesia">Indonesia</option>
@@ -271,8 +271,8 @@
         </div>
 
         <div>
-          <label for="color" class="mb-1 block text-sm font-medium text-slate-700">Color</label>
-          <input id="color" type="color" bind:value={color} class="h-10 w-16 rounded border border-slate-300 bg-white" />
+          <label for="color" class="mb-1 block text-sm font-medium text-fg-muted">Color</label>
+          <input id="color" type="color" bind:value={color} class="h-10 w-16 rounded border border-border-strong bg-surface" />
         </div>
       </div>
 
@@ -280,11 +280,11 @@
         <button
           type="submit"
           disabled={loading}
-          class="inline-flex items-center justify-center rounded-lg bg-blue-600 px-4 py-2 text-sm font-medium text-white transition hover:bg-blue-700 disabled:cursor-not-allowed disabled:opacity-50"
+          class="inline-flex items-center justify-center rounded-lg bg-accent px-4 py-2 text-sm font-medium text-accent-fg transition hover:bg-accent-hover disabled:cursor-not-allowed disabled:opacity-50"
         >
           {loading ? 'Adding...' : 'Add Server'}
         </button>
-        <a href="/" class="text-sm font-medium text-slate-600 transition hover:text-slate-900">Cancel</a>
+        <a href="/" class="text-sm font-medium text-fg-muted transition hover:text-fg">Cancel</a>
       </div>
     </form>
   </div>
