@@ -2,10 +2,53 @@
 @tailwind components;
 @tailwind utilities;
 
+:root {
+  --color-bg: 248 250 252;
+  --color-surface: 255 255 255;
+  --color-surface-muted: 241 245 249;
+  --color-fg: 15 23 42;
+  --color-fg-muted: 71 85 105;
+  --color-fg-subtle: 100 116 139;
+  --color-border: 226 232 240;
+  --color-border-strong: 203 213 225;
+  --color-accent: 37 99 235;
+  --color-accent-hover: 29 78 216;
+  --color-accent-fg: 255 255 255;
+  --color-accent-subtle: 239 246 255;
+  --color-success: 22 163 74;
+  --color-warning: 180 120 4;
+  --color-error: 220 38 38;
+  --color-info: 37 99 235;
+}
+
+.dark {
+  --color-bg: 3 7 18;
+  --color-surface: 17 24 39;
+  --color-surface-muted: 31 41 55;
+  --color-fg: 249 250 251;
+  --color-fg-muted: 209 213 219;
+  --color-fg-subtle: 148 163 184;
+  --color-border: 31 41 55;
+  --color-border-strong: 55 65 81;
+  --color-accent: 59 130 246;
+  --color-accent-hover: 96 165 250;
+  --color-accent-fg: 255 255 255;
+  --color-accent-subtle: 30 58 138;
+  --color-success: 74 222 128;
+  --color-warning: 250 204 21;
+  --color-error: 248 113 113;
+  --color-info: 96 165 250;
+}
+
 /* Global focus-visible styling for keyboard accessibility */
 @layer base {
   :focus-visible {
     outline: none;
+  }
+
+  body {
+    background-color: rgb(var(--color-bg));
+    color: rgb(var(--color-fg));
   }
 
   /* Smooth scrolling for navigation */
@@ -24,7 +67,7 @@
   /* Ensure tap targets are large enough on mobile (WCAG 2.5.5) */
   @media (max-width: 768px) {
     button, a, [role="button"] {
-      min-height: 32px;
+      min-height: 44px;
     }
   }
 
@@ -39,12 +82,12 @@
   }
 
   ::-webkit-scrollbar-thumb {
-    background: #cbd5e1;
+    background: rgb(var(--color-border-strong));
     border-radius: 4px;
   }
 
   ::-webkit-scrollbar-thumb:hover {
-    background: #94a3b8;
+    background: rgb(var(--color-fg-subtle));
   }
 
   /* Reduce motion for users who prefer it */
