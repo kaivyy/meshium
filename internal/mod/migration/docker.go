@@ -252,7 +252,15 @@ func (a *DockerApplier) Backup(ctx context.Context, ssh SSHExecuter) (BackupData
 	return BackupData{Type: "docker", Data: raw}, nil
 }
 
-// Apply pulls images, recreates compose files, and recreates containers on the target.
+// Apply pulls images, recreates compose files, and recreates containers on the
+// target.
+//
+// Image migration is REGISTRY-ONLY: each image is transferred with `docker pull`
+// (step 2 below), so it must exist in a registry the target can reach. Images
+// that were built locally on the source and never pushed to a registry cannot
+// be migrated by this path — their pull is reported as a warning and the
+// migration continues, so any container depending on such an image will fail to
+// start. Saving/streaming image tarballs (docker save|load) is not implemented.
 func (a *DockerApplier) Apply(ctx context.Context, ssh SSHExecuter, data CategoryData, onProgress StepCallback) error {
 	var dd DockerData
 	if len(data.Data) == 0 {
@@ -297,22 +305,29 @@ func (a *DockerApplier) Apply(ctx context.Context, ssh SSHExecuter, data Categor
 		}
 	}
 
-	// 2. Pull images
+	// 2. Pull images (registry-only). A locally-built image that was never
+	// pushed to a registry the target can reach will fail here; that failure is
+	// surfaced as a warning rather than aborting, so the operator can see which
+	// images did not transfer.
+	pullFailures := 0
 	for i, image := range dd.Images {
 		if onProgress != nil {
 			onProgress(WSMessage{
 				Step:   "docker:apply",
 				Status: "progress",
-				Value:  fmt.Sprintf("Pulling image %d/%d: %s", i+1, len(dd.Images), image),
+				Value:  fmt.Sprintf("Pulling image %d/%d from registry: %s", i+1, len(dd.Images), image),
 			})
 		}
 		_, stderr, exitCode, _ := ssh.ExecContext(ctx, fmt.Sprintf("docker pull %s 2>&1", shared.ShellQuote(image)))
-		if exitCode != 0 && onProgress != nil {
-			onProgress(WSMessage{
-				Step:   "docker:apply",
-				Status: "warning",
-				Value:  fmt.Sprintf("Failed to pull %s: %s", image, stderr),
-			})
+		if exitCode != 0 {
+			pullFailures++
+			if onProgress != nil {
+				onProgress(WSMessage{
+					Step:   "docker:apply",
+					Status: "warning",
+					Value:  fmt.Sprintf("Failed to pull %s from registry (locally-built images that were never pushed cannot be migrated): %s", image, stderr),
+				})
+			}
 		}
 	}
 
@@ -379,10 +394,14 @@ func (a *DockerApplier) Apply(ctx context.Context, ssh SSHExecuter, data Categor
 	}
 
 	if onProgress != nil {
+		summary := fmt.Sprintf("Docker migration finished: %d containers, %d images (registry pull), %d volumes, %d compose files", len(dd.Containers), len(dd.Images), len(dd.Volumes), len(dd.ComposeFiles))
+		if pullFailures > 0 {
+			summary += fmt.Sprintf("; %d image(s) failed to pull from a registry and were NOT migrated (see warnings above)", pullFailures)
+		}
 		onProgress(WSMessage{
 			Step:   "docker:apply",
 			Status: "success",
-			Value:  fmt.Sprintf("Docker migration complete: %d containers, %d images, %d volumes, %d compose files", len(dd.Containers), len(dd.Images), len(dd.Volumes), len(dd.ComposeFiles)),
+			Value:  summary,
 		})
 	}
 

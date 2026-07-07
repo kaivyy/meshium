@@ -313,7 +313,7 @@ func (e *Executor) dryRunDocker(ctx context.Context, ssh SSHExecuter, data Categ
 			changes = append(changes, DryRunChange{
 				Type:     "add",
 				Resource: "docker:image:" + image,
-				Detail:   fmt.Sprintf("Image %s will be pulled", image),
+				Detail:   fmt.Sprintf("Image %s will be pulled from a registry (locally-built images not pushed to a reachable registry cannot be migrated)", image),
 			})
 		}
 	}
