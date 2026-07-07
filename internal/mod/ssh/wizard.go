@@ -416,14 +416,12 @@ type authResult struct {
 
 func (w *WizardRunner) authenticate(cfg ServerConfig) *authResult {
 	start := time.Now()
-	// Use TOFU callback so credentials are only sent after host key verification.
-	// If the host is unknown, the key is trusted on first use and saved.
-	// If the host is known and the key matches, auth proceeds.
-	// If the host is known and the key differs, the connection is rejected (MITM protection).
+	// Credentials are only sent after the host key is verified against the
+	// known-hosts store: a known+matching key lets auth proceed, a known but
+	// differing key is rejected as a mismatch (MITM protection), and an unknown
+	// or unverifiable key fails closed. There is deliberately no insecure
+	// fallback here — this dial carries real credentials.
 	hostKeyCallback := w.getHostKeyCallback(cfg.ID)
-	if hostKeyCallback == nil {
-		hostKeyCallback = ssh.InsecureIgnoreHostKey()
-	}
 
 	sshConfig := &ssh.ClientConfig{
 		User:            cfg.Username,
@@ -547,11 +545,13 @@ func (w *WizardRunner) testRoundTrip(cfg ServerConfig) int64 {
 }
 
 // getHostKeyCallback returns the known hosts callback for the wizard.
+// Without a known-hosts store there is no way to verify the remote key, so it
+// fails closed rather than silently accepting any key on a credentialed dial.
 func (w *WizardRunner) getHostKeyCallback(serverID int) ssh.HostKeyCallback {
 	if w.knownHosts != nil {
 		return w.knownHosts.MakeHostKeyCallback(serverID)
 	}
-	return ssh.InsecureIgnoreHostKey()
+	return FailClosedHostKeyCallback()
 }
 
 // RunDiagnostics executes a full diagnostics run for a server.

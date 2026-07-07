@@ -655,7 +655,10 @@ func (s *Service) hostKeyCallback(serverID int) ssh.HostKeyCallback {
 	if s.knownHosts != nil {
 		return s.knownHosts.MakeHostKeyCallback(serverID)
 	}
-	return ssh.InsecureIgnoreHostKey()
+	// No store to verify against: fail closed rather than silently accepting any
+	// key. These dials carry decrypted credentials, so an insecure fallback would
+	// expose them to a man-in-the-middle.
+	return modssh.FailClosedHostKeyCallback()
 }
 
 func (s *Service) buildSSHConfig(serverID int, seen map[int]bool) (*modssh.ServerConfig, *server.Server, error) {

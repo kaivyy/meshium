@@ -14,6 +14,24 @@ import (
 var ErrHostKeyNotTrusted = errors.New("host key not trusted — first connection requires explicit trust")
 var ErrHostKeyMismatch = errors.New("host key mismatch — possible MITM attack")
 
+// ErrNoHostKeyVerification indicates a connection was attempted without any
+// means of verifying the remote host key (no known-hosts store available).
+// Rather than silently accept any key — which would expose the connection to
+// a man-in-the-middle — callers fail closed with this error.
+var ErrNoHostKeyVerification = errors.New(
+	"cannot verify host key: no known-hosts store configured — " +
+		"trust the host first via the connection wizard (TrustHostKey) before connecting")
+
+// FailClosedHostKeyCallback returns an ssh.HostKeyCallback that rejects every
+// connection with ErrNoHostKeyVerification. It is used where a verifying
+// callback cannot be constructed, so credentialed connections fail closed
+// instead of silently falling back to ssh.InsecureIgnoreHostKey.
+func FailClosedHostKeyCallback() ssh.HostKeyCallback {
+	return func(hostname string, remote net.Addr, key ssh.PublicKey) error {
+		return ErrNoHostKeyVerification
+	}
+}
+
 // KnownHostsStore persists host keys in SQLite and provides SSH host key callbacks.
 type KnownHostsStore struct {
 	db *sql.DB
