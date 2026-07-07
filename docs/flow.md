@@ -1,8 +1,10 @@
-# Meshium — User Flow: Zero-Downtime Migration
+# Meshium — User Flow: Assisted Server Migration
 
 ## Overview
 
-Meshium provides a guided 11-step wizard for performing zero-downtime server migrations. The wizard walks the user through discovery, risk assessment, planning, provisioning, execution, and post-cutover observation — with real-time monitoring and automatic rollback on failure.
+Meshium provides a guided 11-step wizard for performing assisted server migrations. The wizard walks the user through discovery, risk assessment, planning, provisioning, execution, and post-cutover observation — with real-time monitoring and rollback of the changes the pipeline itself applied.
+
+> **Important — cutover is not automated.** The live pipeline transfers data and configuration and sets up database replication (when enabled), but it does **not** automatically switch production traffic from the source to the target. The traffic-switch stage records a **manual-cutover checkpoint** and instructs the operator to move traffic themselves (DNS / reverse proxy / load balancer) and then verify. Meshium does not advertise "zero-downtime"; see `docs/architecture.md` ("Cutover & Downtime Honesty").
 
 ---
 
@@ -114,6 +116,8 @@ This is the primary migration interface — a guided 11-step wizard with validat
 | Max Error Rate | 5% | Error rate threshold for auto-rollback |
 | Max Latency | 2000ms | Latency threshold for auto-rollback |
 
+> **Note on cutover-related options.** *Traffic Provider*, *Freeze Write on Cutover*, and *Drain Queues on Cutover* configure the (not-yet-wired) `TrafficSwitchEngine`/`QueueEngine`. The executed pipeline does not switch traffic, freeze source writes, or drain queues at cutover today — see Step 9. These options are recorded for planning and future use, and *Max Error Rate* / *Max Latency* do not drive an automatic cutover rollback.
+
 ### Step 5: Dry Run
 
 **Purpose:** Preview what will change without actually applying anything.
@@ -158,27 +162,28 @@ This is the primary migration interface — a guided 11-step wizard with validat
 | Indicator | Green badge "Ready for Cutover" when lag ≤ 5s; yellow "Waiting for replication..." otherwise |
 | Controls | Pause, Rollback available |
 
-### Step 9: Cutover
+### Step 9: Cutover (manual)
 
-**Purpose:** Switch all traffic from source to target.
+**Purpose:** Record a manual-cutover checkpoint. The pipeline does **not** switch traffic automatically.
 
 | Element | Description |
 |---------|-------------|
 | Action | Click **Confirm Cutover** (with explicit confirmation dialog) |
-| Shows | 7-step cutover checklist, real-time progress |
+| Shows | Manual-cutover checklist, real-time progress |
 | Gate | Must be explicitly confirmed by user |
 
-**Cutover sequence:**
+**What the pipeline does at this stage:**
 
-1. Freeze writes on source server
-2. Perform final delta sync
-3. Wait for replication to catch up
-4. Drain message queues (BullMQ / RabbitMQ)
-5. Run health verification
-6. Switch traffic to target server
-7. Promote target as primary & resume writes
+The traffic-switch stage records a manual-cutover checkpoint and emits a **warning** that a manual cutover is required. It writes a cutover record with `traffic_switched = false` and leaves the recorded state pointing at the source. It does **not** freeze source writes, switch traffic, or promote the target.
 
-Auto-advances to **Observation** after traffic switch.
+**What the operator must do manually:**
+
+1. Verify replication lag is acceptable (Step 8) and the target is healthy
+2. Freeze or drain writes on the source if the workload requires it
+3. Switch traffic to the target (DNS / reverse proxy / load balancer)
+4. Verify the target is serving production traffic correctly
+
+Auto-advances to **Observation** after the checkpoint is recorded.
 
 ### Step 10: Observation
 
@@ -252,6 +257,13 @@ Available during pipeline execution (steps 7–10):
 
 ## Traffic Switching Support
 
+> **Not wired into the live pipeline.** A `TrafficSwitchEngine`
+> (`internal/mod/migration/traffic.go`) implements the providers below, but the
+> executed pipeline's traffic-switch stage does **not** invoke it — it only
+> records a manual-cutover checkpoint (see Step 9). The table documents the
+> engine's intended provider support, not an automated capability the pipeline
+> performs today. Switching traffic is a manual operator step.
+
 | Provider | Method | Rollback |
 |----------|--------|----------|
 | **Cloudflare** | DNS API | Revert DNS record |
@@ -282,11 +294,10 @@ Any state can transition to **Failed** or **Interrupted**. Failed → Rollback �
 
 Rollback is triggered automatically when:
 
-- Health score drops below the configured threshold during observation
-- Error rate exceeds the configured maximum during cutover
+- Health score drops below the configured threshold during observation (when auto-rollback is enabled)
 - User manually triggers rollback
 
-Rollback reverses changes in LIFO order and restores the original traffic configuration.
+Rollback reverses the changes the pipeline itself applied, in LIFO order (e.g. applied file/config categories, database replication setup). Because the pipeline never switches production traffic (see Step 9), there is no automatic traffic configuration to restore; if the operator performed a manual cutover, they must revert it manually.
 
 ---
 
