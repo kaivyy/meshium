@@ -1209,10 +1209,6 @@ func packageUpdateCommandForPackageManager(pm string) string {
 	}
 }
 
-func packageUpdateCountCommand(pm string) string {
-	return packageUpdateCommandForPackageManager(pm)
-}
-
 func parsePackageList(stdout, pm string) []string {
 	var packages []string
 	for _, line := range strings.Split(strings.TrimSpace(stdout), "\n") {

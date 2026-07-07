@@ -6,7 +6,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"time"
 )
 
 // StepState represents the lifecycle state of a single migration step.
@@ -390,11 +389,6 @@ func (r *sqliteRepo) GetInterruptedMigrations() ([]Migration, error) {
 		migrations = append(migrations, m)
 	}
 	return migrations, nil
-}
-
-// nowRFC3339 returns the current time in RFC3339 format.
-func nowRFC3339() string {
-	return time.Now().Format(time.RFC3339)
 }
 
 // --- Context-aware helpers (used by Engine) ---
