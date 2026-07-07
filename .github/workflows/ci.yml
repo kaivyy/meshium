@@ -10,10 +10,13 @@ on:
       - main
       - master
 
+# Jobs are split so they run in parallel and each stays fast. Race lives in its
+# own job because the race detector roughly doubles wall-clock time; keeping it
+# separate means vet/build feedback is not held hostage to it.
 jobs:
   test:
+    name: Test & vet
     runs-on: ubuntu-latest
-
     steps:
       - name: Check out repository
         uses: actions/checkout@v4
@@ -24,21 +27,14 @@ jobs:
           go-version-file: go.mod
           cache: true
 
+      - name: go vet
+        run: go vet ./...
+
       - name: Run Go tests
         run: |
           mkdir -p test-results
           set -o pipefail
           go test ./... -count=1 2>&1 | tee test-results/go-test.txt
-
-      - name: Set up Node.js
-        uses: actions/setup-node@v4
-        with:
-          node-version: 20
-          cache: npm
-          cache-dependency-path: web/package-lock.json
-
-      - name: Build frontend
-        run: cd web && npm ci && npm run build
 
       - name: Upload test results
         if: always()
@@ -47,3 +43,77 @@ jobs:
           name: go-test-results
           path: test-results/go-test.txt
           if-no-files-found: warn
+
+  race:
+    name: Race detector
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - name: Run Go tests with race detector
+        run: go test -race ./... -count=1
+
+  lint:
+    name: Static analysis
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - name: Install staticcheck
+        run: go install honnef.co/go/tools/cmd/staticcheck@latest
+
+      # Advisory for now: the codebase carries pre-existing staticcheck findings
+      # (mostly U1000 unused symbols and minor S-series style nits) that are out
+      # of scope for the CI-hardening change that introduced this job. Surfacing
+      # them without blocking unrelated PRs is the intended first step. Promote to
+      # blocking once the backlog is cleared.
+      - name: Run staticcheck
+        continue-on-error: true
+        run: staticcheck ./...
+
+      - name: Install govulncheck
+        run: go install golang.org/x/vuln/cmd/govulncheck@latest
+
+      # govulncheck surfaces known CVEs in dependencies. It is advisory: a newly
+      # disclosed upstream vuln should be visible without blocking unrelated PRs.
+      # Promote to blocking once the dependency surface is actively curated.
+      - name: Run govulncheck
+        continue-on-error: true
+        run: govulncheck ./...
+
+  frontend:
+    name: Frontend build
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+          cache-dependency-path: web/package-lock.json
+
+      - name: Install dependencies
+        run: cd web && npm ci
+
+      - name: Type-check
+        run: cd web && npm run check
+
+      - name: Build frontend
+        run: cd web && npm run build
