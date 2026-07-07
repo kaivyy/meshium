@@ -5,6 +5,55 @@ All notable changes to Meshium are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.5.0-beta.3] — 2026-07-08
+
+Build-fix release. **v1.5.0-beta.1 and v1.5.0-beta.2 do not compile from a
+fresh clone** — two source files under `internal/mod/server/` were silently
+excluded by an over-broad `.gitignore` pattern and never committed, so the
+`server` package failed to satisfy its `Repo` interface on any machine that
+did not already have the files on disk. This release commits the missing files,
+anchors the offending ignore patterns, and corrects the build/test docs. No
+feature or runtime-behavior changes versus beta.2.
+
+### Fixed — Fresh-clone build blocker
+
+- **`.gitignore` swallowed package source** — the bare `server` binary pattern
+  (intended for the compiled root binary) also matched the
+  `internal/mod/server/` package directory, so newly added files there were
+  ignored. `internal/mod/server/repo_enterprise.go` (which implements
+  `CreateConnectionProfile` and 23 other `sqliteRepo` methods) and
+  `internal/mod/server/socket_test.go` were never tracked in any commit.
+  A fresh clone of beta.1/beta.2 therefore failed with
+  `*sqliteRepo does not implement Repo (missing method CreateConnectionProfile)`.
+  - `.gitignore` — anchored the binary patterns to the repo root: `server` →
+    `/server`, `meshium-server` → `/meshium-server`, and `bin/` → `/bin/`, so
+    they no longer match nested package paths.
+  - `internal/mod/server/repo_enterprise.go`, `internal/mod/server/socket_test.go`
+    — now tracked.
+
+### Fixed — Documentation
+
+- **README build/test instructions corrected for a fresh clone.** The embedded
+  frontend output (`cmd/server/web/build/`) is generated, not committed, so a
+  bare `go build ./...` / `go test ./...` fails until the frontend is built
+  once. README now directs users to `make build` / `make test` and documents
+  the raw-Go prerequisite explicitly.
+
+### Note on superseded pre-releases
+
+- **v1.5.0-beta.1 and v1.5.0-beta.2 are superseded by v1.5.0-beta.3** because
+  their fresh-clone build was broken. The tags are left in place (not deleted or
+  rewritten); use v1.5.0-beta.3 instead.
+
+### Verification
+
+- Verified from a clean checkout of the candidate: `make build` succeeds
+  end-to-end, `go build ./...`, `go vet ./...`, `go test ./...`, and
+  `go test -race ./...` all pass after the frontend is built; `npm run check`
+  and `npm run build` are clean.
+
+---
+
 ## [1.5.0-beta.2] — 2026-07-07
 
 Second beta on the v1.5.0 line. Builds on v1.5.0-beta.1 by adding two
