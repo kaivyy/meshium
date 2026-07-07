@@ -13,6 +13,12 @@ on:
 # Jobs are split so they run in parallel and each stays fast. Race lives in its
 # own job because the race detector roughly doubles wall-clock time; keeping it
 # separate means vet/build feedback is not held hostage to it.
+#
+# NOTE: every Go job builds the embedded frontend first. cmd/server/embed.go
+# embeds `all:web/build`, so the SvelteKit output must exist at
+# cmd/server/web/build before any `go` command can even compile — otherwise the
+# build fails with `pattern all:web/build: no matching files found`. That output
+# is generated, not committed, so each job that runs Go regenerates it.
 jobs:
   test:
     name: Test & vet
@@ -26,6 +32,16 @@ jobs:
         with:
           go-version-file: go.mod
           cache: true
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+          cache-dependency-path: web/package-lock.json
+
+      - name: Build embedded frontend
+        run: cd web && npm ci && npm run build
 
       - name: go vet
         run: go vet ./...
@@ -57,6 +73,16 @@ jobs:
           go-version-file: go.mod
           cache: true
 
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+          cache-dependency-path: web/package-lock.json
+
+      - name: Build embedded frontend
+        run: cd web && npm ci && npm run build
+
       - name: Run Go tests with race detector
         run: go test -race ./... -count=1
 
@@ -72,6 +98,16 @@ jobs:
         with:
           go-version-file: go.mod
           cache: true
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+          cache-dependency-path: web/package-lock.json
+
+      - name: Build embedded frontend
+        run: cd web && npm ci && npm run build
 
       - name: Install staticcheck
         run: go install honnef.co/go/tools/cmd/staticcheck@latest
@@ -117,3 +153,89 @@ jobs:
 
       - name: Build frontend
         run: cd web && npm run build
+
+  # Reproduces the exact conditions under which v1.5.0-beta.1/beta.2 shipped a
+  # tree that would not build from a fresh clone: source files that existed in
+  # the developer's working tree but were never committed (silently ignored by
+  # an over-broad .gitignore rule). Neither the old test/race/lint jobs nor a
+  # normal checkout catch this, because a normal checkout also carries whatever
+  # the committer had on disk. This job builds ONLY tracked content.
+  fresh-clone-build:
+    name: Fresh-clone build guard
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+          cache-dependency-path: web/package-lock.json
+
+      # Fast, precise root-cause canary. A source file that is BOTH tracked AND
+      # matched by a .gitignore rule is the exact fragile state that shipped in
+      # beta.1/beta.2: any NEW sibling created in that directory is silently
+      # ignored by `git add` and never committed. `--no-index` makes
+      # check-ignore evaluate tracked paths (it normally skips them). Scoped to
+      # source trees so it does not trip over intentionally-ignored tracked
+      # artifacts elsewhere in the repo.
+      - name: Guard — no tracked source file is swallowed by .gitignore
+        run: |
+          set -uo pipefail
+          git ls-files -- 'cmd/**' 'internal/**' 'web/src/**' \
+            | git check-ignore --no-index --stdin -v > ignored-source.txt || true
+          if [ -s ignored-source.txt ]; then
+            echo "::error::A tracked source file matches a .gitignore rule. New sibling files in the same directory will be silently ignored and never committed — this is the v1.5.0-beta.1/beta.2 fresh-clone build bug. Offending <gitignore>:<line>:<pattern> <path>:"
+            cat ignored-source.txt
+            exit 1
+          fi
+          echo "OK: no tracked source file is matched by a .gitignore rule."
+
+      # `git archive HEAD` produces exactly what a GitHub tag tarball ships:
+      # tracked files only — no untracked working-tree files, no .git, no dev
+      # artifacts, and no pre-generated cmd/server/web/build embed directory.
+      # Building there proves the tagged source is self-contained. If a required
+      # source file were untracked (the beta bug), it would be absent here and
+      # the build would fail — exactly as it did for users who cloned the tag.
+      - name: Materialize a tag-like tree (tracked files only)
+        run: |
+          set -euo pipefail
+          rm -rf "$RUNNER_TEMP/fresh-tree"
+          mkdir -p "$RUNNER_TEMP/fresh-tree"
+          git archive HEAD | tar -x -C "$RUNNER_TEMP/fresh-tree"
+
+      - name: Assert embed output is not shipped in the tree
+        run: |
+          set -euo pipefail
+          if [ -e "$RUNNER_TEMP/fresh-tree/cmd/server/web/build" ]; then
+            echo "::error::cmd/server/web/build is tracked. The embedded frontend output must be generated by the build, not committed — a committed copy hides a broken fresh-clone build."
+            exit 1
+          fi
+          echo "OK: cmd/server/web/build is absent (generated at build time, as expected)."
+
+      # `make build` builds the frontend into the embed dir, then compiles Go.
+      # vet and test run afterwards in the same tree, so they exercise the
+      # freshly-generated embed output — not anything carried in from CI's own
+      # checkout. Full `-race` is intentionally NOT repeated here: race behavior
+      # is independent of the tracked-vs-untracked file layout this job isolates,
+      # and the dedicated `race` job already runs `-race` across the whole suite.
+      # Repeating it here would add ~3 min for no additional coverage.
+      - name: make build (frontend + Go) in the tag-like tree
+        working-directory: ${{ runner.temp }}/fresh-tree
+        run: make build
+
+      - name: go vet in the tag-like tree
+        working-directory: ${{ runner.temp }}/fresh-tree
+        run: go vet ./...
+
+      - name: go test in the tag-like tree
+        working-directory: ${{ runner.temp }}/fresh-tree
+        run: go test ./... -count=1
