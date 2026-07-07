@@ -11,7 +11,7 @@ Migrate packages, configurations, services, and users across Linux servers — s
 [![CI](https://img.shields.io/badge/CI-GitHub%20Actions-2088FF?style=flat-square&logo=githubactions)](https://github.com/kaivyy/meshium/actions)
 [![License](https://img.shields.io/badge/License-MIT-22c55e?style=flat-square)](LICENSE)
 [![Release](https://img.shields.io/badge/Release-v1.4.0-22c55e?style=flat-square)](https://github.com/kaivyy/meshium/releases)
-[![Tests](https://img.shields.io/badge/Tests-220%2B%20passing%20with%20%2Drace-22c55e?style=flat-square)](#testing)
+[![Tests](https://img.shields.io/badge/Tests-passing%20with%20%2Drace-22c55e?style=flat-square)](#testing)
 
 </div>
 
@@ -602,7 +602,7 @@ go test ./internal/mod/planner/ -race -v
 go test ./internal/jobengine/ -race -v
 ```
 
-All 220+ tests pass across 11 packages with `-race` detector:
+Tests pass across all packages with the `-race` detector:
 
 | Package | Tests | Description |
 |---------|-------|-------------|
@@ -645,7 +645,7 @@ Tests run automatically on every push and pull request via GitHub Actions.
 - **Security headers** — X-Content-Type-Options, X-Frame-Options, X-XSS-Protection, Referrer-Policy, and Content-Security-Policy headers on all responses.
 - **SSH key management** — Meshium auto-generates an Ed25519 keypair for connecting to servers. Per-server key management with AddServerKey/GetServerKey/RemoveServerKey.
 - **SSH bastion** — Connections can be tunneled through a bastion/jump host for firewalled targets. Bastion host keys are verified independently.
-- **Known hosts** — SSH host keys are auto-accepted on first connection (like `ssh -o StrictHostKeyChecking=accept-new`) and verified on subsequent connections to prevent MITM attacks.
+- **Known hosts** — SSH host keys are verified against a SQLite-backed known-hosts store on every connection. Unknown or not-yet-trusted keys are **rejected** (`ErrHostKeyNotTrusted`); a key becomes trusted only through an explicit trust action (`TrustHostKey`), and a subsequent key change is rejected as a mismatch (`ErrHostKeyMismatch`) to prevent MITM. (The connection wizard's initial probe and the optional AI assistant's fallback path connect without verification — see [docs/architecture.md](docs/architecture.md#known-limitations).)
 - **Config exclusion** — 20 OS-critical file paths (`/etc/shadow`, `/etc/passwd`, SSH host keys, etc.) are automatically excluded from migration to prevent breaking the target server.
 - **SSH pool limits** — Maximum 10 concurrent SSH connections (configurable) to prevent resource exhaustion. Stale connections are swept by a background goroutine.
 - **Session management** — The web UI locks after inactivity, requiring password re-entry. Invalid session tokens are rejected; missing tokens are allowed when the app is unlocked to prevent reload loops.
