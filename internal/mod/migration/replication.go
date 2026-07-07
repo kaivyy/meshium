@@ -509,31 +509,16 @@ func (e *ReplicationEngine) rollbackRedis(ctx context.Context, config Replicatio
 // --- MongoDB ---
 
 func (e *ReplicationEngine) setupMongoDB(ctx context.Context, config ReplicationConfig) error {
-	// Add target to replica set
-	sourceHost := config.SourceHost
-	if sourceHost == "" {
-		sourceHost = "source"
-	}
-	targetHost := config.TargetHost
-	if targetHost == "" {
-		targetHost = "target"
-	}
-	port := config.SourcePort
-	if port == 0 {
-		port = 27017
-	}
-
-	cmd := fmt.Sprintf(
-		`mongosh --eval "rs.add('%s:%d')" 2>&1`,
-		shared.ShellQuote(targetHost), port,
-	)
-	if _, _, _, err := e.sourceSSH.ExecContext(ctx, cmd); err != nil {
-		return fmt.Errorf("add target to replica set: %w", err)
-	}
-
-	// Wait for initial sync
-	time.Sleep(5 * time.Second)
-	return nil
+	// MongoDB replication-based cutover is not supported. mongoDBLag has no real
+	// replica-set lag measurement (it returns an error, see mongoDBLag), so
+	// WaitForCatchUp can never confirm the target has caught up and a cutover
+	// would risk promoting on un-replicated data.
+	//
+	// Fail closed HERE, before issuing rs.add() against the source, so a cutover
+	// that cannot complete safely never reconfigures the live source's replica
+	// set. Wiring genuine rs.status() optimeDate lag measurement into mongoDBLag
+	// is the prerequisite for re-enabling this path.
+	return fmt.Errorf("mongodb replication cutover is not supported: replica-set lag measurement is not implemented, so replication catch-up cannot be verified before promotion — refusing to reconfigure the source replica set")
 }
 
 func (e *ReplicationEngine) mongoDBLag(ctx context.Context, config ReplicationConfig) (int64, error) {

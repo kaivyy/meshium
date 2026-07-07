@@ -53,3 +53,27 @@ func TestRedisLagFailsClosedWhenLinkDown(t *testing.T) {
 		t.Fatal("redisLag returned no error while master link is down; it must fail closed")
 	}
 }
+
+// TestSetupMongoDBFailsClosedWithoutTouchingSource proves MongoDB replication
+// setup refuses up front and never issues rs.add() (or any command) against the
+// live source. mongoDBLag cannot measure replica-set lag, so a cutover could
+// never verify catch-up; reconfiguring the source's replica set for a migration
+// that cannot safely complete would leave the source altered for nothing.
+func TestSetupMongoDBFailsClosedWithoutTouchingSource(t *testing.T) {
+	source := newMockSSH()
+	target := newMockSSH()
+
+	e := NewReplicationEngine(source, target, nil)
+	err := e.setupMongoDB(context.Background(), ReplicationConfig{
+		DatabaseType: "mongodb",
+		SourceHost:   "src",
+		TargetHost:   "dst",
+		SourcePort:   27017,
+	})
+	if err == nil {
+		t.Fatal("setupMongoDB returned no error; MongoDB cutover must fail closed without lag checks")
+	}
+	if len(source.commands) != 0 {
+		t.Fatalf("setupMongoDB issued %d command(s) against the source before failing closed: %v", len(source.commands), source.commands)
+	}
+}
