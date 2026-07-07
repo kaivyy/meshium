@@ -818,8 +818,12 @@ func (p *Pipeline) Cancel(ctx context.Context, migrationID int, onProgress StepC
 	return nil
 }
 
-// RecoverInterrupted detects migrations stuck in a running state (from a
-// crashed process) and marks them as interrupted so they can be resumed.
+// RecoverInterrupted detects migrations left in an in-progress state by a
+// crashed process and marks them as interrupted so they can be resumed.
+// Detection uses isRunningStatus so it catches both the legacy literal
+// "running" and any state-machine string (e.g. "initial_sync") persisted into
+// the status column by SetMigrationState; markInterrupted resets the typed
+// state column too so the migration stays resumable.
 func (p *Pipeline) RecoverInterrupted() ([]int, error) {
 	migrations, err := p.jobRepo.ListMigrations()
 	if err != nil {
@@ -828,8 +832,8 @@ func (p *Pipeline) RecoverInterrupted() ([]int, error) {
 
 	var recovered []int
 	for _, m := range migrations {
-		if m.Status == StatusRunning {
-			if err := p.jobRepo.UpdateMigrationStatus(m.ID, StatusInterrupted, "process may have crashed"); err != nil {
+		if isRunningStatus(m.Status) {
+			if err := markInterrupted(p.jobRepo, m.ID); err != nil {
 				return recovered, fmt.Errorf("failed to update migration %d: %w", m.ID, err)
 			}
 			recovered = append(recovered, m.ID)

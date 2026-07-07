@@ -122,9 +122,52 @@ func (e *Executor) Resume(ctx context.Context, migrationID int, onProgress StepC
 	return e.executeWithSkip(ctx, migrationID, onProgress, skip)
 }
 
-// RecoverInterrupted detects migrations stuck in StatusRunning (from a
-// crashed process) and marks them as StatusInterrupted so they can be
-// resumed. Returns the IDs of migrations that were recovered.
+// stateResetter is implemented by repositories that can persist the typed
+// migration state, keeping the `state` column consistent with `status`. The
+// production *sqliteRepo satisfies it; lightweight test mocks that only
+// implement Repo do not, in which case recovery falls back to updating the
+// legacy status column alone.
+type stateResetter interface {
+	SetMigrationState(migrationID int, state MigrationState) error
+}
+
+// isRunningStatus reports whether a migration's persisted status string means
+// it was actively in progress when the process died. It covers the legacy
+// literal "running" plus any state-machine string (e.g. "initial_sync",
+// "live_replication") that maps to a MigrationState for which IsRunning() is
+// true. Terminal, failed, paused, and already-interrupted states return false,
+// which also makes recovery idempotent across repeated startup passes.
+func isRunningStatus(status string) bool {
+	if status == StatusRunning {
+		return true
+	}
+	st, err := StateFromString(status)
+	if err != nil {
+		return false
+	}
+	return st.IsRunning()
+}
+
+// markInterrupted flips a crashed-in-progress migration to the interrupted
+// state. When the repo supports typed state it resets the `state` column too,
+// so the migration stays resumable (Resume reads GetMigrationState, which
+// prefers `state` and requires CanResume()); it always sets the legacy status
+// and error via UpdateMigrationStatus so the recovery reason is preserved.
+func markInterrupted(repo Repo, migrationID int) error {
+	if resetter, ok := repo.(stateResetter); ok {
+		if err := resetter.SetMigrationState(migrationID, StateInterrupted); err != nil {
+			return err
+		}
+	}
+	return repo.UpdateMigrationStatus(migrationID, StatusInterrupted, "process may have crashed")
+}
+
+// RecoverInterrupted detects migrations left in an in-progress state by a
+// crashed process and marks them as StatusInterrupted so they can be resumed.
+// Detection covers the legacy literal "running" as well as any state-machine
+// string that maps to a running MigrationState (e.g. "initial_sync"), because
+// SetMigrationState persists the state string into the status column. Returns
+// the IDs of migrations that were recovered.
 func (e *Executor) RecoverInterrupted() ([]int, error) {
 	migrations, err := e.repo.ListMigrations()
 	if err != nil {
@@ -133,8 +176,8 @@ func (e *Executor) RecoverInterrupted() ([]int, error) {
 
 	var recovered []int
 	for _, m := range migrations {
-		if m.Status == StatusRunning {
-			if err := e.repo.UpdateMigrationStatus(m.ID, StatusInterrupted, "process may have crashed"); err != nil {
+		if isRunningStatus(m.Status) {
+			if err := markInterrupted(e.repo, m.ID); err != nil {
 				return recovered, fmt.Errorf("failed to update migration %d: %w", m.ID, err)
 			}
 			recovered = append(recovered, m.ID)

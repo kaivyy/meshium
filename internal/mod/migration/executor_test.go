@@ -86,6 +86,135 @@ func TestRecoverInterruptedEmptyList(t *testing.T) {
 	}
 }
 
+// stateAwareMockRepo extends mockRepo with typed-state support so it satisfies
+// the stateResetter interface, mirroring the production *sqliteRepo. It records
+// the last state written per migration and, like SetMigrationState in job.go,
+// also mirrors the state string into the legacy status column.
+type stateAwareMockRepo struct {
+	mockRepo
+	states map[int]MigrationState
+}
+
+func (m *stateAwareMockRepo) SetMigrationState(migrationID int, state MigrationState) error {
+	if m.states == nil {
+		m.states = make(map[int]MigrationState)
+	}
+	m.states[migrationID] = state
+	// Mirror job.go's SetMigrationState: the state string is written into the
+	// legacy status column too.
+	return m.mockRepo.UpdateMigrationStatus(migrationID, state.StateString(), "")
+}
+
+// TestRecoverInterruptedDetectsStateMachineRunning reproduces a Jalur A / Jalur B
+// crash mid-state-machine: SetMigrationState persists the state string (e.g.
+// "initial_sync") into the status column, so status is never the literal
+// "running". RecoverInterrupted must still detect these via IsRunning() and mark
+// them interrupted, while leaving terminal/paused states untouched.
+func TestRecoverInterruptedDetectsStateMachineRunning(t *testing.T) {
+	repo := &mockRepo{
+		migrations: []Migration{
+			{ID: 1, Status: StateInitialSync.StateString()},    // crashed mid-pipeline
+			{ID: 2, Status: StateLiveReplication.StateString()}, // crashed mid-replication
+			{ID: 3, Status: StatusRunning},                      // legacy literal running
+			{ID: 4, Status: StatusCompleted},                    // terminal, must be skipped
+			{ID: 5, Status: StatePaused.StateString()},          // paused, must be skipped
+			{ID: 6, Status: StatusInterrupted},                  // already interrupted, skipped
+		},
+	}
+
+	executor := &Executor{repo: repo}
+
+	recovered, err := executor.RecoverInterrupted()
+	if err != nil {
+		t.Fatalf("RecoverInterrupted failed: %v", err)
+	}
+
+	if len(recovered) != 3 {
+		t.Fatalf("expected 3 recovered migrations, got %d: %v", len(recovered), recovered)
+	}
+
+	for _, id := range []int{1, 2, 3} {
+		m, _ := repo.GetMigration(id)
+		if m.Status != StatusInterrupted {
+			t.Fatalf("expected migration %d status %q, got %q", id, StatusInterrupted, m.Status)
+		}
+	}
+
+	// Paused, completed, and already-interrupted migrations must be untouched.
+	m4, _ := repo.GetMigration(4)
+	if m4.Status != StatusCompleted {
+		t.Fatalf("expected migration 4 to stay %q, got %q", StatusCompleted, m4.Status)
+	}
+	m5, _ := repo.GetMigration(5)
+	if m5.Status != StatePaused.StateString() {
+		t.Fatalf("expected migration 5 to stay %q, got %q", StatePaused.StateString(), m5.Status)
+	}
+}
+
+// TestRecoverInterruptedResetsStateColumn verifies that when the repo supports
+// typed state, recovery resets the state column to Interrupted, not just the
+// legacy status. This keeps the migration resumable: Resume reads
+// GetMigrationState (which prefers the state column) and requires CanResume().
+func TestRecoverInterruptedResetsStateColumn(t *testing.T) {
+	repo := &stateAwareMockRepo{
+		mockRepo: mockRepo{
+			migrations: []Migration{
+				{ID: 1, Status: StateInitialSync.StateString()},
+			},
+		},
+	}
+
+	executor := &Executor{repo: repo}
+
+	recovered, err := executor.RecoverInterrupted()
+	if err != nil {
+		t.Fatalf("RecoverInterrupted failed: %v", err)
+	}
+	if len(recovered) != 1 {
+		t.Fatalf("expected 1 recovered migration, got %d", len(recovered))
+	}
+
+	if got := repo.states[1]; got != StateInterrupted {
+		t.Fatalf("expected state column reset to %v, got %v", StateInterrupted, got)
+	}
+	if !repo.states[1].CanResume() {
+		t.Fatalf("recovered migration must be resumable, state %v CanResume=false", repo.states[1])
+	}
+	m, _ := repo.GetMigration(1)
+	if m.Status != StatusInterrupted {
+		t.Fatalf("expected status %q, got %q", StatusInterrupted, m.Status)
+	}
+}
+
+// TestRecoverInterruptedIsIdempotent verifies that running recovery twice
+// produces no further changes on the second pass — after the first pass every
+// migration is interrupted, which IsRunning() excludes.
+func TestRecoverInterruptedIsIdempotent(t *testing.T) {
+	repo := &mockRepo{
+		migrations: []Migration{
+			{ID: 1, Status: StateInitialSync.StateString()},
+			{ID: 2, Status: StatusRunning},
+		},
+	}
+	executor := &Executor{repo: repo}
+
+	first, err := executor.RecoverInterrupted()
+	if err != nil {
+		t.Fatalf("first RecoverInterrupted failed: %v", err)
+	}
+	if len(first) != 2 {
+		t.Fatalf("expected 2 recovered on first pass, got %d", len(first))
+	}
+
+	second, err := executor.RecoverInterrupted()
+	if err != nil {
+		t.Fatalf("second RecoverInterrupted failed: %v", err)
+	}
+	if len(second) != 0 {
+		t.Fatalf("expected 0 recovered on second pass, got %d: %v", len(second), second)
+	}
+}
+
 // TestGetAppliedCategories verifies that the repo correctly returns
 // categories that have been applied (StepStatusApplied).
 func TestGetAppliedCategories(t *testing.T) {
