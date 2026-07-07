@@ -1208,7 +1208,11 @@ func (s *preparationStage) Rollback(ctx context.Context, pc *PipelineContext) er
 	return nil
 }
 
-// initialSyncStage performs the initial data transfer from source to target.
+// initialSyncStage applies the data collected during the collect phase to the
+// target by replaying each category's Applier.Apply. Despite the stage name,
+// this is NOT a file-level rsync transfer: the SyncEngine (InitialSync /
+// DeltaSync) is not driven by the live pipeline (see the NOTE in Execute), so
+// only what each category collector captured is reproduced on the target.
 type initialSyncStage struct {
 	repo PipelineRepo
 }
@@ -1216,14 +1220,15 @@ type initialSyncStage struct {
 func (s *initialSyncStage) Name() PipelineStageName { return StageInitialSync }
 
 func (s *initialSyncStage) Execute(ctx context.Context, pc *PipelineContext) error {
-	pc.OnProgress(WSMessage{Step: "initial_sync", Status: "progress", Value: "Starting initial data sync..."})
+	pc.OnProgress(WSMessage{Step: "initial_sync", Status: "progress", Value: "Applying collected data to target..."})
 
-	// NOTE (latent bug): syncConfigFromPipelineContext(pc) builds a SyncConfig
-	// from the target server metadata, but this stage applies data via
-	// mod.Applier.Apply below and never drives the SyncEngine, so the config is
-	// not consumed here. The call is intentionally omitted rather than
-	// discarding its result. If/when this stage is wired to SyncEngine
-	// (InitialSync/DeltaSync), pass syncConfigFromPipelineContext(pc) into it.
+	// NOTE: this stage does not perform a file-level rsync data transfer. The
+	// SyncEngine (InitialSync/DeltaSync in sync.go) is constructed but has no
+	// live pipeline caller, so syncConfigFromPipelineContext(pc) is not built or
+	// consumed here. Instead the stage replays each collected category via
+	// mod.Applier.Apply below. If/when this stage is wired to the SyncEngine,
+	// pass syncConfigFromPipelineContext(pc) into it and update the progress
+	// messages to reflect the real transfer.
 
 	// Apply collected data to target (this is the "initial sync" for file-based categories)
 	steps, err := pc.JobRepo.GetSteps(pc.MigrationID)
@@ -1296,7 +1301,7 @@ func (s *initialSyncStage) Execute(ctx context.Context, pc *PipelineContext) err
 		return fmt.Errorf("initial sync skipped %d categories: %v", len(skippedCategories), skippedCategories)
 	}
 
-	pc.OnProgress(WSMessage{Step: "initial_sync", Status: "success", Value: "Initial sync completed"})
+	pc.OnProgress(WSMessage{Step: "initial_sync", Status: "success", Value: "Collected data applied to target"})
 	return nil
 }
 
