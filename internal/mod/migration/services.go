@@ -63,8 +63,37 @@ func (c *ServicesCollector) Collect(ctx context.Context, ssh SSHExecuter) (Categ
 // ServicesApplier enables services on the target server.
 type ServicesApplier struct{}
 
+// usesSystemd reports whether the distro family manages services through
+// systemd. Alpine uses OpenRC (rc-update/rc-service); unknown families have no
+// verified init system. Only the families below are driven with systemctl,
+// matching the EnableService/StartService commands in their DistroAdapters.
+func usesSystemd(info DistroInfo) bool {
+	switch info.Family {
+	case "debian", "rhel", "arch", "suse":
+		return true
+	default:
+		return false // alpine (OpenRC) and unrecognized families
+	}
+}
+
 // Backup saves the target's currently enabled services.
+//
+// Service backup and rollback are implemented for systemd only. On OpenRC
+// targets (Alpine) `systemctl` does not exist: the query below returned an
+// empty list with a nil transport error, producing a false "successful" backup
+// that captured nothing and could never be rolled back. Because Backup is the
+// mandatory gate before Apply, that meant services were enabled on the target
+// with no way to undo them. Fail closed instead so the gate aborts the
+// migration rather than applying an unrollbackable change.
 func (a *ServicesApplier) Backup(ctx context.Context, ssh SSHExecuter) (BackupData, error) {
+	info, err := DetectDistro(ctx, ssh)
+	if err != nil {
+		return BackupData{}, err
+	}
+	if !usesSystemd(info) {
+		return BackupData{}, fmt.Errorf("service migration is not supported on %q (family %q): only systemd targets have a verified service backup/rollback path — OpenRC (Alpine) and unknown init systems are not yet supported", info.Name, info.Family)
+	}
+
 	stdout, _, _, err := ssh.ExecContext(ctx, "systemctl list-unit-files --type=service --state=enabled --no-legend 2>/dev/null")
 	if err != nil {
 		return BackupData{}, err

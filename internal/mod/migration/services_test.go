@@ -32,6 +32,7 @@ func TestServicesCollector(t *testing.T) {
 
 func TestServicesApplierBackup(t *testing.T) {
 	ssh := newMockSSH()
+	ssh.execOutput["cat /etc/os-release"] = "ID=ubuntu\nVERSION_ID=22.04"
 	ssh.execOutput["systemctl list-unit-files --type=service --state=enabled --no-legend 2>/dev/null"] =
 		"nginx.service      enabled\n"
 
@@ -45,6 +46,22 @@ func TestServicesApplierBackup(t *testing.T) {
 	json.Unmarshal(backup.Data, &sb)
 	if len(sb.Services) != 1 || sb.Services[0] != "nginx" {
 		t.Errorf("expected ['nginx'], got %v", sb.Services)
+	}
+}
+
+// TestServicesApplierBackupFailsClosedOnOpenRC proves that service backup
+// refuses an Alpine/OpenRC target instead of recording an empty systemd backup.
+// Backup is the mandatory gate before Apply, so a false-success here would let
+// the migration enable services on the target with nothing to roll back to.
+func TestServicesApplierBackupFailsClosedOnOpenRC(t *testing.T) {
+	ssh := newMockSSH()
+	ssh.execOutput["cat /etc/os-release"] = "NAME=\"Alpine Linux\"\nID=alpine\nVERSION_ID=3.19.1"
+	// systemctl would return empty on Alpine; even so, backup must not "succeed".
+	ssh.execOutput["systemctl list-unit-files --type=service --state=enabled --no-legend 2>/dev/null"] = ""
+
+	applier := &ServicesApplier{}
+	if _, err := applier.Backup(context.Background(), ssh); err == nil {
+		t.Fatal("expected Backup to fail closed on an OpenRC (Alpine) target, got nil error")
 	}
 }
 
