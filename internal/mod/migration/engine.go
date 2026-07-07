@@ -7,6 +7,7 @@ import (
 	"log"
 	"sync"
 
+	"meshium/internal/mod/observ"
 	"meshium/internal/mod/server"
 )
 
@@ -28,6 +29,7 @@ type Engine struct {
 	authSvc  AESKeyProvider
 	hosts    HostKeyStore
 	registry *CategoryRegistry
+	observer *observ.Recorder
 	mu       sync.Mutex
 }
 
@@ -47,6 +49,7 @@ func NewEngine(
 		authSvc:  authSvc,
 		hosts:    hosts,
 		registry: registry,
+		observer: observ.NewRecorder(nil),
 	}
 }
 
@@ -106,6 +109,10 @@ func (e *Engine) Run(ctx context.Context, migrationID int, steps []MigrationStep
 		currentState, _ = StateFromString(migration.Status)
 	}
 	sm := NewStateMachine(currentState)
+
+	// Observability: the migration lifecycle has begun. Emitted once; the stage
+	// is the entry state so a timeline reads from the migration's real start.
+	e.obsMigrationStarted(migrationID, stageOf(sm.State()))
 
 	// Load the migration job
 	job := &MigrationJob{
@@ -356,6 +363,7 @@ func (e *Engine) Run(ctx context.Context, migrationID int, steps []MigrationStep
 	}
 
 	result.FinalState = sm.State()
+	e.obsMigrationCompleted(migrationID, stageOf(sm.State()))
 	onProgress(WSMessage{Step: "engine", Status: "complete", Value: "Migration committed successfully"})
 	return result, nil
 }
@@ -527,18 +535,27 @@ func (e *Engine) Resume(ctx context.Context, migrationID int, steps []MigrationS
 
 // transition validates and persists a state transition.
 func (e *Engine) transition(ctx context.Context, sm *StateMachine, migrationID int, to MigrationState, onProgress StepCallback, label string) error {
+	from := sm.State()
 	if err := sm.Transition(to); err != nil {
 		return fmt.Errorf("state transition to %s failed: %w", label, err)
 	}
 	if err := e.repo.SetMigrationStateContext(ctx, migrationID, to); err != nil {
 		return fmt.Errorf("persist state %s failed: %w", label, err)
 	}
+	// Observability: the state we left has completed, the state we entered has
+	// begun. Emitted after the transition is durably persisted so an observer
+	// never sees a stage the migration did not actually enter.
+	e.obsStageCompleted(migrationID, stageOf(from))
+	e.obsStageStarted(migrationID, stageOf(to))
 	onProgress(WSMessage{Step: "engine", Status: "progress", Value: fmt.Sprintf("State: %s", to.String())})
 	return nil
 }
 
 // failMigration transitions to Failed state.
 func (e *Engine) failMigration(ctx context.Context, sm *StateMachine, migrationID int, errMsg string, onProgress StepCallback) {
+	// Observability: record the stage that failed before the state changes, so
+	// the event's stage reflects where the migration actually broke.
+	e.obsStageFailed(migrationID, stageOf(sm.State()), errMsg)
 	onProgress(WSMessage{Step: "engine", Status: "error", Error: errMsg})
 	if err := sm.Transition(StateFailed); err != nil {
 		sm.ForceTransition(StateFailed)
@@ -617,6 +634,9 @@ func (e *Engine) failAndRollback(ctx context.Context, sm *StateMachine, migratio
 
 // interruptMigration handles context cancellation by marking the migration as interrupted.
 func (e *Engine) interruptMigration(ctx context.Context, sm *StateMachine, migrationID int, appliedSteps []int, steps []MigrationStep, sshClient SSHExecuter, onProgress StepCallback) {
+	// Observability: record the interruption at the stage it happened, before
+	// the state machine moves to Interrupted.
+	e.obsMigrationInterrupted(migrationID, stageOf(sm.State()), "context cancelled")
 	onProgress(WSMessage{Step: "engine", Status: "warning", Value: "Migration interrupted by context cancellation"})
 
 	// Transition to Interrupted
