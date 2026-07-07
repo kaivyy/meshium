@@ -403,15 +403,26 @@ func (c *Collector) CollectNetworkInfoContext(ctx context.Context, onStep func(S
 	var wg sync.WaitGroup
 	wg.Add(2)
 
+	// The two goroutines below call onStep concurrently, so serialize the
+	// callback to protect whatever shared state the caller mutates inside it
+	// (e.g. RunConnectionTest writes to a shared SystemInfo). Callers must not
+	// assume any ordering between public_ip and provider results.
+	var stepMu sync.Mutex
+	safeStep := func(sr StepResult) {
+		stepMu.Lock()
+		defer stepMu.Unlock()
+		onStep(sr)
+	}
+
 	// public_ip: curl ifconfig.me (can take 1-5s)
 	go func() {
 		defer wg.Done()
 		stdout, _, _, err := c.client.ExecContext(ctx, "curl -s --max-time 3 ifconfig.me")
 		if err != nil {
-			onStep(StepResult{Name: "public_ip", Error: err})
+			safeStep(StepResult{Name: "public_ip", Error: err})
 			return
 		}
-		onStep(StepResult{Name: "public_ip", Value: strings.TrimSpace(stdout)})
+		safeStep(StepResult{Name: "public_ip", Value: strings.TrimSpace(stdout)})
 	}()
 
 	// provider: curl 169.254.169.254 (AWS metadata, times out in 2s on non-AWS)
@@ -419,15 +430,15 @@ func (c *Collector) CollectNetworkInfoContext(ctx context.Context, onStep func(S
 		defer wg.Done()
 		stdout, _, _, err := c.client.ExecContext(ctx, "curl -s --max-time 1 http://169.254.169.254/latest/meta-data/instance-id 2>/dev/null || echo unknown")
 		if err != nil {
-			onStep(StepResult{Name: "provider", Value: "unknown"})
+			safeStep(StepResult{Name: "provider", Value: "unknown"})
 			return
 		}
 		value := strings.TrimSpace(stdout)
 		if value == "" || value == "unknown" {
-			onStep(StepResult{Name: "provider", Value: "unknown"})
+			safeStep(StepResult{Name: "provider", Value: "unknown"})
 			return
 		}
-		onStep(StepResult{Name: "provider", Value: "cloud"})
+		safeStep(StepResult{Name: "provider", Value: "cloud"})
 	}()
 
 	wg.Wait()
