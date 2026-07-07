@@ -502,6 +502,16 @@ func (c *Client) ExecStreamLinesContextWithTimeout(ctx context.Context, cmd stri
 		return err
 	}
 
+	// stdout is scanned in this goroutine and stderr in the goroutine below,
+	// both calling onOutput. Serialize the callback so it is never invoked
+	// concurrently — callers must not have to guard their own callback state.
+	var outMu sync.Mutex
+	safeOutput := func(source StreamSource, line string) {
+		outMu.Lock()
+		defer outMu.Unlock()
+		onOutput(source, line)
+	}
+
 	// Scan stderr in a goroutine so we can interleave stdout and stderr
 	// without blocking on either pipe.
 	stderrDone := make(chan error, 1)
@@ -509,7 +519,7 @@ func (c *Client) ExecStreamLinesContextWithTimeout(ctx context.Context, cmd stri
 		scanner := bufio.NewScanner(stderr)
 		scanner.Buffer(make([]byte, 0, maxScanBufferSize), maxScanBufferSize)
 		for scanner.Scan() {
-			onOutput(StreamStderr, scanner.Text())
+			safeOutput(StreamStderr, scanner.Text())
 		}
 		stderrDone <- scanner.Err()
 	}()
@@ -518,7 +528,7 @@ func (c *Client) ExecStreamLinesContextWithTimeout(ctx context.Context, cmd stri
 	scanner := bufio.NewScanner(stdout)
 	scanner.Buffer(make([]byte, 0, maxScanBufferSize), maxScanBufferSize)
 	for scanner.Scan() {
-		onOutput(StreamStdout, scanner.Text())
+		safeOutput(StreamStdout, scanner.Text())
 	}
 	if execCtx.Err() != nil {
 		return execCtx.Err()
