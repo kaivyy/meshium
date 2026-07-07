@@ -99,7 +99,15 @@ func (e *Executor) PreFlight(ctx context.Context, migrationID int, onProgress St
 	} else if availableBytes, parseErr := parseDFAvailableBytes(stdout); parseErr != nil {
 		addWarning(fmt.Sprintf("could not parse target disk space: %v", parseErr))
 	} else if availableBytes < 1<<30 {
-		addWarning(fmt.Sprintf("target root filesystem has only %s available", formatBytes(availableBytes)))
+		// A per-migration estimated data size is not available here: the
+		// Migration/MigrationPlan model carries no aggregate byte count, and
+		// the size estimator lives in the planner package operating on
+		// PlannedStep. Until that is wired through, block on clearly
+		// insufficient free space (< 1 GiB) rather than merely warning, since
+		// almost any real migration needs more than that.
+		addError(fmt.Sprintf("target root filesystem has only %s available (insufficient for migration)", formatBytes(availableBytes)))
+	} else if availableBytes < 5<<30 {
+		addWarning(fmt.Sprintf("target root filesystem has only %s available; migration may exceed available space", formatBytes(availableBytes)))
 	} else {
 		onProgress(WSMessage{Step: "preflight:disk", Status: "success", Value: "Target disk space is sufficient"})
 	}
@@ -119,7 +127,15 @@ func (e *Executor) PreFlight(ctx context.Context, migrationID int, onProgress St
 		onProgress(WSMessage{Step: "preflight:os", Status: "progress", Value: fmt.Sprintf("Source distro detected: %s", sourceInfo.Name)})
 	}
 	if sourceOK && targetOK && sourceInfo.Family != "" && targetInfo.Family != "" && sourceInfo.Family != targetInfo.Family {
-		addWarning(fmt.Sprintf("source family %s differs from target family %s", sourceInfo.Family, targetInfo.Family))
+		// A family mismatch is only a warning for data-only migrations, but
+		// package and service migrations depend on the distro's package
+		// manager and init layout: transferring apt packages or systemd unit
+		// specifics onto a different family will not work, so block those.
+		if contains(migration.Categories, "packages") || contains(migration.Categories, "services") {
+			addError(fmt.Sprintf("incompatible OS families for package/service migration: source %s vs target %s", sourceInfo.Family, targetInfo.Family))
+		} else {
+			addWarning(fmt.Sprintf("source family %s differs from target family %s", sourceInfo.Family, targetInfo.Family))
+		}
 	}
 
 	// If Docker is part of the migration, ensure it exists on target.
@@ -138,8 +154,6 @@ func (e *Executor) PreFlight(ctx context.Context, migrationID int, onProgress St
 		} else {
 			onProgress(WSMessage{Step: "preflight:docker", Status: "success", Value: "Docker is available on the target"})
 		}
-	} else if err != nil {
-		addWarning(fmt.Sprintf("could not parse migration categories: %v", err))
 	}
 
 	result.OK = len(result.Errors) == 0

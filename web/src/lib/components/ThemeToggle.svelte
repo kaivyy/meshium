@@ -8,7 +8,7 @@
 <button
   type="button"
   onclick={() => cycleTheme($themeStore)}
-  class="p-1.5 rounded-lg text-fg-subtle hover:text-fg hover:bg-surface-muted transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent focus-visible:ring-offset-2"
+  class="flex h-9 w-9 items-center justify-center rounded-lg text-fg-subtle hover:text-fg hover:bg-surface-muted transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent focus-visible:ring-offset-2"
   aria-label={`Theme: ${labels[$themeStore]}. Click to change.`}
   title={labels[$themeStore]}
 >

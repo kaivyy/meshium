@@ -16,9 +16,19 @@
     label?: string;
     align?: 'left' | 'right';
     trigger?: Snippet;
+    block?: boolean;
   }
 
-  let { items, label = 'Open menu', align = 'right', trigger }: Props = $props();
+  let { items, label = 'Open menu', align = 'right', trigger, block = false }: Props = $props();
+
+  // When `block` is set, the menu fills its container on mobile and reverts to
+  // auto width from the `sm` breakpoint up, so it can sit in a responsive grid.
+  const wrapperClass = $derived(block ? 'relative w-full sm:w-auto' : 'relative');
+  const buttonClass = $derived(
+    trigger
+      ? `${block ? 'flex w-full sm:inline-flex sm:w-auto' : 'inline-flex'} items-center justify-center`
+      : `${block ? 'flex w-full sm:inline-flex sm:w-auto' : 'inline-flex'} items-center justify-center rounded-lg p-1.5 text-fg-subtle transition-colors hover:bg-surface-muted hover:text-fg`
+  );
 
   let open = $state(false);
   let menuEl: HTMLDivElement | null = null;
@@ -52,13 +62,13 @@
   });
 </script>
 
-<div class="relative" bind:this={menuEl}>
+<div class={wrapperClass} bind:this={menuEl}>
   <button
     type="button"
     onclick={toggle}
     aria-label={label}
     aria-expanded={open}
-    class="inline-flex items-center justify-center rounded-lg p-1.5 text-fg-subtle transition-colors hover:bg-surface-muted hover:text-fg"
+    class={buttonClass}
   >
     {#if trigger}
       {@render trigger()}

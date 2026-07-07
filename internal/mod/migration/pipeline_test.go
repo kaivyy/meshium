@@ -402,13 +402,21 @@ func TestCompatibilityRAM(t *testing.T) {
 func TestCompatibilityDisk(t *testing.T) {
 	engine := &CompatibilityEngine{}
 
-	// Target has less disk → critical
-	result := engine.checkDisk(&serverInfo{DiskGB: 500}, &serverInfo{DiskGB: 100})
+	// Target available space cannot hold the source's used data → critical.
+	// Source uses 450GB; target only has 100GB available.
+	result := engine.checkDisk(&serverInfo{DiskUsedGB: 450, DiskGB: 50}, &serverInfo{DiskGB: 100})
 	if result.Passed {
-		t.Error("expected target with less disk to fail")
+		t.Error("expected target that cannot hold source used data to fail")
 	}
 	if result.Severity != SeverityCritical {
 		t.Errorf("expected critical severity for disk, got %s", result.Severity)
+	}
+
+	// Target available space comfortably holds the source's used data → pass,
+	// even though the target's total/available is smaller than the source's.
+	result = engine.checkDisk(&serverInfo{DiskUsedGB: 40, DiskGB: 460}, &serverInfo{DiskGB: 100})
+	if !result.Passed {
+		t.Error("expected target that can hold source used data to pass")
 	}
 }
 

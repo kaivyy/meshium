@@ -232,7 +232,7 @@
         No history entries match the current filters.
       </div>
     {:else}
-      <div class="overflow-x-auto rounded-2xl border border-border bg-surface shadow-sm">
+      <div class="hidden overflow-x-auto rounded-2xl border border-border bg-surface shadow-sm md:block">
         <table class="min-w-full divide-y divide-border">
           <thead class="bg-surface-muted">
             <tr>
@@ -281,6 +281,60 @@
             {/each}
           </tbody>
         </table>
+      </div>
+
+      <!-- Mobile: stacked cards -->
+      <div class="mt-4 space-y-3 md:hidden">
+        {#each filteredHistory as entry}
+          <div class="rounded-xl border border-border bg-surface p-4">
+            <div class="flex items-center justify-between gap-2">
+              <span class="min-w-0 break-words font-medium text-fg">{entry.serverName || `Server #${entry.serverId}`}</span>
+              <span class={`inline-flex shrink-0 rounded-full px-2.5 py-1 text-xs font-medium ${successBadge(entry.success)}`}>
+                {entry.success ? 'Success' : 'Failure'}
+              </span>
+            </div>
+            <div class="mt-1 text-xs text-fg-subtle">{entry.hostname || entry.ip || '—'} · {entry.username}</div>
+            <dl class="mt-3 grid grid-cols-2 gap-x-4 gap-y-2 text-sm">
+              <div>
+                <dt class="text-xs uppercase tracking-wide text-fg-subtle">Auth</dt>
+                <dd class="break-words text-fg-muted">{entry.authMethod || '—'}</dd>
+                <dd class="mt-1 text-xs text-fg-subtle">{entry.agentUsed ? 'Agent used' : 'No agent'}{entry.keyFingerprint ? ` · ${entry.keyFingerprint.slice(0, 16)}…` : ''}</dd>
+              </div>
+              <div>
+                <dt class="text-xs uppercase tracking-wide text-fg-subtle">Latency</dt>
+                <dd class="break-words text-fg-muted">{formatLatency(entry.latencyMs)}</dd>
+              </div>
+              <div>
+                <dt class="text-xs uppercase tracking-wide text-fg-subtle">Duration</dt>
+                <dd class="break-words text-fg-muted">{formatDuration(entry.durationMs)}</dd>
+              </div>
+              <div>
+                <dt class="text-xs uppercase tracking-wide text-fg-subtle">Timestamp</dt>
+                <dd class="break-words text-fg-muted">{formatDate(entry.timestamp)}</dd>
+              </div>
+              <div class="col-span-2">
+                <dt class="text-xs uppercase tracking-wide text-fg-subtle">Cipher / KEX</dt>
+                <dd class="break-all text-fg-muted">{entry.cipher || '—'}</dd>
+                <dd class="mt-1 break-all text-xs text-fg-subtle">{entry.kex || '—'}</dd>
+                {#if entry.compression}
+                  <dd class="mt-1 break-all text-xs text-fg-subtle">Compression: {entry.compression}</dd>
+                {/if}
+              </div>
+              {#if !entry.success && entry.failureReason}
+                <div class="col-span-2">
+                  <dt class="text-xs uppercase tracking-wide text-fg-subtle">Failure reason</dt>
+                  <dd class="break-words text-error">{entry.failureReason}</dd>
+                </div>
+              {/if}
+              {#if entry.exitStatus}
+                <div class="col-span-2">
+                  <dt class="text-xs uppercase tracking-wide text-fg-subtle">Exit status</dt>
+                  <dd class="break-words text-fg-subtle">{entry.exitStatus}</dd>
+                </div>
+              {/if}
+            </dl>
+          </div>
+        {/each}
       </div>
     {/if}
 

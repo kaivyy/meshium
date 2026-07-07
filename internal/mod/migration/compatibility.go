@@ -80,7 +80,12 @@ func (e *CompatibilityEngine) CheckCompatibility(ctx context.Context, migrationI
 			Expected:         "compatible",
 			Actual:           r.Message,
 			Passed:           r.Passed,
-			ErrorMessage:     func() string { if r.Passed { return "" }; return r.Message }(),
+			ErrorMessage: func() string {
+				if r.Passed {
+					return ""
+				}
+				return r.Message
+			}(),
 		})
 	}
 
@@ -99,29 +104,36 @@ func HasBlockers(results []CompatibilityCheckResult) bool {
 
 // serverInfo holds collected server information.
 type serverInfo struct {
-	Arch             string
-	CPUCores         int
-	RAMMB            int
-	DiskGB           float64
-	Kernel           string
-	OS               string
-	DockerVersion    string
-	ComposeVersion   string
-	PackageManager   string
-	Timezone         string
-	OpenSSLVersion   string
-	StorageDriver    string
-	SELinux          string
-	Distro           string
-	OpenPorts        []string
+	Arch           string
+	CPUCores       int
+	RAMMB          int
+	DiskGB         float64 // available space on / (df column 4)
+	DiskUsedGB     float64 // used space on / (df column 3)
+	Kernel         string
+	OS             string
+	DockerVersion  string
+	ComposeVersion string
+	PackageManager string
+	Timezone       string
+	OpenSSLVersion string
+	StorageDriver  string
+	SELinux        string
+	Distro         string
+	OpenPorts      []string
 }
 
 // collectServerInfo gathers system information from a server via SSH.
 func (e *CompatibilityEngine) collectServerInfo(ctx context.Context, ssh SSHExecuter) (*serverInfo, error) {
 	info := &serverInfo{}
 
-	// Architecture
-	output, _, _, _ := ssh.ExecContext(ctx, "uname -m 2>&1")
+	// Architecture. This is the first probe against the connection; if it
+	// fails the SSH session is unusable, so surface the error instead of
+	// silently returning a zero-valued serverInfo (which would make every
+	// downstream check falsely pass). Callers treat this as a critical blocker.
+	output, _, _, err := ssh.ExecContext(ctx, "uname -m 2>&1")
+	if err != nil {
+		return nil, fmt.Errorf("ssh probe failed (uname -m): %w", err)
+	}
 	info.Arch = strings.TrimSpace(output)
 
 	// CPU cores
@@ -132,9 +144,18 @@ func (e *CompatibilityEngine) collectServerInfo(ctx context.Context, ssh SSHExec
 	output, _, _, _ = ssh.ExecContext(ctx, "free -m 2>/dev/null | awk '/Mem:/ {print $2}'")
 	info.RAMMB, _ = strconv.Atoi(strings.TrimSpace(output))
 
-	// Disk
-	output, _, _, _ = ssh.ExecContext(ctx, "df -BG / 2>/dev/null | awk 'NR==2 {print $2}'")
-	info.DiskGB, _ = strconv.ParseFloat(strings.TrimSuffix(strings.TrimSpace(output), "G"), 64)
+	// Disk. Capture both USED ($3) and AVAILABLE ($4) on /. The capacity check
+	// compares the target's available space against the source's used data, so
+	// both figures are needed. A huge but nearly-full target disk must not read
+	// as "sufficient".
+	output, _, _, _ = ssh.ExecContext(ctx, "df -BG / 2>/dev/null | awk 'NR==2 {print $3, $4}'")
+	{
+		fields := strings.Fields(strings.TrimSpace(output))
+		if len(fields) >= 2 {
+			info.DiskUsedGB, _ = strconv.ParseFloat(strings.TrimSuffix(fields[0], "G"), 64)
+			info.DiskGB, _ = strconv.ParseFloat(strings.TrimSuffix(fields[1], "G"), 64)
+		}
+	}
 
 	// Kernel
 	output, _, _, _ = ssh.ExecContext(ctx, "uname -r 2>&1")
@@ -235,19 +256,23 @@ func (e *CompatibilityEngine) checkRAM(source, target *serverInfo) Compatibility
 }
 
 func (e *CompatibilityEngine) checkDisk(source, target *serverInfo) CompatibilityCheckResult {
-	if target.DiskGB >= source.DiskGB {
+	// The target must be able to hold the data actually stored on the source
+	// (source USED), not merely match the source's free space. Comparing the
+	// two available figures would pass a small target whenever it happened to
+	// have more free space than the source, even if it cannot fit the payload.
+	if target.DiskGB >= source.DiskUsedGB {
 		return CompatibilityCheckResult{
 			CheckName: "disk_capacity",
 			Severity:  SeverityInfo,
 			Passed:    true,
-			Message:   fmt.Sprintf("Target has sufficient disk: %.0fGB >= %.0fGB", target.DiskGB, source.DiskGB),
+			Message:   fmt.Sprintf("Target has sufficient disk: %.0fGB available >= %.0fGB used on source", target.DiskGB, source.DiskUsedGB),
 		}
 	}
 	return CompatibilityCheckResult{
 		CheckName: "disk_capacity",
 		Severity:  SeverityCritical,
 		Passed:    false,
-		Message:   fmt.Sprintf("Target has less disk: %.0fGB < %.0fGB", target.DiskGB, source.DiskGB),
+		Message:   fmt.Sprintf("Target has insufficient disk: %.0fGB available < %.0fGB used on source", target.DiskGB, source.DiskUsedGB),
 	}
 }
 

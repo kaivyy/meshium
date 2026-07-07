@@ -123,10 +123,10 @@
 
   // Close drawer on route change
   $effect(() => {
-    if (drawerOpen) {
-      // Track page changes to auto-close drawer
-      $page.url.pathname;
-    }
+    // Reading the pathname registers it as a dependency so this effect
+    // re-runs on navigation and closes the drawer.
+    void $page.url.pathname;
+    drawerOpen = false;
   });
 </script>
 
@@ -220,60 +220,62 @@
 
 <!-- Mobile bottom navbar with center drawer button -->
 <nav
-  class="md:hidden fixed bottom-0 inset-x-0 z-40 bg-surface border-t border-border flex items-center justify-around px-1 py-1 pb-[max(0.375rem,env(safe-area-inset-bottom))]"
+  class="md:hidden fixed bottom-0 inset-x-0 z-40 bg-surface border-t border-border flex items-stretch px-1 pt-1 pb-[max(0.375rem,env(safe-area-inset-bottom))]"
 >
   <!-- Left: 2 quick items -->
   {#each quickItems.slice(0, 2) as item}
     <a
       href={item.href}
       aria-current={isActive(item.href) ? 'page' : undefined}
-      class="flex flex-col items-center gap-0.5 px-2 py-1 rounded-lg text-[10px] transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent
-        {isActive(item.href) ? 'text-accent font-medium' : 'text-fg-subtle'}"
+      class="flex flex-1 basis-0 flex-col items-center justify-center gap-1 rounded-lg py-1.5 text-[10px] font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent
+        {isActive(item.href) ? 'text-accent' : 'text-fg-subtle'}"
     >
-      <div class="relative">
-        <item.icon size={20} />
+      <span class="relative flex h-6 w-6 items-center justify-center">
+        <item.icon size={20} class="shrink-0" />
         {#if item.href === '/jobs' && activeJobs > 0}
-          <span class="absolute -right-2 -top-2 inline-flex h-4 min-w-4 items-center justify-center rounded-full bg-accent px-1 text-[9px] font-semibold leading-none text-accent-fg">
+          <span class="absolute -right-2 -top-1.5 inline-flex h-4 min-w-4 items-center justify-center rounded-full bg-accent px-1 text-[9px] font-semibold leading-none text-accent-fg">
             {activeJobs}
           </span>
         {/if}
-      </div>
-      <span>{item.label}</span>
+      </span>
+      <span class="leading-none">{item.label}</span>
     </a>
   {/each}
 
   <!-- Center: Drawer toggle button -->
-  <button
-    type="button"
-    onclick={toggleDrawer}
-    class="flex flex-col items-center justify-center gap-0.5 -mt-4 rounded-full bg-accent px-4 py-2.5 text-accent-fg shadow-lg shadow-accent/30 transition-transform active:scale-95 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent focus-visible:ring-offset-2"
-    aria-label={drawerOpen ? 'Close menu' : 'Open menu'}
-    aria-expanded={drawerOpen}
-  >
-    {#if drawerOpen}
-      <X size={22} />
-    {:else}
-      <Grid size={22} />
-    {/if}
-  </button>
+  <div class="flex flex-1 basis-0 items-start justify-center">
+    <button
+      type="button"
+      onclick={toggleDrawer}
+      class="flex h-12 w-12 -translate-y-3 items-center justify-center rounded-full bg-accent text-accent-fg shadow-lg shadow-accent/30 transition-transform active:scale-95 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent focus-visible:ring-offset-2 focus-visible:ring-offset-surface"
+      aria-label={drawerOpen ? 'Close menu' : 'Open menu'}
+      aria-expanded={drawerOpen}
+    >
+      {#if drawerOpen}
+        <X size={22} class="shrink-0" />
+      {:else}
+        <Grid size={22} class="shrink-0" />
+      {/if}
+    </button>
+  </div>
 
   <!-- Right: 2 quick items -->
   {#each quickItems.slice(2) as item}
     <a
       href={item.href}
       aria-current={isActive(item.href) ? 'page' : undefined}
-      class="flex flex-col items-center gap-0.5 px-2 py-1 rounded-lg text-[10px] transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent
-        {isActive(item.href) ? 'text-accent font-medium' : 'text-fg-subtle'}"
+      class="flex flex-1 basis-0 flex-col items-center justify-center gap-1 rounded-lg py-1.5 text-[10px] font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent
+        {isActive(item.href) ? 'text-accent' : 'text-fg-subtle'}"
     >
-      <div class="relative">
-        <item.icon size={20} />
+      <span class="relative flex h-6 w-6 items-center justify-center">
+        <item.icon size={20} class="shrink-0" />
         {#if item.href === '/jobs' && activeJobs > 0}
-          <span class="absolute -right-2 -top-2 inline-flex h-4 min-w-4 items-center justify-center rounded-full bg-accent px-1 text-[9px] font-semibold leading-none text-accent-fg">
+          <span class="absolute -right-2 -top-1.5 inline-flex h-4 min-w-4 items-center justify-center rounded-full bg-accent px-1 text-[9px] font-semibold leading-none text-accent-fg">
             {activeJobs}
           </span>
         {/if}
-      </div>
-      <span>{item.label}</span>
+      </span>
+      <span class="leading-none">{item.label}</span>
     </a>
   {/each}
 </nav>

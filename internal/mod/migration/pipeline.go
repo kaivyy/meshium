@@ -203,6 +203,14 @@ func (p *Pipeline) Execute(ctx context.Context, migrationID int, onProgress Step
 		onProgress(WSMessage{Step: "pipeline", Status: "progress", Value: "Resuming migration..."})
 	}
 
+	// Mark the migration as running in the DB. RecoverInterrupted matches on
+	// StatusRunning, so without this a crashed pipeline can never be detected
+	// or recovered. This must happen before the long-running SSH/stage work.
+	if err := p.jobRepo.UpdateMigrationStatus(migrationID, StatusRunning, ""); err != nil {
+		log.Printf("warning: failed to mark migration %d as running: %v", migrationID, err)
+		onProgress(WSMessage{Step: "pipeline", Status: "warning", Value: fmt.Sprintf("Failed to persist running status: %v", err)})
+	}
+
 	// Create SSH connections
 	sourceServer, err := p.srvRepo.GetByID(migration.SourceID)
 	if err != nil {
@@ -1098,7 +1106,9 @@ func (s *planningStage) Execute(ctx context.Context, pc *PipelineContext) error 
 		if err != nil {
 			return fmt.Errorf("marshal %s data: %w", catName, err)
 		}
-		pc.JobRepo.CreateStep(pc.MigrationID, catName, "collect", string(rawData))
+		if _, err := pc.JobRepo.CreateStep(pc.MigrationID, catName, "collect", string(rawData)); err != nil {
+			return fmt.Errorf("persist collected %s data: %w", catName, err)
+		}
 
 		pc.OnProgress(WSMessage{Step: "planning", Status: "success", Value: fmt.Sprintf("Collected %s", catName)})
 	}
@@ -1175,9 +1185,16 @@ func (s *preparationStage) Execute(ctx context.Context, pc *PipelineContext) err
 			return fmt.Errorf("backup %s failed (migration aborted — no apply without backup): %w", catName, err)
 		}
 
-		// Save backup to DB
-		rawBackup, _ := json.Marshal(backup)
-		pc.JobRepo.CreateBackup(pc.MigrationID, pc.Migration.TargetID, catName, string(rawBackup))
+		// Save backup to DB. Persistence failure is fatal: initialSyncStage
+		// rollback restores from these records, so a lost backup means we
+		// could apply to the target with no way to restore it.
+		rawBackup, err := json.Marshal(backup)
+		if err != nil {
+			return fmt.Errorf("marshal %s backup failed (migration aborted — no apply without backup): %w", catName, err)
+		}
+		if _, err := pc.JobRepo.CreateBackup(pc.MigrationID, pc.Migration.TargetID, catName, string(rawBackup)); err != nil {
+			return fmt.Errorf("persist %s backup failed (migration aborted — no apply without backup): %w", catName, err)
+		}
 
 		pc.OnProgress(WSMessage{Step: "preparation", Status: "success", Value: fmt.Sprintf("Backed up %s", catName)})
 	}
@@ -1201,8 +1218,12 @@ func (s *initialSyncStage) Name() PipelineStageName { return StageInitialSync }
 func (s *initialSyncStage) Execute(ctx context.Context, pc *PipelineContext) error {
 	pc.OnProgress(WSMessage{Step: "initial_sync", Status: "progress", Value: "Starting initial data sync..."})
 
-	// Prepare target SSH metadata for sync-related stages and verification.
-	_ = syncConfigFromPipelineContext(pc)
+	// NOTE (latent bug): syncConfigFromPipelineContext(pc) builds a SyncConfig
+	// from the target server metadata, but this stage applies data via
+	// mod.Applier.Apply below and never drives the SyncEngine, so the config is
+	// not consumed here. The call is intentionally omitted rather than
+	// discarding its result. If/when this stage is wired to SyncEngine
+	// (InitialSync/DeltaSync), pass syncConfigFromPipelineContext(pc) into it.
 
 	// Apply collected data to target (this is the "initial sync" for file-based categories)
 	steps, err := pc.JobRepo.GetSteps(pc.MigrationID)
@@ -1521,8 +1542,12 @@ func (s *healthVerificationStage) Execute(ctx context.Context, pc *PipelineConte
 
 	// Basic health check: verify target is responsive
 	output, _, _, err := pc.TargetSSH.ExecContext(ctx, "echo ok")
-	if err != nil || output != "ok\n" {
+	if err != nil {
 		return fmt.Errorf("target health check failed: %w", err)
+	}
+	if output != "ok\n" {
+		// err is nil here, so don't wrap it (would render as %!w(<nil>)).
+		return fmt.Errorf("target health check failed: unexpected output %q", output)
 	}
 
 	// Check Docker containers if docker category is included
@@ -1677,25 +1702,54 @@ func (s *postCutoverObservationStage) Execute(ctx context.Context, pc *PipelineC
 
 		// Check target health
 		output, _, _, err := pc.TargetSSH.ExecContext(ctx, "echo ok")
-		if err != nil || output != "ok\n" {
-			if pc.Config.AutoRollbackOnError {
-				return fmt.Errorf("target health check failed during observation: %w", err)
+		healthy := err == nil && output == "ok\n"
+
+		if !healthy {
+			// Build a real error describing the failure. err may be nil when
+			// the command succeeded but returned unexpected output, so avoid
+			// wrapping a nil error (which renders as %!w(<nil>)).
+			var healthErr error
+			if err != nil {
+				healthErr = fmt.Errorf("target health check failed during observation: %w", err)
+			} else {
+				healthErr = fmt.Errorf("target health check failed during observation: unexpected output %q", output)
 			}
-			pc.OnProgress(WSMessage{Step: "observation", Status: "warning", Value: "Health check warning"})
+			if pc.Config.AutoRollbackOnError {
+				return healthErr
+			}
+			pc.OnProgress(WSMessage{Step: "observation", Status: "warning", Value: fmt.Sprintf("Health check warning: %v", healthErr)})
 		}
 
-		// Record health check
-		pc.Repo.CreateHealthCheckResult(ctx, HealthCheckResult{
+		// Record the actual health status/score from the check, not a
+		// hard-coded healthy result.
+		healthResult := HealthCheckResult{
 			MigrationID: pc.MigrationID,
 			ServerID:    pc.Migration.TargetID,
 			CheckType:   HealthCheckTCP,
 			CheckTarget: pc.TargetServer.Host,
-			Status:      "healthy",
-			HealthScore: 100,
-		})
+		}
+		if healthy {
+			healthResult.Status = "healthy"
+			healthResult.HealthScore = 100
+		} else {
+			healthResult.Status = "unhealthy"
+			healthResult.HealthScore = 0
+			if err != nil {
+				healthResult.ErrorMessage = err.Error()
+			} else {
+				healthResult.ErrorMessage = fmt.Sprintf("unexpected output %q", output)
+			}
+		}
+		if _, err := pc.Repo.CreateHealthCheckResult(ctx, healthResult); err != nil {
+			log.Printf("warning: failed to persist observation health check for migration %d: %v", pc.MigrationID, err)
+		}
 
 		remaining := time.Until(deadline).Round(time.Second)
-		pc.OnProgress(WSMessage{Step: "observation", Status: "progress", Value: fmt.Sprintf("Observation OK — %s remaining", remaining)})
+		healthLabel := "OK"
+		if !healthy {
+			healthLabel = "DEGRADED"
+		}
+		pc.OnProgress(WSMessage{Step: "observation", Status: "progress", Value: fmt.Sprintf("Observation %s — %s remaining", healthLabel, remaining)})
 
 		select {
 		case <-ctx.Done():
@@ -1729,9 +1783,19 @@ func (s *finalizationStage) Execute(ctx context.Context, pc *PipelineContext) er
 		return fmt.Errorf("failed to load steps: %w", err)
 	}
 
+	// Finalization runs AFTER trafficSwitch and postCutoverObservation, so the
+	// target is already live with the migrated data. A returned error here would
+	// propagate to Execute's rollback path, which restores the target's stale
+	// pre-migration backups — destroying the freshly-migrated data over a benign,
+	// transient DB write failure (e.g. "database is locked"). This status update
+	// is cosmetic bookkeeping (Applied → Completed); log and continue instead of
+	// triggering a destructive rollback of an already-cutover migration.
 	for _, step := range steps {
 		if step.Status == StepStatusApplied {
-			pc.JobRepo.UpdateStepStatus(step.ID, StepStatusCompleted, "")
+			if err := pc.JobRepo.UpdateStepStatus(step.ID, StepStatusCompleted, ""); err != nil {
+				log.Printf("warning: failed to finalize step %s for migration %d: %v", step.Category, pc.MigrationID, err)
+				pc.OnProgress(WSMessage{Step: "finalization", Status: "warning", Value: fmt.Sprintf("Failed to finalize step %s: %v", step.Category, err)})
+			}
 		}
 	}
 

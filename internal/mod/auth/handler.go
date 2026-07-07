@@ -143,9 +143,19 @@ func (h *Handler) handleStatus(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Report "locked" to any caller that does not present this session's token,
+	// even when the app is globally unlocked. Otherwise a browser with no token
+	// (e.g. a fresh incognito window) would see locked:false and skip the login
+	// screen, riding on another session's unlock. A client only sees the true
+	// unlocked state once it holds the token returned by /auth/unlock.
+	locked := h.svc.IsLocked()
+	if !locked && !h.svc.ValidateSessionToken(extractToken(r)) {
+		locked = true
+	}
+
 	shared.WriteJSON(w, http.StatusOK, AuthStatus{
 		Setup:  setup,
-		Locked: h.svc.IsLocked(),
+		Locked: locked,
 	})
 }
 

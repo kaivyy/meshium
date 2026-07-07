@@ -5,6 +5,8 @@ import (
 	"fmt"
 	"strings"
 	"time"
+
+	"meshium/internal/shared"
 )
 
 // RsyncStrategy transfers files using rsync over SSH.
@@ -110,8 +112,8 @@ func (s *RsyncStrategy) Transfer(ctx context.Context, src, dst TransferTarget, o
 func (s *RsyncStrategy) transferOnce(ctx context.Context, src, dst TransferTarget, opts TransferOptions, attempt int) (*TransferResult, error) {
 	// Build rsync command
 	args := []string{
-		"-avz",           // archive, verbose, compress
-		"--partial",      // keep partially transferred files
+		"-avz",            // archive, verbose, compress
+		"--partial",       // keep partially transferred files
 		"--append-verify", // resume with checksum verification
 	}
 
@@ -122,17 +124,24 @@ func (s *RsyncStrategy) transferOnce(ctx context.Context, src, dst TransferTarge
 		args = append(args, "--progress")
 	}
 
-	// Build source and destination spec
+	// Build source and destination spec. The local path runs rsync via os/exec
+	// with NO shell (see execLocalRsync), so these values must be passed as raw,
+	// unquoted argv elements — shell-quoting them would make rsync treat the
+	// literal quote characters as part of the path. Each value is its own argv
+	// entry, so paths containing spaces are safe without quoting.
 	var srcSpec, dstSpec string
+	var remotePort int
 
 	if src.IsLocal && !dst.IsLocal {
 		// Local → Remote: rsync local_file user@host:remote_path
 		srcSpec = src.Path
 		dstSpec = fmt.Sprintf("%s@%s:%s", dst.User, dst.Host, dst.Path)
+		remotePort = dst.Port
 	} else if !src.IsLocal && dst.IsLocal {
 		// Remote → Local: rsync user@host:remote_path local_path
 		srcSpec = fmt.Sprintf("%s@%s:%s", src.User, src.Host, src.Path)
 		dstSpec = dst.Path
+		remotePort = src.Port
 	} else if !src.IsLocal && !dst.IsLocal {
 		// Remote → Remote: run rsync on the source to push to destination
 		return s.remoteToRemote(ctx, src, dst, opts, args, progressParser)
@@ -140,13 +149,17 @@ func (s *RsyncStrategy) transferOnce(ctx context.Context, src, dst TransferTarge
 		return nil, fmt.Errorf("unsupported transfer mode for rsync")
 	}
 
-	// Run rsync locally (for local→remote and remote→local)
-	cmd := fmt.Sprintf("rsync %s '%s' '%s'",
-		strings.Join(args, " "), srcSpec, dstSpec)
+	// Build the argv directly (program name first). Pass the SSH port as a
+	// separate "-e" / "ssh -p N" pair: as one argv element the remote-shell
+	// string is delivered to rsync intact, without any shell splitting.
+	argv := append([]string{"rsync"}, args...)
+	if remotePort != 0 && remotePort != 22 {
+		argv = append(argv, "-e", fmt.Sprintf("ssh -p %d", remotePort))
+	}
+	argv = append(argv, srcSpec, dstSpec)
 
-	// For local execution, we need to run rsync locally
-	// But we don't have a local exec interface... we need to use os/exec
-	return s.runLocalRsync(ctx, cmd, opts, progressParser)
+	// Run rsync locally (for local→remote and remote→local).
+	return s.runLocalRsync(ctx, argv, opts, progressParser)
 }
 
 // remoteToRemote runs rsync on the source server to push to the destination.
@@ -156,10 +169,17 @@ func (s *RsyncStrategy) remoteToRemote(ctx context.Context, src, dst TransferTar
 		return nil, fmt.Errorf("remote source has no SSH client")
 	}
 
-	// Build rsync command to run on the source
-	dstSpec := fmt.Sprintf("%s@%s:%s", dst.User, dst.Host, dst.Path)
-	cmd := fmt.Sprintf("rsync %s '%s' '%s'",
-		strings.Join(args, " "), src.Path, dstSpec)
+	// Build rsync command to run on the source.
+	// Shell-quote all user-controlled values (user/host/path) to prevent injection.
+	dstSpec := shared.ShellQuote(fmt.Sprintf("%s@%s:%s", dst.User, dst.Host, dst.Path))
+
+	// Pass the destination SSH port explicitly when set to a non-default value.
+	if dst.Port != 0 && dst.Port != 22 {
+		args = append(args, fmt.Sprintf("-e %s", shared.ShellQuote(fmt.Sprintf("ssh -p %d", dst.Port))))
+	}
+
+	cmd := fmt.Sprintf("rsync %s %s %s",
+		strings.Join(args, " "), shared.ShellQuote(src.Path), dstSpec)
 
 	// Execute via SSH on the source
 	stdout, stderr, exitCode, err := src.SSHClient.ExecContext(ctx, cmd)
@@ -185,14 +205,10 @@ func (s *RsyncStrategy) remoteToRemote(ctx context.Context, src, dst TransferTar
 
 // runLocalRsync runs rsync locally using os/exec.
 // This is used for local→remote and remote→local transfers.
-func (s *RsyncStrategy) runLocalRsync(ctx context.Context, cmd string, opts TransferOptions, progressParser *rsyncProgressParser) (*TransferResult, error) {
-	// We need to use os/exec to run rsync locally
-	// But we need to import os/exec... let's use a simpler approach
-	// Actually, for the transfer engine, we should use the SSH client
-	// to run rsync. But for local→remote, we need to run rsync locally.
-
-	// Let's use exec.Command via a helper
-	return execLocalRsync(ctx, cmd, opts, progressParser)
+// argv is the full argument vector (argv[0] is "rsync"); it is executed
+// directly with no shell, so each element is a distinct, unquoted argument.
+func (s *RsyncStrategy) runLocalRsync(ctx context.Context, argv []string, opts TransferOptions, progressParser *rsyncProgressParser) (*TransferResult, error) {
+	return execLocalRsync(ctx, argv, opts, progressParser)
 }
 
 // rsyncProgressParser parses rsync --progress output.

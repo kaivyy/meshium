@@ -19,19 +19,19 @@ func NewRiskEngine(repo PipelineRepo) *RiskEngine {
 
 // RiskInput provides the data needed for risk assessment.
 type RiskInput struct {
-	DataSizeBytes     int64   `json:"dataSizeBytes"`
-	DatabaseSizeBytes int64   `json:"databaseSizeBytes"`
-	ContainerCount    int     `json:"containerCount"`
-	VolumeCount       int     `json:"volumeCount"`
-	QueueCount        int     `json:"queueCount"`
-	ReplicationAvailable bool  `json:"replicationAvailable"`
-	NetworkSpeedMbps  float64 `json:"networkSpeedMbps"`
-	SourceCPU         int     `json:"sourceCPU"`
-	TargetCPU         int     `json:"targetCPU"`
-	SourceRAMMB       int     `json:"sourceRAMMB"`
-	TargetRAMMB       int     `json:"targetRAMMB"`
-	CompatibilityIssues int   `json:"compatibilityIssues"`
-	CriticalIssues    int     `json:"criticalIssues"`
+	DataSizeBytes        int64   `json:"dataSizeBytes"`
+	DatabaseSizeBytes    int64   `json:"databaseSizeBytes"`
+	ContainerCount       int     `json:"containerCount"`
+	VolumeCount          int     `json:"volumeCount"`
+	QueueCount           int     `json:"queueCount"`
+	ReplicationAvailable bool    `json:"replicationAvailable"`
+	NetworkSpeedMbps     float64 `json:"networkSpeedMbps"`
+	SourceCPU            int     `json:"sourceCPU"`
+	TargetCPU            int     `json:"targetCPU"`
+	SourceRAMMB          int     `json:"sourceRAMMB"`
+	TargetRAMMB          int     `json:"targetRAMMB"`
+	CompatibilityIssues  int     `json:"compatibilityIssues"`
+	CriticalIssues       int     `json:"criticalIssues"`
 }
 
 // AssessRisk calculates the risk score and classification for a migration.
@@ -164,11 +164,24 @@ func (e *RiskEngine) calculateScore(input RiskInput) float64 {
 		score += 3
 	}
 
-	// Factor 9: Compatibility issues (0-5 points)
-	score += math.Min(float64(input.CompatibilityIssues)*1.5, 5)
+	// Factor 9: Compatibility issues
+	// Each non-critical compatibility issue adds risk. Cap this contribution
+	// (these are warnings, not blockers) but allow it to exceed the old flat 5
+	// so several issues register meaningfully.
+	score += math.Min(float64(input.CompatibilityIssues)*1.5, 15)
 
-	// Factor 10: Critical blockers (0-5 points)
-	score += math.Min(float64(input.CriticalIssues)*5, 5)
+	// Factor 10: Critical blockers
+	// A hard blocker means the migration cannot safely proceed. The previous
+	// math.Min(..., 5) cap let any number of blockers contribute only 5 points,
+	// so blockers could never push the score into the >=85 "critical" class.
+	// Weight each blocker heavily and floor the score into the critical band
+	// whenever at least one blocker exists, while still capping the total at 100.
+	if input.CriticalIssues > 0 {
+		score += float64(input.CriticalIssues) * 40
+		if score < 85 {
+			score = 85
+		}
+	}
 
 	// Cap at 100
 	return math.Min(score, 100)

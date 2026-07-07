@@ -10,6 +10,7 @@ import (
 	"strings"
 
 	"meshium/internal/mod/transport"
+	"meshium/internal/shared"
 )
 
 // ChecksumVerifier verifies file integrity by comparing SHA256 checksums
@@ -105,8 +106,10 @@ func computeLocalChecksum(path string) (string, error) {
 // computeRemoteChecksum computes the SHA256 checksum of a remote file via SSH.
 // Uses `sha256sum` command, with fallback to `shasum -a 256` for macOS.
 func computeRemoteChecksum(ctx context.Context, ssh transport.SSHExecuter, path string) (string, error) {
-	// Try sha256sum first (Linux), fall back to shasum (macOS)
-	cmd := fmt.Sprintf("sha256sum '%s' 2>/dev/null | awk '{print $1}' || shasum -a 256 '%s' 2>/dev/null | awk '{print $1}'", path, path)
+	// Try sha256sum first (Linux), fall back to shasum (macOS).
+	// Shell-quote the path to prevent command injection via crafted filenames.
+	qp := shared.ShellQuote(path)
+	cmd := fmt.Sprintf("sha256sum %s 2>/dev/null | awk '{print $1}' || shasum -a 256 %s 2>/dev/null | awk '{print $1}'", qp, qp)
 	stdout, stderr, exitCode, err := ssh.ExecContext(ctx, cmd)
 	if err != nil {
 		return "", fmt.Errorf("compute remote checksum: %w", err)

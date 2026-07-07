@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"meshium/internal/mod/auth"
@@ -15,6 +16,25 @@ import (
 
 	"github.com/gorilla/websocket"
 )
+
+// wsConn serializes data-frame writes to a websocket connection.
+// gorilla/websocket permits only one concurrent writer for data frames, but
+// the pipeline WS handler writes from three goroutines: the progress callback
+// driving Execute/Rollback, the client read loop (pong replies), and the
+// terminal status/error write. Routing every WriteJSON through this mutex
+// prevents interleaved, corrupted frames. WriteControl (the heartbeat ping) is
+// exempt from that restriction per gorilla's contract, so it stays on the raw
+// conn and is intentionally not routed through here.
+type wsConn struct {
+	conn *websocket.Conn
+	mu   sync.Mutex
+}
+
+func (c *wsConn) WriteJSON(v interface{}) error {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return c.conn.WriteJSON(v)
+}
 
 // PipelineHandler exposes REST and WebSocket routes for the zero-downtime
 // migration pipeline. It extends the existing Handler with new endpoints
@@ -34,22 +54,7 @@ func NewPipelineHandler(pipeline *Pipeline, repo PipelineRepo, baseRepo Repo) *P
 		repo:     repo,
 		baseRepo: baseRepo,
 		upgrader: websocket.Upgrader{
-			CheckOrigin: func(r *http.Request) bool {
-				origin := r.Header.Get("Origin")
-				if origin == "" {
-					return true
-				}
-				// Allow same-origin requests
-				host := r.Header.Get("Host")
-				if strings.Contains(origin, host) {
-					return true
-				}
-				// Allow localhost for development
-				if strings.HasPrefix(origin, "http://localhost") || strings.HasPrefix(origin, "http://127.0.0.1") {
-					return true
-				}
-				return false
-			},
+			CheckOrigin: shared.CheckWebSocketOrigin,
 		},
 	}
 }
@@ -1113,6 +1118,11 @@ func (h *PipelineHandler) handlePipelineWS(w http.ResponseWriter, r *http.Reques
 	}
 	defer conn.Close()
 
+	// All data-frame writes go through safeConn to serialize the three writer
+	// goroutines (progress callback, read loop, terminal status). The heartbeat
+	// goroutine keeps using conn.WriteControl directly, which gorilla allows.
+	safeConn := &wsConn{conn: conn}
+
 	ctx, cancel := context.WithCancel(r.Context())
 	defer cancel()
 
@@ -1171,7 +1181,7 @@ func (h *PipelineHandler) handlePipelineWS(w http.ResponseWriter, r *http.Reques
 				h.pipeline.Resume(ctx, migrationID, nil)
 			case "ping":
 				// Client-initiated ping — respond with pong
-				conn.WriteJSON(WSMessageExtended{Step: "heartbeat", Status: "pong", Timestamp: time.Now().Format(time.RFC3339)})
+				safeConn.WriteJSON(WSMessageExtended{Step: "heartbeat", Status: "pong", Timestamp: time.Now().Format(time.RFC3339)})
 			}
 		}
 	}()
@@ -1179,10 +1189,27 @@ func (h *PipelineHandler) handlePipelineWS(w http.ResponseWriter, r *http.Reques
 	var runErr error
 	switch action {
 	case "execute":
+		// The pipeline WS URL carries no explicit action, so this "execute"
+		// branch is the default for every connection — including reconnects and
+		// streaming-only clients. Running Execute unconditionally would relaunch
+		// an already running, finished, or failed migration on every connect
+		// (and, after a process restart, re-run one that has no in-process
+		// run-lock to stop it). Only start Execute from a startable state; for
+		// anything else, stream persisted history and hold the connection open
+		// so the client can observe without re-executing.
+		state, stateOK := h.currentMigrationState(migrationID)
+		startable := stateOK && (state == StateCreated || state == StateResuming)
+		if !startable {
+			h.streamPipelineHistory(ctx, safeConn, migrationID, &wsSeq)
+			// Keep the connection open (read loop handles resume/cancel/pause,
+			// heartbeat keeps it alive) until the client disconnects.
+			<-ctx.Done()
+			return
+		}
 		runErr = h.pipeline.Execute(ctx, migrationID, func(msg WSMessage) {
 			wsSeq++
 			ext := h.extendWSMessage(migrationID, msg, wsSeq)
-			if writeErr := conn.WriteJSON(ext); writeErr != nil {
+			if writeErr := safeConn.WriteJSON(ext); writeErr != nil {
 				log.Printf("websocket write failed: %v", writeErr)
 				cancel()
 			}
@@ -1191,25 +1218,62 @@ func (h *PipelineHandler) handlePipelineWS(w http.ResponseWriter, r *http.Reques
 		runErr = h.pipeline.Rollback(ctx, migrationID, func(msg WSMessage) {
 			wsSeq++
 			ext := h.extendWSMessage(migrationID, msg, wsSeq)
-			if writeErr := conn.WriteJSON(ext); writeErr != nil {
+			if writeErr := safeConn.WriteJSON(ext); writeErr != nil {
 				log.Printf("websocket write failed: %v", writeErr)
 				cancel()
 			}
 		})
 	default:
-		conn.WriteJSON(WSMessageExtended{Step: action, Status: "error", Error: "unknown action"})
+		safeConn.WriteJSON(WSMessageExtended{Step: action, Status: "error", Error: "unknown action"})
 		return
 	}
 
 	if runErr != nil {
-		conn.WriteJSON(h.extendWSMessage(migrationID, WSMessage{Step: action, Status: "error", Error: runErr.Error()}, wsSeq+1))
+		safeConn.WriteJSON(h.extendWSMessage(migrationID, WSMessage{Step: action, Status: "error", Error: runErr.Error()}, wsSeq+1))
 		return
 	}
 
-	conn.WriteJSON(h.extendWSMessage(migrationID, WSMessage{Step: action, Status: "complete"}, wsSeq+1))
+	safeConn.WriteJSON(h.extendWSMessage(migrationID, WSMessage{Step: action, Status: "complete"}, wsSeq+1))
 }
 
 // --- Helpers ---
+
+// streamPipelineHistory writes the persisted event history for a migration to
+// the WebSocket connection. It is used when a client connects to a migration
+// that is not in a startable state (already running, finished, or failed) so
+// the client can observe past progress without re-executing the migration.
+// wsSeq is advanced so any subsequent live messages keep monotonically
+// increasing sequence numbers.
+func (h *PipelineHandler) streamPipelineHistory(ctx context.Context, conn *wsConn, migrationID int, wsSeq *int64) {
+	events, err := h.repo.GetEvents(ctx, migrationID, 0, 1000)
+	if err != nil {
+		log.Printf("failed to load event history for migration %d: %v", migrationID, err)
+		return
+	}
+	for _, ev := range events {
+		status := "info"
+		switch ev.Level {
+		case EventLevelError, EventLevelCritical:
+			status = "error"
+		case EventLevelWarning:
+			status = "warning"
+		}
+		step := ev.Stage
+		if step == "" {
+			step = ev.Type
+		}
+		*wsSeq++
+		ext := h.extendWSMessage(migrationID, WSMessage{
+			Step:   step,
+			Status: status,
+			Value:  ev.Message,
+		}, *wsSeq)
+		if writeErr := conn.WriteJSON(ext); writeErr != nil {
+			log.Printf("websocket history write failed for migration %d: %v", migrationID, writeErr)
+			return
+		}
+	}
+}
 
 func (h *PipelineHandler) extendWSMessage(migrationID int, msg WSMessage, sequence int64) WSMessageExtended {
 	ext := WSMessageExtended{

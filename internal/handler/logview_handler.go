@@ -40,7 +40,7 @@ func NewLogViewHandler(service *logview.Service, authSvc *auth.Service) *LogView
 		service: service,
 		authSvc: authSvc,
 		upgrader: websocket.Upgrader{
-			CheckOrigin: func(r *http.Request) bool { return true },
+			CheckOrigin: shared.CheckWebSocketOrigin,
 		},
 	}
 }

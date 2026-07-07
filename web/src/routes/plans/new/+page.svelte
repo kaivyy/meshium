@@ -198,7 +198,7 @@
         >
           {step < currentStep ? '✓' : step}
         </div>
-        <div class="min-w-0">
+        <div class="hidden min-w-0 sm:block">
           <div class={`text-xs font-semibold uppercase tracking-wide ${step === currentStep ? 'text-fg' : 'text-fg-subtle'}`}>{label}</div>
           <div class="text-xs text-fg-subtle">Step {step}</div>
         </div>

@@ -271,7 +271,7 @@ export interface MigrationSession {
     id: number;
     sourceId: number;
     targetId: number;
-    categories: string;
+    categories: string[];
     status: string;
     state: string;
     config?: string;
@@ -513,7 +513,8 @@ export const pipelineApi = {
 
   // Compatibility
   getCompatibilityChecks: (id: number) => api.get(`/pipeline/migrations/${id}/compatibility`) as Promise<CompatibilityCheckResult[]>,
-  checkCompatibility: (id: number) => api.post(`/pipeline/migrations/${id}/compatibility`, {}) as Promise<CompatibilityCheckResult[]>,
+  // refresh=true forces the backend to re-run preflight instead of returning cached results
+  checkCompatibility: (id: number, refresh = true) => api.post(`/pipeline/migrations/${id}/compatibility${refresh ? '?refresh=true' : ''}`, {}) as Promise<CompatibilityCheckResult[]>,
 
   // Health
   getHealth: (id: number) => api.get(`/pipeline/migrations/${id}/health`) as Promise<HealthCheckResult[]>,
@@ -530,7 +531,9 @@ export const pipelineApi = {
 
   // Provision
   getProvisionStates: (id: number) => api.get(`/pipeline/migrations/${id}/provision`) as Promise<ProvisionState[]>,
-  provision: (id: number, components?: string[]) => api.post(`/pipeline/migrations/${id}/provision`, { components }),
+  // The backend POST returns the current provision states (it does not report a success flag),
+  // so callers must inspect the returned states to determine whether provisioning actually occurred.
+  provision: (id: number, components?: string[]) => api.post(`/pipeline/migrations/${id}/provision`, { components }) as Promise<ProvisionState[]>,
 
   // Metrics & Audit
   getMetrics: (id: number) => api.get(`/pipeline/migrations/${id}/metrics`) as Promise<MigrationMetric[]>,

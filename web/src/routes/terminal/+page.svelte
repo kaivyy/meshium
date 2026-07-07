@@ -562,7 +562,7 @@
     </div>
 
     <!-- Terminal -->
-    <div class="lg:col-span-2">
+    <div class="min-w-0 lg:col-span-2">
       {#if !selectedServer}
         <Card padding="lg">
           <div class="flex flex-col items-center justify-center py-16 text-center">
@@ -608,7 +608,7 @@
             <!-- xterm.js terminal container — always rendered -->
             <div
               bind:this={terminalContainer}
-              class="h-[400px] sm:h-[500px] bg-surface-muted p-2"
+              class="h-[400px] sm:h-[500px] overflow-hidden bg-surface-muted p-2"
             ></div>
 
             <!-- Overlay: shown when not yet connected -->

@@ -63,6 +63,7 @@ func main() {
 	knownHosts := ssh.NewKnownHostsStore(database)
 	serverSvc.SetHostKeyStore(knownHosts)
 	serverHandler := server.NewHandler(serverSvc)
+	serverKeyHandler := server.NewKeyHandler(serverSvc, sshPool, knownHosts, authSvc)
 
 	// Invalidate cached SSH connections when server config changes
 	serverSvc.SetPoolInvalidator(sshPool)
@@ -271,6 +272,7 @@ func main() {
 	})
 	authHandler.RegisterRoutes(mux)
 	serverHandler.RegisterRoutes(mux)
+	serverKeyHandler.RegisterRoutes(mux)
 	discoveryHandler.RegisterRoutes(mux)
 	migrationHandler.RegisterRoutes(mux)
 	pipelineHandler.RegisterRoutes(mux)

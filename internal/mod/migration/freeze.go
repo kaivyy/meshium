@@ -3,6 +3,7 @@ package migration
 import (
 	"context"
 	"fmt"
+	"strconv"
 	"strings"
 
 	"meshium/internal/mod/discovery"
@@ -64,7 +65,9 @@ func (m *FreezeManager) FreezeWrites(ctx context.Context, databases []DatabaseIn
 					result.Errors = append(result.Errors, fmt.Sprintf("redis workers: %v", err))
 					// Non-fatal — continue with other freezes.
 				} else {
-					result.FrozenDBs = append(result.FrozenDBs, "redis:"+string(usage))
+					// Record the port so unfreezeAll can resume the workers on
+					// the correct Redis instance.
+					result.FrozenDBs = append(result.FrozenDBs, fmt.Sprintf("redis:%s:%d", usage, db.Port))
 				}
 			}
 
@@ -272,8 +275,12 @@ func (m *FreezeManager) pauseBullMQWorkers(ctx context.Context, db DatabaseInfo)
 		return fmt.Errorf("source ssh not configured")
 	}
 
-	// Pause all BullMQ queues.
-	cmd := fmt.Sprintf(`redis-cli -p %d --scan --pattern "bull:*:meta" | while read key; do redis-cli -p %d SET "$(echo $key | sed 's/:meta$//:paused')" "1"; done 2>&1`, db.Port, db.Port)
+	// Pause all BullMQ queues by setting the ":paused" key for each queue that
+	// has a ":meta" key. The resume counterpart scans for and deletes these
+	// "bull:*:paused" keys, so the substitution must rewrite the ":meta" suffix
+	// to ":paused" (the previous `s/:meta$//:paused` was not valid sed and never
+	// paused anything).
+	cmd := fmt.Sprintf(`redis-cli -p %d --scan --pattern "bull:*:meta" | while read key; do redis-cli -p %d SET "$(echo "$key" | sed 's/:meta$/:paused/')" "1"; done 2>&1`, db.Port, db.Port)
 	_, _, exitCode, err := m.sourceSSH.ExecContext(ctx, cmd)
 	if err != nil || exitCode != 0 {
 		if err == nil {
@@ -321,7 +328,17 @@ func (m *FreezeManager) unfreezeAll(ctx context.Context, result *FreezeResult) e
 				firstErr = err
 			}
 		case strings.HasPrefix(frozen, "redis:"):
-			// Best-effort: redis worker resume would happen here if we tracked the port.
+			// Format is "redis:<usage>:<port>" — resume the paused BullMQ
+			// workers on the recorded port. Without this the queues stay
+			// paused after a rollback.
+			parts := strings.Split(frozen, ":")
+			if len(parts) == 3 {
+				if port, convErr := strconv.Atoi(parts[2]); convErr == nil {
+					if err := m.resumeBullMQWorkers(ctx, DatabaseInfo{Type: "redis", Port: port}); err != nil && firstErr == nil {
+						firstErr = err
+					}
+				}
+			}
 		}
 	}
 	return firstErr

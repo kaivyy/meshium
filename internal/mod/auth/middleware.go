@@ -27,11 +27,13 @@ var authExemptPaths = map[string]bool{
 }
 
 // RequireAuth returns middleware that checks for a valid session token.
-// If the app is not set up, it allows requests through (setup mode).
+// If the app is not set up, it returns 403 (only exempt setup endpoints work).
 // If the app is locked, it returns 403 Forbidden.
-// If the app is unlocked, API requests are allowed (unlocked = authenticated).
-// Session tokens are validated for WebSocket endpoints to prevent CSRF.
-// WebSocket routes (/ws/) require a valid token in the "token" query parameter.
+// If the app is unlocked, API and WebSocket requests require a valid session
+// token — a missing or invalid token is rejected with 401. The global unlocked
+// state is NOT sufficient on its own: each client must present the token it
+// received from /auth/unlock, so an unauthenticated browser cannot ride on
+// another session's unlock.
 func (m *Middleware) RequireAuth(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		// Allow exempt paths (auth endpoints, health check)
@@ -49,15 +51,14 @@ func (m *Middleware) RequireAuth(next http.Handler) http.Handler {
 			return
 		}
 
-		// If app is not set up yet, allow API access (setup mode)
+		// If app is not set up yet, deny API/WS access. Only the exempt
+		// setup/status endpoints (handled above) are reachable.
 		setup, err := m.svc.IsSetup()
 		if err != nil {
 			shared.WriteError(w, http.StatusInternalServerError, "internal error", "INTERNAL")
 			return
 		}
 		if !setup {
-			// In setup mode, only allow auth-related endpoints
-			// (already handled by exempt paths above)
 			shared.WriteError(w, http.StatusForbidden, "app not set up", "NOT_SETUP")
 			return
 		}
@@ -68,27 +69,11 @@ func (m *Middleware) RequireAuth(next http.Handler) http.Handler {
 			return
 		}
 
-		// WebSocket routes: same logic as API routes.
-		// If a token is provided, validate it (reject invalid tokens).
-		// If no token is provided, allow access (unlocked = authenticated).
-		// This prevents WebSocket failures after a server restart when
-		// the browser has a stale token in localStorage.
-		if isWS {
-			token := extractToken(r)
-			if token != "" && !m.svc.ValidateSessionToken(token) {
-				shared.WriteError(w, http.StatusUnauthorized, "invalid session token", "UNAUTHORIZED")
-				return
-			}
-			next.ServeHTTP(w, r)
-			return
-		}
-
-		// API routes: if a token is provided, validate it (reject invalid tokens).
-		// If no token is provided, allow access (unlocked = authenticated).
-		// This prevents reload loops where the frontend has no token after
-		// a server restart but the app is still unlocked.
+		// API and WebSocket routes require a valid session token. A missing
+		// or invalid token is rejected — being globally unlocked is not enough,
+		// the caller must prove it holds this session's token.
 		token := extractToken(r)
-		if token != "" && !m.svc.ValidateSessionToken(token) {
+		if !m.svc.ValidateSessionToken(token) {
 			shared.WriteError(w, http.StatusUnauthorized, "invalid session token", "UNAUTHORIZED")
 			return
 		}

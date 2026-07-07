@@ -16,11 +16,11 @@
   );
 
   const interactiveClass = $derived(
-    hoverable ? 'hover:border-border-strong hover:shadow-md transition-all cursor-pointer' : ''
+    hoverable ? 'hover:border-border-strong hover:shadow-card-hover hover:-translate-y-0.5 transition-all cursor-pointer' : ''
   );
 </script>
 
-<div class={`rounded-xl border border-border bg-surface shadow-sm transition-shadow ${paddingClass} ${interactiveClass}`}>
+<div class={`rounded-xl border border-border bg-surface shadow-card transition-all ${paddingClass} ${interactiveClass}`}>
   {#if children}
     {@render children()}
   {/if}

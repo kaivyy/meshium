@@ -147,13 +147,22 @@ func (a *DefaultRiskAssessor) assessDockerVolumeStep(step PlannedStep, source, t
 		if name != "" {
 			for _, c := range source.Docker.Containers {
 				if c.Name == name {
-					// Estimate volume size: 500MB per volume
-					estimatedSizeGB := int64(len(c.Volumes)) * 500 / 1024
-					if estimatedSizeGB > a.LargeVolumeThresholdGB {
-						return RiskHigh
-					}
+					// NOTE: ContainerInfo.Volumes is a list of mount specs, not
+					// sizes — no per-volume byte count is available on the
+					// snapshot. The previous 500MB-per-volume constant produced
+					// a falsely-low GB figure (integer division yielded 0GB for
+					// <=2 volumes, so the 10GB threshold only tripped at ~23
+					// volumes). Rather than invent a size, treat volume count as
+					// an unknown-size heuristic: no volumes is low risk, and a
+					// container with many mounts is more likely to carry
+					// significant data and warrant elevated risk.
 					if len(c.Volumes) == 0 {
 						return RiskLow // No volumes to transfer
+					}
+					if len(c.Volumes) > 3 {
+						// Multiple volumes of unknown size — treat as high risk
+						// since total data could be large and cannot be verified.
+						return RiskHigh
 					}
 					break
 				}

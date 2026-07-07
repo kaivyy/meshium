@@ -10,15 +10,16 @@ import (
 
 // execLocalRsync runs rsync locally using os/exec.
 // It captures stdout/stderr and parses progress output.
-func execLocalRsync(ctx context.Context, cmd string, opts TransferOptions, progressParser *rsyncProgressParser) (*TransferResult, error) {
-	// Parse the command string into args
-	parts := strings.Fields(cmd)
-	if len(parts) == 0 {
+// argv is the full argument vector (argv[0] is the program name); it is passed
+// straight to exec.CommandContext with no shell, so arguments containing spaces
+// or quote characters are handled correctly without any quoting.
+func execLocalRsync(ctx context.Context, argv []string, opts TransferOptions, progressParser *rsyncProgressParser) (*TransferResult, error) {
+	if len(argv) == 0 {
 		return nil, fmt.Errorf("empty rsync command")
 	}
 
 	// Create exec.Command
-	execCmd := exec.CommandContext(ctx, parts[0], parts[1:]...)
+	execCmd := exec.CommandContext(ctx, argv[0], argv[1:]...)
 
 	// Capture stdout and stderr
 	stdoutPipe, err := execCmd.StdoutPipe()

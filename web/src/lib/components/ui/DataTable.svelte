@@ -79,7 +79,8 @@
   }
 </script>
 
-<div class="overflow-hidden rounded-2xl border border-border bg-surface shadow-sm">
+<!-- Desktop: table -->
+<div class="hidden overflow-x-auto rounded-2xl border border-border bg-surface shadow-sm md:block">
   <table class="min-w-full divide-y divide-border">
     <thead class="bg-surface-muted">
       <tr>
@@ -161,4 +162,54 @@
       {/if}
     </tbody>
   </table>
+</div>
+
+<!-- Mobile: stacked cards -->
+<div class="space-y-3 md:hidden">
+  {#if loading}
+    <div class="flex items-center justify-center gap-2 rounded-2xl border border-border bg-surface px-4 py-8 text-sm text-fg-subtle shadow-sm">
+      <Loader2 size={18} class="animate-spin" />
+      <span>Loading...</span>
+    </div>
+  {:else if sortedData.length === 0}
+    <div class="rounded-2xl border border-border bg-surface px-4 py-8 text-center text-sm text-fg-subtle shadow-sm">
+      {#if empty}
+        {@render empty()}
+      {:else}
+        No data
+      {/if}
+    </div>
+  {:else}
+    {#each sortedData as row (row[rowKey] as string | number)}
+      <!-- svelte-ignore a11y_no_noninteractive_tabindex -->
+      <div
+        class={`rounded-2xl border border-border bg-surface p-4 shadow-sm ${onRowClick ? 'cursor-pointer hover:bg-surface-muted' : ''}`}
+        role={onRowClick ? 'button' : undefined}
+        tabindex={onRowClick ? 0 : undefined}
+        onclick={() => onRowClick?.(row)}
+        onkeydown={(e) => {
+          if (onRowClick && (e.key === 'Enter' || e.key === ' ')) {
+            e.preventDefault();
+            onRowClick(row);
+          }
+        }}
+      >
+        <dl class="space-y-2">
+          {#each columns as column}
+            {@const value = getCellValue(row, column.key)}
+            <div class="flex items-start justify-between gap-3">
+              <dt class="shrink-0 text-xs font-semibold uppercase tracking-wide text-fg-subtle">{column.label}</dt>
+              <dd class="min-w-0 break-words text-right text-sm text-fg-muted">
+                {#if cell}
+                  {@render cell({ column, row, value })}
+                {:else}
+                  {formatCellValue(value)}
+                {/if}
+              </dd>
+            </div>
+          {/each}
+        </dl>
+      </div>
+    {/each}
+  {/if}
 </div>

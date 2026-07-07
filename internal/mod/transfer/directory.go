@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"meshium/internal/mod/transport"
+	"meshium/internal/shared"
 )
 
 // DirectoryTransfer transfers an entire directory from source to destination.
@@ -31,13 +32,13 @@ func NewDirectoryTransfer(selector *StrategySelector) *DirectoryTransfer {
 
 // DirectoryTransferResult holds the outcome of a directory transfer.
 type DirectoryTransferResult struct {
-	TotalFiles       int           `json:"totalFiles"`
-	TransferredFiles int           `json:"transferredFiles"`
-	SkippedFiles     int           `json:"skippedFiles"`
-	FailedFiles      int           `json:"failedFiles"`
-	TotalBytes       int64         `json:"totalBytes"`
-	TransferredBytes int64         `json:"transferredBytes"`
-	Duration         time.Duration `json:"duration"`
+	TotalFiles       int                `json:"totalFiles"`
+	TransferredFiles int                `json:"transferredFiles"`
+	SkippedFiles     int                `json:"skippedFiles"`
+	FailedFiles      int                `json:"failedFiles"`
+	TotalBytes       int64              `json:"totalBytes"`
+	TransferredBytes int64              `json:"transferredBytes"`
+	Duration         time.Duration      `json:"duration"`
 	FileResults      []FileTransferInfo `json:"fileResults"`
 }
 
@@ -125,19 +126,24 @@ func (dt *DirectoryTransfer) Transfer(
 			continue
 		}
 
-		// Check if file already exists at destination with same size (resume)
+		// Check if file already exists at destination with same size (resume).
+		// Matching size alone does NOT prove the content is identical, so we
+		// require a checksum match before skipping; otherwise we fall through
+		// and re-transfer to avoid a silent data-integrity gap.
 		dstExists, _ := FileExists(ctx, fileDst)
 		if dstExists {
 			dstSize, err := GetFileSize(ctx, fileDst)
 			if err == nil && dstSize == fi.Size {
-				// File already fully transferred — skip
-				fileInfo.Skipped = true
-				fileInfo.Transferred = true
-				result.SkippedFiles++
-				result.TransferredFiles++
-				transferredBytes += fi.Size
-				result.FileResults = append(result.FileResults, fileInfo)
-				continue
+				if _, verr := dt.verifier.Verify(ctx, fileSrc, fileDst); verr == nil {
+					// Size matches AND checksum matches — safe to skip.
+					fileInfo.Skipped = true
+					fileInfo.Transferred = true
+					result.SkippedFiles++
+					result.TransferredFiles++
+					transferredBytes += fi.Size
+					result.FileResults = append(result.FileResults, fileInfo)
+					continue
+				}
 			}
 		}
 
@@ -247,7 +253,8 @@ func (dt *DirectoryTransfer) listLocalFiles(rootPath string) ([]FileInfo, error)
 func (dt *DirectoryTransfer) listRemoteFiles(ctx context.Context, ssh transport.SSHExecuter, rootPath string) ([]FileInfo, error) {
 	// Use find to list files with size and relative path
 	// Format: size\tpath (relative to rootPath)
-	cmd := fmt.Sprintf("cd '%s' && find . -type f -printf '%%s\\t%%P\\n' 2>/dev/null", rootPath)
+	// Shell-quote rootPath to prevent command injection via crafted paths.
+	cmd := fmt.Sprintf("cd %s && find . -type f -printf '%%s\\t%%P\\n' 2>/dev/null", shared.ShellQuote(rootPath))
 	stdout, stderr, exitCode, err := ssh.ExecContext(ctx, cmd)
 	if err != nil {
 		return nil, fmt.Errorf("list remote files: %w", err)
@@ -284,7 +291,8 @@ func (dt *DirectoryTransfer) ensureDestDir(ctx context.Context, dst TransferTarg
 	if dst.SSHClient == nil {
 		return fmt.Errorf("remote destination has no SSH client")
 	}
-	cmd := fmt.Sprintf("mkdir -p '%s'", dst.Path)
+	// Shell-quote the path to prevent command injection.
+	cmd := fmt.Sprintf("mkdir -p %s", shared.ShellQuote(dst.Path))
 	_, stderr, exitCode, err := dst.SSHClient.ExecContext(ctx, cmd)
 	if err != nil {
 		return err
@@ -308,7 +316,8 @@ func (dt *DirectoryTransfer) ensureParentDir(ctx context.Context, target Transfe
 	dirPath = filepath.Dir(target.Path)
 	// For remote paths, use Unix-style separators
 	dirPath = strings.ReplaceAll(dirPath, "\\", "/")
-	cmd := fmt.Sprintf("mkdir -p '%s'", dirPath)
+	// Shell-quote the path to prevent command injection.
+	cmd := fmt.Sprintf("mkdir -p %s", shared.ShellQuote(dirPath))
 	_, stderr, exitCode, err := target.SSHClient.ExecContext(ctx, cmd)
 	if err != nil {
 		return err
@@ -321,8 +330,8 @@ func (dt *DirectoryTransfer) ensureParentDir(ctx context.Context, target Transfe
 
 // DirectoryResumeState holds the state of a directory transfer for resume.
 type DirectoryResumeState struct {
-	TransferID      string                   `json:"transferId"`
-	CompletedFiles  map[string]int64         `json:"completedFiles"` // relativePath → size
+	TransferID     string           `json:"transferId"`
+	CompletedFiles map[string]int64 `json:"completedFiles"` // relativePath → size
 }
 
 // SerializeResumeState serializes a DirectoryResumeState to JSON.
@@ -387,7 +396,8 @@ func (dt *DirectoryTransfer) Rollback(ctx context.Context, dst TransferTarget) e
 	if dst.SSHClient == nil {
 		return fmt.Errorf("remote destination has no SSH client")
 	}
-	cmd := fmt.Sprintf("rm -rf '%s'", dst.Path)
+	// Shell-quote the path to prevent command injection.
+	cmd := fmt.Sprintf("rm -rf %s", shared.ShellQuote(dst.Path))
 	_, stderr, exitCode, err := dst.SSHClient.ExecContext(ctx, cmd)
 	if err != nil {
 		return fmt.Errorf("remove remote directory: %w", err)

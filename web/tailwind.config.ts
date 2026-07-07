@@ -32,6 +32,10 @@ const config: Config = {
         warning: withAlpha('--color-warning'),
         error: withAlpha('--color-error'),
         info: withAlpha('--color-info')
+      },
+      boxShadow: {
+        card: 'var(--shadow-card)',
+        'card-hover': 'var(--shadow-card-hover)'
       }
     }
   },

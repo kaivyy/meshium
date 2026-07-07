@@ -30,11 +30,11 @@
 
   const variantClass = $derived(
     variant === 'primary'
-      ? 'bg-accent text-accent-fg hover:bg-accent-hover focus-visible:ring-accent'
+      ? 'bg-accent text-accent-fg shadow-sm hover:bg-accent-hover hover:shadow focus-visible:ring-accent'
       : variant === 'secondary'
-        ? 'border border-border-strong bg-surface text-fg-muted hover:bg-surface-muted focus-visible:ring-accent'
+        ? 'border border-border-strong bg-surface text-fg-muted shadow-sm hover:bg-surface-muted focus-visible:ring-accent'
         : variant === 'danger'
-          ? 'bg-error text-white hover:opacity-90 focus-visible:ring-error'
+          ? 'bg-error text-white shadow-sm hover:opacity-90 focus-visible:ring-error'
           : 'text-fg-muted hover:bg-surface-muted focus-visible:ring-accent'
   );
 

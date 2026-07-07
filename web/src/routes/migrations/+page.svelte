@@ -50,6 +50,7 @@
   }
 
   async function deleteMigration(id: number, event: MouseEvent) {
+    event.preventDefault();
     event.stopPropagation();
     if (!confirm('Delete this migration?')) return;
     try {
@@ -144,57 +145,7 @@
       </div>
 
       <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
-        <!-- Source Server Card -->
-        <div class="rounded-lg border bg-surface p-4 {hasServers ? 'border-border' : 'border-dashed border-border-strong'}">
-          <div class="flex items-center gap-2 mb-3">
-            <div class="w-8 h-8 rounded-lg flex items-center justify-center {hasServers ? 'bg-success/10 text-success' : 'bg-surface-muted text-fg-subtle'}">
-              {#if hasServers}
-                <CheckCircle2 size={18} />
-              {:else}
-                <ServerIcon size={18} />
-              {/if}
-            </div>
-            <div>
-              <h3 class="text-sm font-medium text-fg">Source Server</h3>
-              <p class="text-xs text-fg-subtle">Primary VPS to migrate from</p>
-            </div>
-          </div>
-          {#if hasServers}
-            {#each servers.slice(0, 1) as s}
-              <div class="space-y-1.5 text-xs">
-                <div class="flex items-center justify-between">
-                  <span class="text-fg-subtle">Name</span>
-                  <span class="font-medium text-fg">{s.name}</span>
-                </div>
-                <div class="flex items-center justify-between">
-                  <span class="text-fg-subtle">Host</span>
-                  <span class="font-mono text-fg-muted">{s.host}:{s.port}</span>
-                </div>
-                {#if serverInfos[s.id]}
-                  <div class="flex items-center justify-between">
-                    <span class="text-fg-subtle">OS</span>
-                    <span class="text-fg-muted">{serverInfos[s.id].os || '—'}</span>
-                  </div>
-                  <div class="flex items-center justify-between">
-                    <span class="text-fg-subtle">SSH</span>
-                    <span class="font-medium {serverInfos[s.id].sshStatus === 'connected' || serverInfos[s.id].sshStatus === 'ok' ? 'text-success' : 'text-warning'}">
-                      {serverInfos[s.id].sshStatus || '—'}
-                    </span>
-                  </div>
-                {/if}
-              </div>
-            {/each}
-          {:else}
-            <div class="text-center py-2">
-              <p class="text-xs text-fg-subtle mb-2">No source server connected</p>
-              <a href="/servers/new" class="inline-flex items-center gap-1 text-xs text-accent hover:text-accent font-medium">
-                <Plus size={14} /> Add Source Server
-              </a>
-            </div>
-          {/if}
-        </div>
-
-        <!-- Target Server Card -->
+        <!-- Servers Connected Card -->
         <div class="rounded-lg border bg-surface p-4 {hasMultipleServers ? 'border-border' : 'border-dashed border-border-strong'}">
           <div class="flex items-center gap-2 mb-3">
             <div class="w-8 h-8 rounded-lg flex items-center justify-center {hasMultipleServers ? 'bg-success/10 text-success' : 'bg-surface-muted text-fg-subtle'}">
@@ -205,47 +156,44 @@
               {/if}
             </div>
             <div>
-              <h3 class="text-sm font-medium text-fg">Target Server</h3>
-              <p class="text-xs text-fg-subtle">Destination VPS to migrate to</p>
+              <h3 class="text-sm font-medium text-fg">Servers Connected</h3>
+              <p class="text-xs text-fg-subtle">
+                {#if hasMultipleServers}
+                  {servers.length} servers ready to migrate between
+                {:else if hasServers}
+                  Add at least one more server
+                {:else}
+                  Connect servers to migrate between
+                {/if}
+              </p>
             </div>
           </div>
-          {#if hasMultipleServers}
-            {#each servers.slice(1, 2) as s}
-              <div class="space-y-1.5 text-xs">
-                <div class="flex items-center justify-between">
-                  <span class="text-fg-subtle">Name</span>
-                  <span class="font-medium text-fg">{s.name}</span>
-                </div>
-                <div class="flex items-center justify-between">
-                  <span class="text-fg-subtle">Host</span>
-                  <span class="font-mono text-fg-muted">{s.host}:{s.port}</span>
-                </div>
-                {#if serverInfos[s.id]}
-                  <div class="flex items-center justify-between">
-                    <span class="text-fg-subtle">OS</span>
-                    <span class="text-fg-muted">{serverInfos[s.id].os || '—'}</span>
-                  </div>
-                  <div class="flex items-center justify-between">
-                    <span class="text-fg-subtle">SSH</span>
-                    <span class="font-medium {serverInfos[s.id].sshStatus === 'connected' || serverInfos[s.id].sshStatus === 'ok' ? 'text-success' : 'text-warning'}">
+          {#if hasServers}
+            <div class="space-y-1.5 text-xs">
+              {#each servers.slice(0, 4) as s}
+                <div class="flex items-center justify-between gap-2">
+                  <span class="font-medium text-fg truncate">{s.name}</span>
+                  {#if serverInfos[s.id]}
+                    <span class="shrink-0 font-medium {serverInfos[s.id].sshStatus === 'connected' || serverInfos[s.id].sshStatus === 'ok' ? 'text-success' : 'text-warning'}">
                       {serverInfos[s.id].sshStatus || '—'}
                     </span>
-                  </div>
-                {/if}
-              </div>
-            {/each}
-          {:else if hasServers}
-            <div class="text-center py-2">
-              <p class="text-xs text-fg-subtle mb-2">No target server connected</p>
-              <a href="/servers/new" class="inline-flex items-center gap-1 text-xs text-accent hover:text-accent font-medium">
-                <Plus size={14} /> Add Target Server
+                  {:else}
+                    <span class="shrink-0 font-mono text-fg-subtle">{s.host}</span>
+                  {/if}
+                </div>
+              {/each}
+              {#if servers.length > 4}
+                <p class="text-fg-subtle">+{servers.length - 4} more</p>
+              {/if}
+              <a href="/servers/new" class="inline-flex items-center gap-1 text-xs text-accent hover:text-accent font-medium mt-1">
+                <Plus size={14} /> Add another server
               </a>
             </div>
           {:else}
             <div class="text-center py-2">
-              <p class="text-xs text-fg-subtle mb-2">No target server connected</p>
+              <p class="text-xs text-fg-subtle mb-2">No servers connected</p>
               <a href="/servers/new" class="inline-flex items-center gap-1 text-xs text-accent hover:text-accent font-medium">
-                <Plus size={14} /> Add Target Server
+                <Plus size={14} /> Add a server
               </a>
             </div>
           {/if}
@@ -270,11 +218,13 @@
             <div class="space-y-1.5 text-xs">
               <div class="flex items-center justify-between">
                 <span class="text-fg-subtle">Servers scanned</span>
-                <span class="font-medium text-fg">{Object.keys(serverInfos).length}</span>
+                <span class="font-medium text-fg">{Object.keys(serverInfos).length} of {servers.length}</span>
               </div>
               <div class="flex items-center justify-between">
                 <span class="text-fg-subtle">Status</span>
-                <span class="font-medium text-success">Complete</span>
+                <span class="font-medium {Object.keys(serverInfos).length >= servers.length ? 'text-success' : 'text-warning'}">
+                  {Object.keys(serverInfos).length >= servers.length ? 'Complete' : 'Partial'}
+                </span>
               </div>
               <a href="/discovery" class="inline-flex items-center gap-1 text-xs text-accent hover:text-accent font-medium mt-1">
                 <Search size={14} /> View Discovery
@@ -290,6 +240,31 @@
           {:else}
             <div class="text-center py-2">
               <p class="text-xs text-fg-subtle">Connect a server first</p>
+            </div>
+          {/if}
+        </div>
+
+        <!-- Ready to Migrate Card -->
+        <div class="rounded-lg border bg-surface p-4 {hasMultipleServers ? 'border-border' : 'border-dashed border-border-strong'}">
+          <div class="flex items-center gap-2 mb-3">
+            <div class="w-8 h-8 rounded-lg flex items-center justify-center {hasMultipleServers ? 'bg-accent/10 text-accent' : 'bg-surface-muted text-fg-subtle'}">
+              <ArrowRightLeft size={18} />
+            </div>
+            <div>
+              <h3 class="text-sm font-medium text-fg">Ready to Migrate</h3>
+              <p class="text-xs text-fg-subtle">Pick source & target in the wizard</p>
+            </div>
+          </div>
+          {#if hasMultipleServers}
+            <div class="space-y-2 text-xs">
+              <p class="text-fg-muted">Choose any server as the source and any other as the target — you're not limited to two.</p>
+              <a href="/migrations/new" class="inline-flex items-center gap-1 text-xs text-accent hover:text-accent font-medium">
+                <Plus size={14} /> Start a migration
+              </a>
+            </div>
+          {:else}
+            <div class="text-center py-2">
+              <p class="text-xs text-fg-subtle">Connect at least 2 servers to start</p>
             </div>
           {/if}
         </div>
@@ -345,7 +320,9 @@
                   </span>
                   <span class="text-xs text-fg-subtle">{m.createdAt}</span>
                   <button
-                    on:click={(e) => deleteMigration(m.id, e)}
+                    type="button"
+                    aria-label="Delete migration"
+                    onclick={(e) => deleteMigration(m.id, e)}
                     class="text-fg-subtle hover:text-error"
                   >
                     <Trash2 size={16} />

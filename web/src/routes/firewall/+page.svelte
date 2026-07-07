@@ -417,25 +417,62 @@
               <Badge variant="info">IPv6: {ipv6Rules.length}</Badge>
             </div>
 
-            <div class="mt-5 overflow-x-auto rounded-xl border border-border">
-              <table class="min-w-full divide-y divide-border text-sm">
-                <thead class="bg-surface-muted text-fg-muted">
-                  <tr>
-                    <th class="px-4 py-3 text-left font-medium">Action</th>
-                    <th class="px-4 py-3 text-left font-medium">Port</th>
-                    <th class="px-4 py-3 text-left font-medium">Protocol</th>
-                    <th class="px-4 py-3 text-left font-medium">Source</th>
-                    <th class="px-4 py-3 text-left font-medium">Direction</th>
-                    <th class="px-4 py-3 text-left font-medium">ID</th>
-                    <th class="px-4 py-3 text-right font-medium">Actions</th>
-                  </tr>
-                </thead>
-                <tbody class="divide-y divide-border bg-surface">
-                  {#if firewall.rules.length === 0}
+            {#if firewall.rules.length === 0}
+              <div class="mt-5 rounded-xl border border-border px-4 py-8 text-center text-sm text-fg-subtle">
+                No IPv4 rules found.
+              </div>
+            {:else}
+              <!-- Mobile: stacked cards -->
+              <div class="mt-5 space-y-3 md:hidden">
+                {#each firewall.rules as rule}
+                  <div class="rounded-xl border border-border bg-surface p-4">
+                    <div class="flex items-center justify-between gap-2">
+                      <Badge variant={badgeVariantForAction(rule.action)}>{rule.action}</Badge>
+                      <span class="font-medium text-fg">{rule.port}</span>
+                    </div>
+                    <dl class="mt-3 grid grid-cols-2 gap-x-4 gap-y-2 text-sm">
+                      <div>
+                        <dt class="text-xs uppercase tracking-wide text-fg-subtle">Protocol</dt>
+                        <dd class="text-fg-muted">{rule.protocol}</dd>
+                      </div>
+                      <div>
+                        <dt class="text-xs uppercase tracking-wide text-fg-subtle">Direction</dt>
+                        <dd class="text-fg-muted">{rule.direction}</dd>
+                      </div>
+                      <div class="col-span-2">
+                        <dt class="text-xs uppercase tracking-wide text-fg-subtle">Source</dt>
+                        <dd class="break-all text-fg-muted">{rule.source || 'any'}</dd>
+                      </div>
+                    </dl>
+                    {#if canEditRules}
+                      <button
+                        type="button"
+                        class="mt-3 inline-flex w-full items-center justify-center gap-1.5 rounded-lg border border-border-strong bg-surface px-3 py-2 text-xs font-medium text-fg-muted transition-colors hover:bg-surface-muted"
+                        onclick={() => openDeleteConfirm(rule)}
+                      >
+                        <Trash2 size={14} />
+                        Delete
+                      </button>
+                    {/if}
+                  </div>
+                {/each}
+              </div>
+
+              <!-- Desktop: table -->
+              <div class="mt-5 hidden overflow-x-auto rounded-xl border border-border md:block">
+                <table class="min-w-full divide-y divide-border text-sm">
+                  <thead class="bg-surface-muted text-fg-muted">
                     <tr>
-                      <td colspan="7" class="px-4 py-8 text-center text-fg-subtle">No IPv4 rules found.</td>
+                      <th class="px-4 py-3 text-left font-medium">Action</th>
+                      <th class="px-4 py-3 text-left font-medium">Port</th>
+                      <th class="px-4 py-3 text-left font-medium">Protocol</th>
+                      <th class="px-4 py-3 text-left font-medium">Source</th>
+                      <th class="px-4 py-3 text-left font-medium">Direction</th>
+                      <th class="px-4 py-3 text-left font-medium">ID</th>
+                      <th class="px-4 py-3 text-right font-medium">Actions</th>
                     </tr>
-                  {:else}
+                  </thead>
+                  <tbody class="divide-y divide-border bg-surface">
                     {#each firewall.rules as rule}
                       <tr>
                         <td class="px-4 py-3">
@@ -462,10 +499,10 @@
                         </td>
                       </tr>
                     {/each}
-                  {/if}
-                </tbody>
-              </table>
-            </div>
+                  </tbody>
+                </table>
+              </div>
+            {/if}
           </Card>
 
           {#if ipv6Rules.length > 0}
@@ -478,7 +515,34 @@
                 <Badge variant="neutral">{ipv6Rules.length} rules</Badge>
               </div>
 
-              <div class="mt-5 overflow-x-auto rounded-xl border border-border">
+              <!-- Mobile: stacked cards -->
+              <div class="mt-5 space-y-3 md:hidden">
+                {#each ipv6Rules as rule}
+                  <div class="rounded-xl border border-border bg-surface p-4">
+                    <div class="flex items-center justify-between gap-2">
+                      <Badge variant={badgeVariantForAction(rule.action)}>{rule.action}</Badge>
+                      <span class="font-medium text-fg">{rule.port}</span>
+                    </div>
+                    <dl class="mt-3 grid grid-cols-2 gap-x-4 gap-y-2 text-sm">
+                      <div>
+                        <dt class="text-xs uppercase tracking-wide text-fg-subtle">Protocol</dt>
+                        <dd class="text-fg-muted">{rule.protocol}</dd>
+                      </div>
+                      <div>
+                        <dt class="text-xs uppercase tracking-wide text-fg-subtle">Direction</dt>
+                        <dd class="text-fg-muted">{rule.direction}</dd>
+                      </div>
+                      <div class="col-span-2">
+                        <dt class="text-xs uppercase tracking-wide text-fg-subtle">Source</dt>
+                        <dd class="break-all text-fg-muted">{rule.source || 'any'}</dd>
+                      </div>
+                    </dl>
+                  </div>
+                {/each}
+              </div>
+
+              <!-- Desktop: table -->
+              <div class="mt-5 hidden overflow-x-auto rounded-xl border border-border md:block">
                 <table class="min-w-full divide-y divide-border text-sm">
                   <thead class="bg-surface-muted text-fg-muted">
                     <tr>

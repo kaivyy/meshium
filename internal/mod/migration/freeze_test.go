@@ -117,8 +117,8 @@ func TestFreezeManager_DetectRedisBullMQ(t *testing.T) {
 	if err != nil {
 		t.Fatalf("FreezeWrites() error = %v", err)
 	}
-	if !containsString(result.FrozenDBs, "redis:bullmq") {
-		t.Fatalf("FreezeWrites() FrozenDBs = %#v, want redis:bullmq", result.FrozenDBs)
+	if !containsString(result.FrozenDBs, "redis:bullmq:6379") {
+		t.Fatalf("FreezeWrites() FrozenDBs = %#v, want redis:bullmq:6379", result.FrozenDBs)
 	}
 }
 

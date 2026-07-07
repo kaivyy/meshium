@@ -350,7 +350,8 @@
     />
   {:else}
     <Card padding="sm">
-      <div class="overflow-x-auto">
+      <!-- Desktop: table -->
+      <div class="hidden overflow-x-auto md:block">
         <table class="min-w-full divide-y divide-border">
           <thead class="bg-surface-muted">
             <tr>
@@ -447,6 +448,100 @@
             {/each}
           </tbody>
         </table>
+      </div>
+
+      <!-- Mobile: stacked cards -->
+      <div class="mt-4 space-y-3 md:hidden">
+        {#each filteredServices as service (service.name)}
+          <div class="rounded-xl border border-border bg-surface p-4">
+            <div class="flex items-center justify-between gap-2">
+              <span class="min-w-0 break-words font-medium text-fg">{service.name}</span>
+              <div class="flex shrink-0 flex-col items-end gap-1">
+                <Badge variant={stateVariant(service)} size="sm">{service.activeState}</Badge>
+                {#if service.subState && service.subState !== service.activeState}
+                  <span class="text-xs text-fg-subtle">{service.subState}</span>
+                {/if}
+              </div>
+            </div>
+            <dl class="mt-3 grid grid-cols-2 gap-x-4 gap-y-2 text-sm">
+              <div>
+                <dt class="text-xs uppercase tracking-wide text-fg-subtle">Type</dt>
+                <dd class="break-words text-fg-muted">{service.type || 'service'}</dd>
+              </div>
+              <div>
+                <dt class="text-xs uppercase tracking-wide text-fg-subtle">Enabled</dt>
+                <dd class="mt-0.5">
+                  <Badge variant={enabledVariant(service.enabled)} size="sm">{service.enabled ? 'Enabled' : 'Disabled'}</Badge>
+                </dd>
+              </div>
+              <div class="col-span-2">
+                <dt class="text-xs uppercase tracking-wide text-fg-subtle">Description</dt>
+                <dd class="break-words text-fg-muted">{formatServiceDescription(service)}</dd>
+              </div>
+            </dl>
+            <div class="mt-3 flex flex-wrap gap-2">
+              {#if canStart(service)}
+                <button
+                  type="button"
+                  onclick={() => performAction(service, 'start')}
+                  disabled={serviceBusy(service.name)}
+                  class="inline-flex items-center gap-1.5 rounded-lg border border-border-strong bg-surface px-3 py-1.5 text-xs font-medium text-fg-muted hover:bg-surface-muted disabled:cursor-not-allowed disabled:opacity-60"
+                >
+                  {#if isBusy(service.name, 'start')}<Spinner size="sm" label="" />{:else}<Play size={12} />{/if}
+                  Start
+                </button>
+              {/if}
+
+              {#if canStop(service)}
+                <button
+                  type="button"
+                  onclick={() => performAction(service, 'stop')}
+                  disabled={serviceBusy(service.name)}
+                  class="inline-flex items-center gap-1.5 rounded-lg border border-border-strong bg-surface px-3 py-1.5 text-xs font-medium text-fg-muted hover:bg-surface-muted disabled:cursor-not-allowed disabled:opacity-60"
+                >
+                  {#if isBusy(service.name, 'stop')}<Spinner size="sm" label="" />{:else}<Square size={12} />{/if}
+                  Stop
+                </button>
+              {/if}
+
+              {#if canRestart(service)}
+                <button
+                  type="button"
+                  onclick={() => performAction(service, 'restart')}
+                  disabled={serviceBusy(service.name)}
+                  class="inline-flex items-center gap-1.5 rounded-lg border border-border-strong bg-surface px-3 py-1.5 text-xs font-medium text-fg-muted hover:bg-surface-muted disabled:cursor-not-allowed disabled:opacity-60"
+                >
+                  {#if isBusy(service.name, 'restart')}<Spinner size="sm" label="" />{:else}<RotateCcw size={12} />{/if}
+                  Restart
+                </button>
+              {/if}
+
+              {#if canToggleEnabled(service)}
+                {#if service.enabled}
+                  <button
+                    type="button"
+                    onclick={() => performAction(service, 'disable')}
+                    disabled={serviceBusy(service.name)}
+                    class="inline-flex items-center gap-1.5 rounded-lg border border-border-strong bg-surface px-3 py-1.5 text-xs font-medium text-fg-muted hover:bg-surface-muted disabled:cursor-not-allowed disabled:opacity-60"
+                  >
+                    {#if isBusy(service.name, 'disable')}<Spinner size="sm" label="" />{:else}<ToggleLeft size={12} />{/if}
+                    Disable
+                  </button>
+                {:else}
+                  <button
+                    type="button"
+                    onclick={() => performAction(service, 'enable')}
+                    disabled={serviceBusy(service.name)}
+                    class="inline-flex items-center gap-1.5 rounded-lg border border-border-strong bg-surface px-3 py-1.5 text-xs font-medium text-fg-muted hover:bg-surface-muted disabled:cursor-not-allowed disabled:opacity-60"
+                  >
+                    {#if isBusy(service.name, 'enable')}<Spinner size="sm" label="" />{:else}<ToggleRight size={12} />{/if}
+                    Enable
+                  </button>
+                {/if}
+              {/if}
+            </div>
+          </div>
+        {/each}
       </div>
     </Card>
   {/if}

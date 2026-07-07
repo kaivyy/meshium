@@ -540,7 +540,7 @@
         icon={emptyIcon}
       />
     {:else}
-      <div class="overflow-hidden rounded-2xl border border-border bg-surface shadow-sm">
+      <div class="hidden overflow-x-auto rounded-2xl border border-border bg-surface shadow-sm md:block">
         <table class="min-w-full divide-y divide-border">
           <thead class="bg-surface-muted">
             <tr>
@@ -636,6 +636,109 @@
           </tbody>
         </table>
       </div>
+
+      <!-- Mobile: stacked cards -->
+      <div class="mt-4 space-y-3 md:hidden">
+        {#each filteredContainers as item (item.container.name + item.serverId)}
+          <div
+            class="cursor-pointer rounded-xl border border-border bg-surface p-4"
+            onclick={() => goto(`/servers/${item.serverId}`)}
+            role="button"
+            tabindex="0"
+            onkeydown={(event) => { if (event.key === 'Enter') goto(`/servers/${item.serverId}`); }}
+          >
+            <div class="flex items-center justify-between gap-2">
+              <span class="min-w-0 break-words font-medium text-fg">{item.container.name}</span>
+              <Badge variant={containerStateVariant(item.container.state)}>{item.container.state}</Badge>
+            </div>
+            <dl class="mt-3 grid grid-cols-2 gap-x-4 gap-y-2 text-sm">
+              <div class="col-span-2">
+                <dt class="text-xs uppercase tracking-wide text-fg-subtle">Image</dt>
+                <dd class="break-words text-fg-muted">{item.container.image}</dd>
+              </div>
+              <div class="col-span-2">
+                <dt class="text-xs uppercase tracking-wide text-fg-subtle">Ports</dt>
+                <dd class="break-words text-fg-muted">{formatPorts(item.container.ports)}</dd>
+              </div>
+              <div>
+                <dt class="text-xs uppercase tracking-wide text-fg-subtle">Uptime</dt>
+                <dd class="break-words text-fg-muted">{formatUptime(item.container.status)}</dd>
+              </div>
+              <div>
+                <dt class="text-xs uppercase tracking-wide text-fg-subtle">Server</dt>
+                <dd class="break-words text-fg-muted">{item.serverName}</dd>
+              </div>
+            </dl>
+            <div class="mt-3 flex flex-wrap gap-2">
+              {#if item.container.state.toLowerCase() !== 'running'}
+                <button
+                  type="button"
+                  disabled={isActionLoading(item.serverId, item.container.name, 'start')}
+                  onclick={(event) => { event.stopPropagation(); performContainerAction(item, 'start'); }}
+                  class="inline-flex items-center gap-1 rounded-lg border border-border-strong bg-surface px-3 py-1.5 text-xs font-medium text-fg-muted hover:bg-surface-muted disabled:opacity-60"
+                >
+                  {#if isActionLoading(item.serverId, item.container.name, 'start')}
+                    <Spinner size="sm" label="Loading" />
+                  {:else}
+                    <Play size={14} />
+                  {/if}
+                  Start
+                </button>
+              {:else}
+                <button
+                  type="button"
+                  disabled={isActionLoading(item.serverId, item.container.name, 'stop')}
+                  onclick={(event) => { event.stopPropagation(); performContainerAction(item, 'stop'); }}
+                  class="inline-flex items-center gap-1 rounded-lg border border-border-strong bg-surface px-3 py-1.5 text-xs font-medium text-fg-muted hover:bg-surface-muted disabled:opacity-60"
+                >
+                  {#if isActionLoading(item.serverId, item.container.name, 'stop')}
+                    <Spinner size="sm" label="Loading" />
+                  {:else}
+                    <Square size={14} />
+                  {/if}
+                  Stop
+                </button>
+                <button
+                  type="button"
+                  disabled={isActionLoading(item.serverId, item.container.name, 'restart')}
+                  onclick={(event) => { event.stopPropagation(); performContainerAction(item, 'restart'); }}
+                  class="inline-flex items-center gap-1 rounded-lg border border-border-strong bg-surface px-3 py-1.5 text-xs font-medium text-fg-muted hover:bg-surface-muted disabled:opacity-60"
+                >
+                  {#if isActionLoading(item.serverId, item.container.name, 'restart')}
+                    <Spinner size="sm" label="Loading" />
+                  {:else}
+                    <RotateCcw size={14} />
+                  {/if}
+                  Restart
+                </button>
+              {/if}
+
+              <button
+                type="button"
+                onclick={(event) => { event.stopPropagation(); openLogsModal(item); }}
+                class="inline-flex items-center gap-1 rounded-lg border border-border-strong bg-surface px-3 py-1.5 text-xs font-medium text-fg-muted hover:bg-surface-muted"
+              >
+                <FileText size={14} />
+                Logs
+              </button>
+
+              <button
+                type="button"
+                disabled={isActionLoading(item.serverId, item.container.name, 'remove')}
+                onclick={(event) => { event.stopPropagation(); openRemoveModal(item); }}
+                class="inline-flex items-center gap-1 rounded-lg bg-error px-3 py-1.5 text-xs font-medium text-accent-fg hover:bg-error/90 disabled:opacity-60"
+              >
+                {#if isActionLoading(item.serverId, item.container.name, 'remove')}
+                  <Spinner size="sm" label="Loading" />
+                {:else}
+                  <Trash2 size={14} />
+                {/if}
+                Remove
+              </button>
+            </div>
+          </div>
+        {/each}
+      </div>
     {/if}
   {:else}
     {#if filteredImages.length === 0}
@@ -645,7 +748,7 @@
         icon={emptyIcon}
       />
     {:else}
-      <div class="overflow-hidden rounded-2xl border border-border bg-surface shadow-sm">
+      <div class="hidden overflow-x-auto rounded-2xl border border-border bg-surface shadow-sm md:block">
         <table class="min-w-full divide-y divide-border">
           <thead class="bg-surface-muted">
             <tr>
@@ -666,6 +769,35 @@
             {/each}
           </tbody>
         </table>
+      </div>
+
+      <!-- Mobile: stacked cards -->
+      <div class="mt-4 space-y-3 md:hidden">
+        {#each filteredImages as item (item.image.id + item.serverId)}
+          <div
+            class="cursor-pointer rounded-xl border border-border bg-surface p-4"
+            onclick={() => goto(`/servers/${item.serverId}`)}
+            role="button"
+            tabindex="0"
+            onkeydown={(event) => { if (event.key === 'Enter') goto(`/servers/${item.serverId}`); }}
+          >
+            <div class="min-w-0 break-words font-medium text-fg">{item.image.repository}</div>
+            <dl class="mt-3 grid grid-cols-2 gap-x-4 gap-y-2 text-sm">
+              <div>
+                <dt class="text-xs uppercase tracking-wide text-fg-subtle">Tag</dt>
+                <dd class="break-words text-fg-muted">{item.image.tag}</dd>
+              </div>
+              <div>
+                <dt class="text-xs uppercase tracking-wide text-fg-subtle">Size</dt>
+                <dd class="break-words text-fg-muted">{item.image.size}</dd>
+              </div>
+              <div class="col-span-2">
+                <dt class="text-xs uppercase tracking-wide text-fg-subtle">Server</dt>
+                <dd class="break-words text-fg-muted">{item.serverName}</dd>
+              </div>
+            </dl>
+          </div>
+        {/each}
       </div>
     {/if}
   {/if}

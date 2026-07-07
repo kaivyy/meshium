@@ -3,6 +3,7 @@ package migration
 import (
 	"context"
 	"fmt"
+	"strings"
 	"time"
 )
 
@@ -165,9 +166,18 @@ func (e *CutoverEngine) Execute(ctx context.Context, config CutoverConfig) error
 	if e.traffic != nil {
 		if err := e.traffic.Verify(ctx, config.TrafficConfig); err != nil {
 			if config.AutoRollback {
+				e.repo.UpdateCutoverRecord(ctx, cutoverID, time.Now().Format(time.RFC3339), fmt.Sprintf("traffic verify failed: %v", err))
 				e.rollback(ctx, config)
+				return fmt.Errorf("traffic verify: %w", err)
 			}
-			return fmt.Errorf("traffic verify: %w", err)
+			// Without auto-rollback, traffic is switched and the target is
+			// promoted but verification failed — the migration is in an
+			// inconsistent, half-cut-over state. Surface a clear error and
+			// mark the cutover record as failed so this is not treated as a
+			// success; a human must intervene.
+			e.repo.UpdateCutoverRecord(ctx, cutoverID, time.Now().Format(time.RFC3339),
+				fmt.Sprintf("traffic verify failed, manual intervention required (auto-rollback disabled): %v", err))
+			return fmt.Errorf("traffic verify failed, manual intervention required (traffic switched and target promoted, auto-rollback disabled): %w", err)
 		}
 	}
 
@@ -183,7 +193,46 @@ func (e *CutoverEngine) Rollback(ctx context.Context, migrationID int) error {
 	history, _ := e.repo.GetCutoverHistory(migrationID)
 	_ = history // used for context
 
-	return e.rollback(ctx, CutoverConfig{MigrationID: migrationID})
+	// Reconstruct the cutover config from persisted state so replication and
+	// queue rollback act on the real databases/queues instead of an empty
+	// config (which would fail with "unsupported database type" and skip
+	// queue resume entirely).
+	return e.rollback(ctx, e.loadRollbackConfig(migrationID))
+}
+
+// loadRollbackConfig reconstructs a CutoverConfig from persisted replication
+// and queue state so that a manually-triggered rollback has the information it
+// needs to actually revert replication and resume queues.
+func (e *CutoverEngine) loadRollbackConfig(migrationID int) CutoverConfig {
+	config := CutoverConfig{MigrationID: migrationID}
+	if e == nil || e.repo == nil {
+		return config
+	}
+
+	if statuses, err := e.repo.GetReplicationStatus(migrationID); err == nil {
+		for _, s := range statuses {
+			config.ReplicationConfig = ReplicationConfig{
+				DatabaseType: s.DatabaseType,
+				DatabaseName: s.DatabaseName,
+				SourceHost:   s.SourceHost,
+				TargetHost:   s.TargetHost,
+				MigrationID:  migrationID,
+			}
+			break
+		}
+	}
+
+	if states, err := e.repo.GetQueueStates(migrationID); err == nil {
+		for _, s := range states {
+			config.QueueConfigs = append(config.QueueConfigs, QueueConfig{
+				QueueType:   s.QueueType,
+				QueueName:   s.QueueName,
+				MigrationID: migrationID,
+			})
+		}
+	}
+
+	return config
 }
 
 // rollback performs the actual rollback operations.
@@ -245,18 +294,39 @@ func (e *CutoverEngine) freezeWrites(ctx context.Context, config CutoverConfig) 
 		return fmt.Errorf("cutover engine is nil")
 	}
 
-	databases := make([]DatabaseInfo, 0, 1)
-	if config.ReplicationConfig.DatabaseType != "" {
-		databases = append(databases, DatabaseInfo{
-			Type: config.ReplicationConfig.DatabaseType,
-			Port: config.ReplicationConfig.SourcePort,
-		})
-	}
-	if len(databases) == 0 {
-		return nil
-	}
 	if e.freezeMgr == nil {
 		return fmt.Errorf("freeze manager not configured")
+	}
+
+	// Freeze ALL databases involved in the migration, not just the single
+	// ReplicationConfig.DatabaseType. The live-replication stage sets up
+	// replication for every database detected on the source, so freezing only
+	// one would leave the others writable during cutover and cause divergence.
+	var databases []DatabaseInfo
+	if e.freezeMgr.sourceSSH != nil {
+		databases = detectDatabases(ctx, e.freezeMgr.sourceSSH)
+	}
+
+	// Ensure the primary replication database is included even if detection
+	// missed it (e.g. non-standard process name) or SSH was unavailable.
+	if config.ReplicationConfig.DatabaseType != "" {
+		found := false
+		for _, db := range databases {
+			if strings.EqualFold(db.Type, config.ReplicationConfig.DatabaseType) {
+				found = true
+				break
+			}
+		}
+		if !found {
+			databases = append(databases, DatabaseInfo{
+				Type: config.ReplicationConfig.DatabaseType,
+				Port: config.ReplicationConfig.SourcePort,
+			})
+		}
+	}
+
+	if len(databases) == 0 {
+		return nil
 	}
 
 	result, err := e.freezeMgr.FreezeWrites(ctx, databases)

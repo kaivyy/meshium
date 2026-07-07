@@ -126,4 +126,31 @@ func TestCheckWebSocketOrigin(t *testing.T) {
 	if CheckWebSocketOrigin(req) {
 		t.Fatal("expected malformed origin to be rejected")
 	}
+
+	// Behind a reverse proxy: the browser Origin carries the public hostname
+	// while the request Host is the internal backend address. The proxy sets
+	// X-Forwarded-Host to the public hostname, which must be honored.
+	proxied := httptest.NewRequest(http.MethodGet, "http://localhost:9527/ws", nil)
+	proxied.Host = "localhost:9527"
+	proxied.Header.Set("Origin", "https://openclaw.example.ts.net")
+	proxied.Header.Set("X-Forwarded-Host", "openclaw.example.ts.net")
+	if !CheckWebSocketOrigin(proxied) {
+		t.Fatal("expected proxied same-site request (matching X-Forwarded-Host) to be allowed")
+	}
+
+	// A cross-origin request behind a proxy must still be rejected when the
+	// Origin matches neither Host nor X-Forwarded-Host.
+	proxied.Header.Set("Origin", "https://evil.example")
+	if CheckWebSocketOrigin(proxied) {
+		t.Fatal("expected cross-origin request to be rejected even with X-Forwarded-Host set")
+	}
+
+	// Origin host matching Host but on a different port should still be allowed
+	// (proxy terminates on 443, forwards to backend port).
+	portReq := httptest.NewRequest(http.MethodGet, "http://example.com/ws", nil)
+	portReq.Host = "example.com:9527"
+	portReq.Header.Set("Origin", "https://example.com")
+	if !CheckWebSocketOrigin(portReq) {
+		t.Fatal("expected same-host different-port request to be allowed")
+	}
 }

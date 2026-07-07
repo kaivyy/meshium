@@ -39,15 +39,7 @@ func NewHandler(runner MigrationRunner, repo Repo) *Handler {
 		runner: runner,
 		repo:   repo,
 		upgrader: websocket.Upgrader{
-			CheckOrigin: func(r *http.Request) bool {
-				origin := r.Header.Get("Origin")
-				if origin == "" {
-					return true // non-browser clients
-				}
-				host := r.Header.Get("Host")
-				// Allow same-origin requests
-				return isSameOrigin(origin, host)
-			},
+			CheckOrigin: shared.CheckWebSocketOrigin,
 		},
 	}
 }
@@ -547,23 +539,6 @@ func (h *Handler) handleExport(w http.ResponseWriter, r *http.Request, id int) {
 	w.Header().Set("Content-Type", "application/json")
 	w.Header().Set("Content-Disposition", fmt.Sprintf("attachment; filename=\"migration-%d.json\"", id))
 	json.NewEncoder(w).Encode(export)
-}
-
-// isSameOrigin checks if the Origin header matches the Host header.
-// This prevents CSRF attacks on WebSocket connections while allowing
-// same-origin browser connections and non-browser clients.
-func isSameOrigin(origin, host string) bool {
-	// Strip scheme from origin
-	originHost := origin
-	if after, ok := strings.CutPrefix(origin, "https://"); ok {
-		originHost = after
-	} else if after, ok := strings.CutPrefix(origin, "http://"); ok {
-		originHost = after
-	}
-	// Strip port from both for comparison (allow different ports in dev)
-	originHost = strings.Split(originHost, ":")[0]
-	hostOnly := strings.Split(host, ":")[0]
-	return originHost == hostOnly || originHost == "localhost" || originHost == "127.0.0.1"
 }
 
 func (h *Handler) upgradeWebSocket(w http.ResponseWriter, r *http.Request) (*websocket.Conn, error) {

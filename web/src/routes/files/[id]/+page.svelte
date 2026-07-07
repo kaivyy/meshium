@@ -148,6 +148,15 @@
     await loadFiles();
   }
 
+  // Derived: can we go up a level?
+  let canGoUp = $derived(currentPath !== '/' && currentPath !== '');
+
+  async function goUp() {
+    if (!canGoUp) return;
+    const parent = currentPath.replace(/\/+$/, '').split('/').slice(0, -1).join('/') || '/';
+    await navigateTo(parent);
+  }
+
   async function openFile(file: FileInfo) {
     if (file.isDir) {
       await navigateTo(file.path);
@@ -346,7 +355,7 @@
 <div class="p-4 sm:p-6 max-w-7xl mx-auto">
   <PageHeader title="File Browser" subtitle={server?.name || `Server #${serverId}`}>
     {#snippet actions()}
-      <div class="flex items-center gap-2">
+      <div class="flex flex-wrap items-center gap-2">
         <button type="button" onclick={() => showMkdirModal = true} class="inline-flex items-center gap-2 rounded-lg border border-border-strong bg-surface px-3 py-2 text-sm font-medium text-fg-muted hover:bg-surface-muted">
           <FolderPlus size={16} /> New Folder
         </button>
@@ -361,15 +370,28 @@
     {/snippet}
   </PageHeader>
 
-  <!-- Breadcrumbs -->
-  <div class="mb-4 flex items-center gap-1 overflow-x-auto whitespace-nowrap rounded-lg border border-border bg-surface px-3 py-2">
-    {#each breadcrumbs as crumb, i}
-      <button type="button" onclick={() => navigateTo(crumb.path)} class="inline-flex items-center gap-1 text-sm hover:text-accent hover:underline">
-        {#if i === 0}<Home size={14} />{/if}
-        {crumb.name}
-      </button>
-      {#if i < breadcrumbs.length - 1}<ChevronRight size={14} class="text-fg-subtle" />{/if}
-    {/each}
+  <!-- Breadcrumbs + Up -->
+  <div class="mb-4 flex items-center gap-2">
+    <button
+      type="button"
+      onclick={goUp}
+      disabled={!canGoUp}
+      title="Up one folder"
+      aria-label="Go up one folder"
+      class="inline-flex shrink-0 items-center gap-1.5 rounded-lg border border-border-strong bg-surface px-3 py-2 text-sm font-medium text-fg-muted hover:bg-surface-muted disabled:cursor-not-allowed disabled:opacity-50"
+    >
+      <ArrowLeft size={16} />
+      <span class="hidden sm:inline">Up</span>
+    </button>
+    <div class="flex min-w-0 flex-1 items-center gap-1 overflow-x-auto whitespace-nowrap rounded-lg border border-border bg-surface px-3 py-2">
+      {#each breadcrumbs as crumb, i}
+        <button type="button" onclick={() => navigateTo(crumb.path)} class="inline-flex items-center gap-1 text-sm hover:text-accent hover:underline">
+          {#if i === 0}<Home size={14} />{/if}
+          {crumb.name}
+        </button>
+        {#if i < breadcrumbs.length - 1}<ChevronRight size={14} class="shrink-0 text-fg-subtle" />{/if}
+      {/each}
+    </div>
   </div>
 
   <!-- Search and filter bar -->
@@ -424,9 +446,9 @@
         {@const Icon = getFileIconComponent(file)}
         <div class="flex items-center gap-3 border-b border-border px-4 py-2 hover:bg-surface-muted transition-colors">
           <!-- Name -->
-          <button type="button" onclick={() => openFile(file)} class="flex flex-1 items-center gap-2 text-left">
+          <button type="button" onclick={() => openFile(file)} class="flex min-w-0 flex-1 items-center gap-2 text-left">
             <Icon size={18} class={file.isDir ? 'text-info' : 'text-fg-subtle'} />
-            <span class="text-sm font-medium text-fg">{file.name}</span>
+            <span class="truncate text-sm font-medium text-fg">{file.name}</span>
             {#if file.isSymlink && file.linkTarget}
               <span class="text-xs text-fg-subtle">→ {file.linkTarget}</span>
             {/if}
@@ -615,12 +637,12 @@
   }}>
     <div class="space-y-3">
       <!-- File info bar -->
-      <div class="flex items-center justify-between rounded-lg bg-surface-muted px-3 py-2">
-        <div class="flex items-center gap-2">
-          <FileText size={16} class="text-fg-subtle" />
-          <span class="font-mono text-sm text-fg-muted">{editFile.path}</span>
+      <div class="flex flex-col gap-2 rounded-lg bg-surface-muted px-3 py-2 sm:flex-row sm:items-center sm:justify-between">
+        <div class="flex min-w-0 items-center gap-2">
+          <FileText size={16} class="shrink-0 text-fg-subtle" />
+          <span class="truncate font-mono text-sm text-fg-muted">{editFile.path}</span>
         </div>
-        <div class="flex items-center gap-3 text-xs text-fg-subtle">
+        <div class="flex shrink-0 items-center gap-3 text-xs text-fg-subtle">
           <span>{editMimeType}</span>
           <span>·</span>
           <span>{formatFileSize(editFile.size)}</span>
@@ -665,7 +687,7 @@
                 if (ln) { ln.scrollTop = (e.target as HTMLTextAreaElement).scrollTop; }
               }}
               id="edit-textarea"
-              class="flex-1 resize-none overflow-auto bg-white p-3 font-mono text-sm leading-6 text-fg outline-none"
+              class="flex-1 resize-none overflow-auto bg-surface p-3 font-mono text-sm leading-6 text-fg outline-none"
               style="max-height: 60vh; min-height: 300px;"
               spellcheck="false"
               autocomplete="off"

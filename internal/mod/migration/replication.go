@@ -3,12 +3,42 @@ package migration
 import (
 	"context"
 	"fmt"
+	"log"
 	"strconv"
 	"strings"
 	"time"
 
 	"meshium/internal/shared"
 )
+
+// execCommandError builds a diagnostic message for a remote command that
+// either failed at the transport level (err != nil) or ran but exited
+// non-zero. ExecContext returns a nil error on non-zero exit and carries the
+// status in exitCode, so callers must inspect both. The combined command
+// output (stdout+stderr) is included because commands here run with 2>&1.
+func execCommandError(err error, exitCode int, out, stderr string) string {
+	detail := strings.TrimSpace(stderr)
+	if detail == "" {
+		detail = strings.TrimSpace(out)
+	}
+	if err != nil {
+		if detail != "" {
+			return fmt.Sprintf("%v: %s", err, detail)
+		}
+		return err.Error()
+	}
+	if detail != "" {
+		return fmt.Sprintf("exit code %d: %s", exitCode, detail)
+	}
+	return fmt.Sprintf("exit code %d", exitCode)
+}
+
+// sqlEscapeSingleQuotes doubles single quotes in a SQL string literal so an
+// interpolated value cannot terminate the literal and inject SQL. It is a
+// minimum guard used together with shell-quoting of the whole command argument.
+func sqlEscapeSingleQuotes(s string) string {
+	return strings.ReplaceAll(s, "'", "''")
+}
 
 // ReplicationEngine manages database replication between source and target servers.
 // Supports MySQL/MariaDB, PostgreSQL, Redis, and MongoDB with dump as fallback.
@@ -158,14 +188,30 @@ func (e *ReplicationEngine) FinalSync(ctx context.Context, config ReplicationCon
 
 	switch config.DatabaseType {
 	case "mysql", "mariadb":
-		// Flush tables with read lock for consistent snapshot
-		_, _, _, _ = e.sourceSSH.ExecContext(ctx, "mysql -e 'FLUSH TABLES WITH READ LOCK' 2>&1")
+		// Flush tables with read lock. A failure here means we do not have a
+		// clean flush point, so propagate it rather than proceeding with cutover
+		// on inconsistent data. ExecContext returns a nil error when the command
+		// runs but exits non-zero, so the exit code must be checked too.
+		//
+		// NOTE: `mysql -e 'FLUSH TABLES WITH READ LOCK'` acquires a session-scoped
+		// lock that is released the instant the client process exits, so this does
+		// not hold a lock across the surrounding sync. True snapshot consistency
+		// requires holding one persistent session open across the sync/unlock.
+		if out, stderr, exitCode, err := e.sourceSSH.ExecContext(ctx, "mysql -e 'FLUSH TABLES WITH READ LOCK' 2>&1"); err != nil || exitCode != 0 {
+			return fmt.Errorf("flush tables with read lock: %s", execCommandError(err, exitCode, out, stderr))
+		}
 		defer func() {
-			e.sourceSSH.ExecContext(ctx, "mysql -e 'UNLOCK TABLES' 2>&1")
+			if out, stderr, exitCode, err := e.sourceSSH.ExecContext(ctx, "mysql -e 'UNLOCK TABLES' 2>&1"); err != nil || exitCode != 0 {
+				log.Printf("final sync: failed to unlock tables on source: %s", execCommandError(err, exitCode, out, stderr))
+			}
 		}()
 	case "redis":
-		// Trigger a save on source
-		_, _, _, _ = e.sourceSSH.ExecContext(ctx, "redis-cli BGSAVE 2>&1")
+		// Trigger a save on source. A failed save means the final snapshot may
+		// be stale, so propagate the error. ExecContext carries a non-zero exit
+		// in exitCode with a nil error, so both must be inspected.
+		if out, stderr, exitCode, err := e.sourceSSH.ExecContext(ctx, "redis-cli BGSAVE 2>&1"); err != nil || exitCode != 0 {
+			return fmt.Errorf("redis bgsave: %s", execCommandError(err, exitCode, out, stderr))
+		}
 		time.Sleep(1 * time.Second)
 	}
 
@@ -196,22 +242,33 @@ func (e *ReplicationEngine) setupMySQL(ctx context.Context, config ReplicationCo
 		replPass = fmt.Sprintf("meshium_%d", time.Now().Unix())
 	}
 
-	// Create replication user on source
-	cmd := fmt.Sprintf(
-		`mysql -e "CREATE USER IF NOT EXISTS '%s'@'%%' IDENTIFIED BY '%s'; GRANT REPLICATION SLAVE ON *.* TO '%s'@'%%'; FLUSH PRIVILEGES;" 2>&1`,
-		replUser, replPass, replUser,
+	// Create replication user on source. Escape SQL string literals (double any
+	// single quotes) and shell-quote the whole -e argument to prevent injection.
+	createUserSQL := fmt.Sprintf(
+		"CREATE USER IF NOT EXISTS '%s'@'%%' IDENTIFIED BY '%s'; GRANT REPLICATION SLAVE ON *.* TO '%s'@'%%'; FLUSH PRIVILEGES;",
+		sqlEscapeSingleQuotes(replUser), sqlEscapeSingleQuotes(replPass), sqlEscapeSingleQuotes(replUser),
 	)
+	cmd := fmt.Sprintf("mysql -e %s 2>&1", shared.ShellQuote(createUserSQL))
 	if _, _, _, err := e.sourceSSH.ExecContext(ctx, cmd); err != nil {
 		return fmt.Errorf("create replication user: %w", err)
 	}
 
-	// Get master status
-	output, _, _, err := e.sourceSSH.ExecContext(ctx, "mysql -e 'SHOW MASTER STATUS\\G' 2>&1")
-	if err != nil {
-		return fmt.Errorf("get master status: %w", err)
+	// Get master status. Check the exit code too: ExecContext returns a nil
+	// error on non-zero exit, and a failed SHOW MASTER STATUS would otherwise
+	// fall through to an empty binlog position and a broken replica.
+	output, mstderr, mexit, err := e.sourceSSH.ExecContext(ctx, "mysql -e 'SHOW MASTER STATUS\\G' 2>&1")
+	if err != nil || mexit != 0 {
+		return fmt.Errorf("get master status: %s", execCommandError(err, mexit, output, mstderr))
 	}
 
 	binFile, binPos := parseMySQLMasterStatus(output)
+
+	// An empty binlog file means binary logging is off or the status was not
+	// parseable. Proceeding would issue CHANGE MASTER with MASTER_LOG_FILE='',
+	// silently misconfiguring the replica, so fail loudly instead.
+	if binFile == "" {
+		return fmt.Errorf("source master status has no binlog file (is binary logging enabled?); output: %s", strings.TrimSpace(output))
+	}
 
 	// Configure replica on target
 	sourceHost := config.SourceHost
@@ -219,12 +276,18 @@ func (e *ReplicationEngine) setupMySQL(ctx context.Context, config ReplicationCo
 		sourceHost = "source" // will be resolved via SSH tunnel or hosts file
 	}
 
-	cmd = fmt.Sprintf(
-		`mysql -e "CHANGE MASTER TO MASTER_HOST='%s', MASTER_USER='%s', MASTER_PASSWORD='%s', MASTER_LOG_FILE='%s', MASTER_LOG_POS=%s; START SLAVE;" 2>&1`,
-		sourceHost, replUser, replPass, binFile, binPos,
+	// MASTER_LOG_POS is a numeric literal; guard it so a non-numeric parse result
+	// cannot inject SQL. Fall back to 0 if the parsed position is not an integer.
+	if _, convErr := strconv.ParseInt(binPos, 10, 64); binPos == "" || convErr != nil {
+		binPos = "0"
+	}
+	changeMasterSQL := fmt.Sprintf(
+		"CHANGE MASTER TO MASTER_HOST='%s', MASTER_USER='%s', MASTER_PASSWORD='%s', MASTER_LOG_FILE='%s', MASTER_LOG_POS=%s; START SLAVE;",
+		sqlEscapeSingleQuotes(sourceHost), sqlEscapeSingleQuotes(replUser), sqlEscapeSingleQuotes(replPass), sqlEscapeSingleQuotes(binFile), binPos,
 	)
-	if _, _, _, err := e.targetSSH.ExecContext(ctx, cmd); err != nil {
-		return fmt.Errorf("configure replica: %w", err)
+	cmd = fmt.Sprintf("mysql -e %s 2>&1", shared.ShellQuote(changeMasterSQL))
+	if out, cstderr, cexit, err := e.targetSSH.ExecContext(ctx, cmd); err != nil || cexit != 0 {
+		return fmt.Errorf("configure replica: %s", execCommandError(err, cexit, out, cstderr))
 	}
 
 	return nil
@@ -278,8 +341,9 @@ func parseMySQLMasterStatus(output string) (string, string) {
 func (e *ReplicationEngine) setupPostgreSQL(ctx context.Context, config ReplicationConfig) error {
 	// Configure source for replication
 	cmds := []string{
-		// Create replication user
-		fmt.Sprintf(`sudo -u postgres psql -c "CREATE USER replicator WITH REPLICATION ENCRYPTED PASSWORD '%s';" 2>&1`, config.ReplicationPass),
+		// Create replication user. Escape the SQL string literal (double single
+		// quotes) and shell-quote the whole -c argument to prevent injection.
+		fmt.Sprintf(`sudo -u postgres psql -c %s 2>&1`, shared.ShellQuote(fmt.Sprintf("CREATE USER replicator WITH REPLICATION ENCRYPTED PASSWORD '%s';", sqlEscapeSingleQuotes(config.ReplicationPass)))),
 		// Create replication slot
 		fmt.Sprintf(`sudo -u postgres psql -c "SELECT pg_create_physical_replication_slot('meshium_slot');" 2>&1`),
 		// Configure wal_level and max_wal_senders
@@ -343,7 +407,11 @@ func (e *ReplicationEngine) postgresLag(ctx context.Context, config ReplicationC
 	}
 	lag, err := strconv.ParseInt(strings.TrimSpace(output), 10, 64)
 	if err != nil {
-		return 0, nil // no replication lag reported
+		// A non-numeric result means the lag query failed (e.g. the psql
+		// command emitted an error). Do NOT report 0 here: callers such as
+		// WaitForCatchUp treat 0 as "caught up" and would proceed to promote
+		// on un-replicated data. Surface the failure instead.
+		return -1, fmt.Errorf("parse postgres replication lag %q: %w", strings.TrimSpace(output), err)
 	}
 	return lag, nil
 }
@@ -464,20 +532,16 @@ func (e *ReplicationEngine) setupMongoDB(ctx context.Context, config Replication
 }
 
 func (e *ReplicationEngine) mongoDBLag(ctx context.Context, config ReplicationConfig) (int64, error) {
-	output, _, _, err := e.sourceSSH.ExecContext(ctx,
-		`mongosh --eval "JSON.stringify(rs.status())" --quiet 2>&1`)
-	if err != nil {
+	// Genuine MongoDB replica-set lag measurement (parsing optimeDate deltas from
+	// rs.status()) is not implemented. Returning 0 here would let WaitForCatchUp
+	// treat replication as instantly caught up and allow promotion on
+	// un-replicated data. Verify connectivity, then return an explicit error so
+	// callers never interpret an unmeasured lag as success.
+	if _, _, _, err := e.sourceSSH.ExecContext(ctx,
+		`mongosh --eval "JSON.stringify(rs.status())" --quiet 2>&1`); err != nil {
 		return -1, err
 	}
-
-	// Parse optimeDate difference
-	for _, line := range strings.Split(output, "\n") {
-		if strings.Contains(line, "optimeDate") || strings.Contains(line, "lag") {
-			// Simplified: return 0 if we can connect
-			return 0, nil
-		}
-	}
-	return 0, nil
+	return -1, fmt.Errorf("mongo lag measurement not implemented")
 }
 
 func (e *ReplicationEngine) promoteMongoDB(ctx context.Context, config ReplicationConfig) error {

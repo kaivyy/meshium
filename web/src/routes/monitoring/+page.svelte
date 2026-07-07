@@ -34,7 +34,7 @@
   let loadingServers = $state(true);
   let loadingMetrics = $state(false);
   let topProcessesLoading = $state(false);
-  let streamingEnabled = $state(false);
+  let streamingEnabled = $state(true);
   let selectedInterval = $state(5);
   let streamStatus = $state<StreamStatus>('idle');
   let streamEndpoint = $state('');
@@ -54,6 +54,20 @@
     return $snapshotsStore[selectedServerId] ?? null;
   });
   const networkRates = $derived.by(() => computeNetworkRates(historyWindow));
+  const networkPeak = $derived.by(() => {
+    let peak = 0;
+    for (const rate of Object.values(networkRates)) {
+      peak = Math.max(peak, rate.rxPerSec, rate.txPerSec);
+    }
+    return peak;
+  });
+
+  function ratePercent(bytesPerSec: number | undefined): number {
+    if (!bytesPerSec || networkPeak <= 0) {
+      return 0;
+    }
+    return Math.max(2, Math.min(100, (bytesPerSec / networkPeak) * 100));
+  }
   const cpuSparkline = $derived.by(() => buildSparkline(historyWindow.map((sample) => sample.cpu.usage)));
   const memorySparkline = $derived.by(() => buildSparkline(historyWindow.map((sample) => sample.memory.usagePercent)));
   const streamBadgeVariant = $derived.by((): BadgeVariant => {
@@ -90,6 +104,9 @@
         const nextServerId = stillValid && selectedServerId !== null ? selectedServerId : data[0].id;
         selectedServerId = nextServerId;
         await loadMetricsBundle(nextServerId);
+        if (streamingEnabled) {
+          openStreaming();
+        }
       }
     } catch (error) {
       console.error(error);
@@ -409,8 +426,11 @@
     const previous = samples[samples.length - 2];
     const elapsed = Math.max((current.timestamp - previous.timestamp) || 1, 1);
 
-    for (const iface of current.network) {
-      const before = previous.network.find((entry) => entry.interface === iface.interface);
+    const currentNetwork = Array.isArray(current.network) ? current.network : [];
+    const previousNetwork = Array.isArray(previous.network) ? previous.network : [];
+
+    for (const iface of currentNetwork) {
+      const before = previousNetwork.find((entry) => entry.interface === iface.interface);
       if (!before) {
         continue;
       }
@@ -432,7 +452,7 @@
   }
 
   function hasNetworkData() {
-    return Boolean(metrics && metrics.network.length > 0);
+    return Boolean(metrics && Array.isArray(metrics.network) && metrics.network.length > 0);
   }
 </script>
 
@@ -492,7 +512,7 @@
             </div>
             <div class="flex flex-col gap-2 sm:flex-row sm:items-center">
               <select
-                class="min-w-[260px] rounded-lg border border-border bg-surface px-3 py-2 text-sm text-fg shadow-sm outline-none transition focus:border-accent"
+                class="w-full min-w-0 rounded-lg border border-border bg-surface px-3 py-2 text-sm text-fg shadow-sm outline-none transition focus:border-accent sm:w-auto sm:min-w-[260px]"
                 value={selectedServerId?.toString() ?? ''}
                 onchange={handleServerChange}
               >
@@ -760,18 +780,20 @@
             </div>
           </div>
 
-          {#if metrics && metrics.network.length > 0}
+          {#if metrics && Array.isArray(metrics.network) && metrics.network.length > 0}
             <div class="mt-4 grid gap-3 md:grid-cols-2">
               {#each metrics.network as iface}
                 <div class="rounded-xl border border-border bg-surface-muted p-4">
                   <div class="flex items-start justify-between gap-3">
-                    <div>
-                      <p class="font-medium text-fg">{iface.interface}</p>
+                    <div class="min-w-0">
+                      <p class="truncate font-medium text-fg">{iface.interface}</p>
                       <p class="mt-1 text-xs text-fg-subtle">{formatBytes(iface.rxBytes)} RX · {formatBytes(iface.txBytes)} TX</p>
                     </div>
-                    <Badge variant="info">
-                      {networkRates[iface.interface] ? `${formatRate(networkRates[iface.interface].rxPerSec)} · ${formatRate(networkRates[iface.interface].txPerSec)}` : 'warming up'}
-                    </Badge>
+                    <span class="shrink-0">
+                      <Badge variant="info">
+                        {networkRates[iface.interface] ? `${formatRate(networkRates[iface.interface].rxPerSec)} · ${formatRate(networkRates[iface.interface].txPerSec)}` : 'warming up'}
+                      </Badge>
+                    </span>
                   </div>
 
                   <div class="mt-3 space-y-2 text-sm">
@@ -780,8 +802,8 @@
                         <span>RX</span>
                         <span>{networkRates[iface.interface] ? formatRate(networkRates[iface.interface].rxPerSec) : '—'}</span>
                       </div>
-                      <div class="h-2 rounded-full bg-surface-muted">
-                        <div class="h-2 rounded-full bg-accent" style="width: 100%; opacity: 0.35;"></div>
+                      <div class="h-2 overflow-hidden rounded-full bg-surface-muted">
+                        <div class="h-2 rounded-full bg-accent transition-all duration-500" style={`width: ${ratePercent(networkRates[iface.interface]?.rxPerSec)}%;`}></div>
                       </div>
                     </div>
                     <div>
@@ -789,8 +811,8 @@
                         <span>TX</span>
                         <span>{networkRates[iface.interface] ? formatRate(networkRates[iface.interface].txPerSec) : '—'}</span>
                       </div>
-                      <div class="h-2 rounded-full bg-surface-muted">
-                        <div class="h-2 rounded-full bg-success" style="width: 100%; opacity: 0.35;"></div>
+                      <div class="h-2 overflow-hidden rounded-full bg-surface-muted">
+                        <div class="h-2 rounded-full bg-success transition-all duration-500" style={`width: ${ratePercent(networkRates[iface.interface]?.txPerSec)}%;`}></div>
                       </div>
                     </div>
                   </div>
@@ -907,7 +929,7 @@
           </div>
 
           {#if topProcesses.length > 0}
-            <div class="mt-4 overflow-hidden rounded-xl border border-border">
+            <div class="mt-4 hidden overflow-x-auto rounded-xl border border-border md:block">
               <table class="min-w-full divide-y divide-border text-sm">
                 <thead class="bg-surface-muted text-left text-xs uppercase tracking-wide text-fg-subtle">
                   <tr>
@@ -936,6 +958,36 @@
                   {/each}
                 </tbody>
               </table>
+            </div>
+
+            <!-- Mobile: stacked cards -->
+            <div class="mt-4 space-y-3 md:hidden">
+              {#each topProcesses as process}
+                <div class="rounded-xl border border-border bg-surface p-4">
+                  <div class="flex items-center justify-between gap-2">
+                    <span class="min-w-0 break-words font-medium text-fg">{process.user}</span>
+                    <span class="font-mono text-xs text-fg-subtle">PID {process.pid}</span>
+                  </div>
+                  <dl class="mt-3 grid grid-cols-2 gap-x-4 gap-y-2 text-sm">
+                    <div>
+                      <dt class="text-xs uppercase tracking-wide text-fg-subtle">CPU</dt>
+                      <dd class="font-medium {gaugeVariant(process.cpu, 50, 80) === 'error' ? 'text-error' : gaugeVariant(process.cpu, 50, 80) === 'warning' ? 'text-warning' : 'text-success'}">
+                        {process.cpu.toFixed(1)}%
+                      </dd>
+                    </div>
+                    <div>
+                      <dt class="text-xs uppercase tracking-wide text-fg-subtle">MEM</dt>
+                      <dd class="font-medium {gaugeVariant(process.memory, 50, 80) === 'error' ? 'text-error' : gaugeVariant(process.memory, 50, 80) === 'warning' ? 'text-warning' : 'text-success'}">
+                        {process.memory.toFixed(1)}%
+                      </dd>
+                    </div>
+                    <div class="col-span-2">
+                      <dt class="text-xs uppercase tracking-wide text-fg-subtle">Command</dt>
+                      <dd class="break-all font-mono text-xs text-fg-muted" title={process.command}>{process.command}</dd>
+                    </div>
+                  </dl>
+                </div>
+              {/each}
             </div>
           {:else}
             <div class="mt-4 rounded-xl border border-dashed border-border bg-surface-muted p-4 text-sm text-fg-subtle">
@@ -978,9 +1030,3 @@
     Select a server to begin monitoring
   </div>
 {/if}
-
-<style>
-  :global(body) {
-    background: #f8fafc;
-  }
-</style>

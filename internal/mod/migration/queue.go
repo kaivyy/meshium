@@ -213,10 +213,11 @@ func (e *QueueEngine) syncBullMQ(ctx context.Context, config QueueConfig, stateI
 	if redisPort == 0 {
 		redisPort = 6379
 	}
-	targetRedisHost := config.RedisHost
-	if targetRedisHost == "" {
-		targetRedisHost = "127.0.0.1"
-	}
+	// The RESTORE runs on the target host (via e.targetSSH), so it must target
+	// the target's local Redis. The previous code defaulted targetRedisHost to
+	// config.RedisHost (the SOURCE host), which caused the sync to write the
+	// keys back to the source instead of the target.
+	targetRedisHost := "127.0.0.1"
 
 	// Dump BullMQ keys from source Redis
 	pattern := fmt.Sprintf("bull:%s:*", queueName)
@@ -234,17 +235,33 @@ func (e *QueueEngine) syncBullMQ(ctx context.Context, config QueueConfig, stateI
 			continue
 		}
 
-		// Dump the key
-		dumpCmd := fmt.Sprintf("redis-cli -h %s -p %d DUMP %s 2>&1",
+		// Skip the pause flag. The scan pattern "bull:<name>:*" matches the
+		// "bull:<name>:paused" key set by pauseBullMQ; copying it to the target
+		// would leave the migrated queue paused forever, since resumeBullMQ only
+		// clears the flag on the source. The target must come up unpaused.
+		if strings.HasSuffix(key, ":paused") {
+			continue
+		}
+
+		// Dump the key. The DUMP payload is raw binary containing NUL bytes,
+		// which get corrupted when passed as a shell-quoted argv value over the
+		// text SSH channel. Base64-encode it on the source so it survives as
+		// text (head -c -1 strips the single trailing newline redis-cli appends
+		// to the reply, which would otherwise corrupt the payload).
+		dumpCmd := fmt.Sprintf("redis-cli -h %s -p %d DUMP %s | head -c -1 | base64 | tr -d '\\n'",
 			shared.ShellQuote(redisHost), redisPort, shared.ShellQuote(key))
-		dump, _, _, err := e.sourceSSH.ExecContext(ctx, dumpCmd)
+		dumpB64, _, _, err := e.sourceSSH.ExecContext(ctx, dumpCmd)
 		if err != nil {
 			e.repo.UpdateQueueState(ctx, stateID, true, 0, false, false, false, err.Error())
 			return fmt.Errorf("dump redis key %s: %w", key, err)
 		}
+		dumpB64 = strings.TrimSpace(dumpB64)
 
-		// Get TTL
-		ttlCmd := fmt.Sprintf("redis-cli -h %s -p %d TTL %s 2>&1",
+		// Get TTL in MILLISECONDS. RESTORE's TTL argument is milliseconds, so we
+		// must read PTTL (ms), not TTL (seconds) — using TTL would restore a
+		// 3600s key with a 3600ms TTL, expiring it ~1000x too soon. PTTL returns
+		// -1 (no expiry) or -2 (missing); only a positive value is a real TTL.
+		ttlCmd := fmt.Sprintf("redis-cli -h %s -p %d PTTL %s 2>&1",
 			shared.ShellQuote(redisHost), redisPort, shared.ShellQuote(key))
 		ttlOutput, _, _, _ := e.sourceSSH.ExecContext(ctx, ttlCmd)
 		ttl := "0"
@@ -252,10 +269,12 @@ func (e *QueueEngine) syncBullMQ(ctx context.Context, config QueueConfig, stateI
 			ttl = strconv.Itoa(t)
 		}
 
-		// Restore on target
-		restoreCmd := fmt.Sprintf("redis-cli -h %s -p %d RESTORE %s %s %s 2>&1",
-			shared.ShellQuote(targetRedisHost), redisPort,
-			shared.ShellQuote(key), ttl, shared.ShellQuote(dump))
+		// Restore on target: decode the base64 payload and feed the raw binary
+		// to RESTORE via stdin (redis-cli -x reads the final argument from
+		// stdin), so no NUL bytes ever pass through argv.
+		restoreCmd := fmt.Sprintf("echo %s | base64 -d | redis-cli -h %s -p %d -x RESTORE %s %s 2>&1",
+			shared.ShellQuote(dumpB64), shared.ShellQuote(targetRedisHost), redisPort,
+			shared.ShellQuote(key), ttl)
 		if _, _, _, err := e.targetSSH.ExecContext(ctx, restoreCmd); err != nil {
 			e.repo.UpdateQueueState(ctx, stateID, true, 0, false, false, false, err.Error())
 			return fmt.Errorf("restore redis key %s: %w", key, err)
@@ -277,9 +296,13 @@ func (e *QueueEngine) resumeBullMQ(ctx context.Context, config QueueConfig, stat
 		redisPort = 6379
 	}
 
+	// Resume must undo the pause on the SAME host the pause acted on.
+	// pauseBullMQ SETs bull:<name>:paused via sourceSSH, so resume must DEL it
+	// via sourceSSH too. Using targetSSH here left the source queue paused
+	// (which is the queue that matters on a rollback).
 	cmd := fmt.Sprintf("redis-cli -h %s -p %d DEL bull:%s:paused 2>&1",
 		shared.ShellQuote(redisHost), redisPort, shared.ShellQuote(queueName))
-	if _, _, _, err := e.targetSSH.ExecContext(ctx, cmd); err != nil {
+	if _, _, _, err := e.sourceSSH.ExecContext(ctx, cmd); err != nil {
 		return fmt.Errorf("resume bullmq: %w", err)
 	}
 
@@ -348,8 +371,11 @@ func (e *QueueEngine) syncRabbitMQ(ctx context.Context, config QueueConfig, stat
 }
 
 func (e *QueueEngine) resumeRabbitMQ(ctx context.Context, config QueueConfig, stateID int64) error {
+	// pauseRabbitMQ throttles the SOURCE broker (watermark 0 via sourceSSH), so
+	// resume must restore the watermark on the SAME source broker. Running this
+	// on targetSSH left the source broker permanently paused.
 	cmd := "rabbitmqctl set_vm_memory_high_watermark 0.4 2>&1"
-	if _, _, _, err := e.targetSSH.ExecContext(ctx, cmd); err != nil {
+	if _, _, _, err := e.sourceSSH.ExecContext(ctx, cmd); err != nil {
 		return fmt.Errorf("resume rabbitmq: %w", err)
 	}
 	e.repo.UpdateQueueState(ctx, stateID, false, 0, true, true, true, "")

@@ -495,14 +495,14 @@
 </script>
 
 {#snippet migrateTrigger()}
-  <span class="inline-flex items-center justify-center gap-2 rounded-lg border border-border-strong bg-surface px-4 py-2 text-sm font-medium text-fg-muted transition hover:bg-surface-muted">
+  <span class="flex w-full items-center justify-center gap-2 rounded-lg border border-border-strong bg-surface px-4 py-2 text-sm font-medium text-fg-muted transition hover:bg-surface-muted sm:w-auto">
     <ArrowRightLeft size={16} />
     Migrate
   </span>
 {/snippet}
 
 {#snippet moreTrigger()}
-  <span class="inline-flex items-center justify-center gap-2 rounded-lg border border-border-strong bg-surface px-4 py-2 text-sm font-medium text-fg-muted transition hover:bg-surface-muted">
+  <span class="flex w-full items-center justify-center gap-2 rounded-lg border border-border-strong bg-surface px-4 py-2 text-sm font-medium text-fg-muted transition hover:bg-surface-muted sm:w-auto">
     <MoreVertical size={16} />
     More
   </span>
@@ -542,30 +542,31 @@
         {/if}
       </div>
 
-      <div class="flex flex-wrap items-center gap-3">
+      <div class="grid grid-cols-3 items-center gap-2 sm:flex sm:flex-wrap sm:gap-3">
         <button
           type="button"
           onclick={handleConnect}
           disabled={connecting}
-          class="inline-flex items-center justify-center gap-2 rounded-lg border border-border-strong bg-surface px-4 py-2 text-sm font-medium text-fg-muted transition hover:bg-surface-muted disabled:cursor-not-allowed disabled:opacity-50"
+          class="flex w-full items-center justify-center gap-2 rounded-lg border border-border-strong bg-surface px-4 py-2 text-sm font-medium text-fg-muted transition hover:bg-surface-muted disabled:cursor-not-allowed disabled:opacity-50 sm:w-auto"
         >
           <Play size={18} />
-          {connecting ? 'Connecting...' : 'Test Connection'}
+          <span class="sm:hidden">{connecting ? 'Testing...' : 'Test'}</span>
+          <span class="hidden sm:inline">{connecting ? 'Connecting...' : 'Test Connection'}</span>
         </button>
 
-        <DropdownMenu items={buildMigrateMenuItems(server.id)} label="Migrate this server" trigger={migrateTrigger} />
-        <DropdownMenu items={buildMoreMenuItems(server.id)} label="More actions" trigger={moreTrigger} />
+        <DropdownMenu items={buildMigrateMenuItems(server.id)} label="Migrate this server" trigger={migrateTrigger} block />
+        <DropdownMenu items={buildMoreMenuItems(server.id)} label="More actions" trigger={moreTrigger} block />
       </div>
     </div>
 
     <div class="mb-6 border-b border-border">
-      <div class="-mb-px flex flex-wrap gap-2" role="tablist" aria-label="Server detail tabs">
+      <div class="-mb-px flex gap-2 overflow-x-auto scrollbar-thin [-ms-overflow-style:none] [scrollbar-width:thin]" role="tablist" aria-label="Server detail tabs">
         {#each tabs as tab}
           <button
             type="button"
             role="tab"
             onclick={() => (activeTab = tab.id)}
-            class={`rounded-t-lg border px-4 py-2 text-sm font-medium transition ${activeTab === tab.id
+            class={`shrink-0 whitespace-nowrap rounded-t-lg border px-4 py-2 text-sm font-medium transition ${activeTab === tab.id
               ? 'border-border border-b-surface bg-surface text-fg'
               : 'border-transparent text-fg-subtle hover:bg-surface-muted hover:text-fg'}`}
             aria-selected={activeTab === tab.id}
@@ -624,12 +625,12 @@
               <h2 class="text-sm font-semibold uppercase tracking-wide text-fg-subtle">System Information</h2>
               <p class="mt-1 text-sm text-fg-subtle">Cached data from the latest successful connection test.</p>
             </div>
-            <div class="flex flex-wrap items-center gap-2">
+            <div class="grid grid-cols-2 items-center gap-2 sm:flex sm:flex-wrap">
               <button
                 type="button"
                 onclick={handleRescan}
                 disabled={rescanning || loadingSnapshot}
-                class="inline-flex items-center justify-center gap-2 rounded-lg border border-border-strong bg-surface px-4 py-2 text-sm font-medium text-fg-muted transition hover:bg-surface-muted disabled:cursor-not-allowed disabled:opacity-50"
+                class="flex w-full items-center justify-center gap-2 rounded-lg border border-border-strong bg-surface px-4 py-2 text-sm font-medium text-fg-muted transition hover:bg-surface-muted disabled:cursor-not-allowed disabled:opacity-50 sm:w-auto"
               >
                 <RefreshCw size={16} />
                 {rescanning ? 'Re-scanning...' : 'Re-scan'}
@@ -637,9 +638,10 @@
               <button
                 type="button"
                 onclick={openComparePage}
-                class="inline-flex items-center justify-center rounded-lg bg-accent px-4 py-2 text-sm font-medium text-accent-fg transition hover:bg-accent-hover"
+                class="flex w-full items-center justify-center rounded-lg bg-accent px-4 py-2 text-sm font-medium text-accent-fg transition hover:bg-accent-hover sm:w-auto"
               >
-                Compare with another server
+                <span class="sm:hidden">Compare</span>
+                <span class="hidden sm:inline">Compare with another server</span>
               </button>
             </div>
           </div>
@@ -1007,7 +1009,7 @@
               </div>
             {/if}
             {#if connectionHistory.length > 0}
-              <div class="overflow-hidden rounded-xl border border-border bg-surface shadow-sm">
+              <div class="hidden overflow-x-auto rounded-xl border border-border bg-surface shadow-sm md:block">
                 <table class="min-w-full divide-y divide-border text-left text-sm">
                   <thead class="bg-surface-muted text-fg-subtle">
                     <tr>
@@ -1036,6 +1038,36 @@
                     {/each}
                   </tbody>
                 </table>
+              </div>
+
+              <!-- Mobile: stacked cards -->
+              <div class="space-y-3 md:hidden">
+                {#each connectionHistory as entry}
+                  <div class="rounded-xl border border-border bg-surface p-4">
+                    <div class="flex items-center justify-between gap-2">
+                      <span class="min-w-0 break-words font-medium text-fg">{formatRelativeTime(entry.createdAt)}</span>
+                      {#if entry.success}
+                        <Badge variant="success">Success</Badge>
+                      {:else}
+                        <Badge variant="error">Failed</Badge>
+                      {/if}
+                    </div>
+                    <dl class="mt-3 grid grid-cols-2 gap-x-4 gap-y-2 text-sm">
+                      <div>
+                        <dt class="text-xs uppercase tracking-wide text-fg-subtle">Method</dt>
+                        <dd class="break-words text-fg-muted">{entry.authMethod || '—'}</dd>
+                      </div>
+                      <div>
+                        <dt class="text-xs uppercase tracking-wide text-fg-subtle">Duration</dt>
+                        <dd class="break-words text-fg-muted">{entry.durationMs ? `${entry.durationMs}ms` : '—'}</dd>
+                      </div>
+                      <div class="col-span-2">
+                        <dt class="text-xs uppercase tracking-wide text-fg-subtle">Reason</dt>
+                        <dd class="break-words text-fg-muted">{entry.reason || '—'}</dd>
+                      </div>
+                    </dl>
+                  </div>
+                {/each}
               </div>
             {:else if connectionMetrics}
               <EmptyState title="No connection history" description="No connection attempts have been recorded yet." />
@@ -1079,7 +1111,7 @@
               <section>
                 <h3 class="mb-3 text-sm font-semibold uppercase tracking-wide text-fg-subtle">Containers</h3>
                 {#if dockerContainers.length}
-                  <div class="overflow-hidden rounded-xl border border-border bg-surface shadow-sm">
+                  <div class="hidden overflow-x-auto rounded-xl border border-border bg-surface shadow-sm md:block">
                     <table class="min-w-full divide-y divide-border text-left text-sm">
                       <thead class="bg-surface-muted text-fg-subtle">
                         <tr>
@@ -1105,6 +1137,32 @@
                       </tbody>
                     </table>
                   </div>
+
+                  <!-- Mobile: stacked cards -->
+                  <div class="space-y-3 md:hidden">
+                    {#each dockerContainers as container}
+                      <div class="rounded-xl border border-border bg-surface p-4">
+                        <div class="flex items-center justify-between gap-2">
+                          <span class="min-w-0 break-words font-medium text-fg">{container.name}</span>
+                          <Badge variant={containerVariant(container.state)}>{formatSummaryLabel(container.state)}</Badge>
+                        </div>
+                        <dl class="mt-3 grid grid-cols-2 gap-x-4 gap-y-2 text-sm">
+                          <div class="col-span-2">
+                            <dt class="text-xs uppercase tracking-wide text-fg-subtle">Image</dt>
+                            <dd class="break-words text-fg-muted">{container.image}</dd>
+                          </div>
+                          <div class="col-span-2">
+                            <dt class="text-xs uppercase tracking-wide text-fg-subtle">Ports</dt>
+                            <dd class="break-words text-fg-muted">{containerPorts(container.ports)}</dd>
+                          </div>
+                          <div class="col-span-2">
+                            <dt class="text-xs uppercase tracking-wide text-fg-subtle">Uptime</dt>
+                            <dd class="break-words text-fg-muted">{containerUptime(container.status)}</dd>
+                          </div>
+                        </dl>
+                      </div>
+                    {/each}
+                  </div>
                 {:else}
                   <EmptyState title="No containers found" description="This server does not appear to have any running containers." />
                 {/if}
@@ -1113,7 +1171,7 @@
               <section>
                 <h3 class="mb-3 text-sm font-semibold uppercase tracking-wide text-fg-subtle">Images</h3>
                 {#if dockerImages.length}
-                  <div class="overflow-hidden rounded-xl border border-border bg-surface shadow-sm">
+                  <div class="hidden overflow-x-auto rounded-xl border border-border bg-surface shadow-sm md:block">
                     <table class="min-w-full divide-y divide-border text-left text-sm">
                       <thead class="bg-surface-muted text-fg-subtle">
                         <tr>
@@ -1132,6 +1190,24 @@
                         {/each}
                       </tbody>
                     </table>
+                  </div>
+
+                  <!-- Mobile: stacked cards -->
+                  <div class="space-y-3 md:hidden">
+                    {#each dockerImages as image}
+                      <div class="rounded-xl border border-border bg-surface p-4">
+                        <div class="flex items-center justify-between gap-2">
+                          <span class="min-w-0 break-words font-medium text-fg">{image.repository}</span>
+                          <span class="shrink-0 text-sm text-fg-muted">{image.size}</span>
+                        </div>
+                        <dl class="mt-3 grid grid-cols-2 gap-x-4 gap-y-2 text-sm">
+                          <div>
+                            <dt class="text-xs uppercase tracking-wide text-fg-subtle">Tag</dt>
+                            <dd class="break-words text-fg-muted">{image.tag}</dd>
+                          </div>
+                        </dl>
+                      </div>
+                    {/each}
                   </div>
                 {:else}
                   <EmptyState title="No images found" description="The snapshot does not include any Docker images." />
@@ -1191,7 +1267,7 @@
           {:else if !visibleServices.length}
             <EmptyState title="No active services" description="Toggle the filter off to view inactive services." />
           {:else}
-            <div class="overflow-hidden rounded-xl border border-border bg-surface shadow-sm">
+            <div class="hidden overflow-x-auto rounded-xl border border-border bg-surface shadow-sm md:block">
               <table class="min-w-full divide-y divide-border text-left text-sm">
                 <thead class="bg-surface-muted text-fg-subtle">
                   <tr>
@@ -1215,6 +1291,32 @@
                 </tbody>
               </table>
             </div>
+
+            <!-- Mobile: stacked cards -->
+            <div class="space-y-3 md:hidden">
+              {#each visibleServices as service}
+                <div class="rounded-xl border border-border bg-surface p-4">
+                  <div class="flex items-center justify-between gap-2">
+                    <span class="min-w-0 break-words font-medium text-fg">{service.name}</span>
+                    <Badge variant={statusVariant(service.activeState)}>{service.activeState}</Badge>
+                  </div>
+                  <dl class="mt-3 grid grid-cols-2 gap-x-4 gap-y-2 text-sm">
+                    <div>
+                      <dt class="text-xs uppercase tracking-wide text-fg-subtle">Load State</dt>
+                      <dd class="break-words text-fg-muted">{service.loadState}</dd>
+                    </div>
+                    <div>
+                      <dt class="text-xs uppercase tracking-wide text-fg-subtle">Type</dt>
+                      <dd class="break-words text-fg-muted">{service.type}</dd>
+                    </div>
+                    <div class="col-span-2">
+                      <dt class="text-xs uppercase tracking-wide text-fg-subtle">Description</dt>
+                      <dd class="break-words text-fg-muted">{service.description}</dd>
+                    </div>
+                  </dl>
+                </div>
+              {/each}
+            </div>
           {/if}
         </Card>
       {/if}
@@ -1237,7 +1339,7 @@
           {:else if !databases.length}
             <EmptyState title="No databases detected" description="The latest snapshot did not find any database instances." />
           {:else}
-            <div class="overflow-hidden rounded-xl border border-border bg-surface shadow-sm">
+            <div class="hidden overflow-x-auto rounded-xl border border-border bg-surface shadow-sm md:block">
               <table class="min-w-full divide-y divide-border text-left text-sm">
                 <thead class="bg-surface-muted text-fg-subtle">
                   <tr>
@@ -1261,6 +1363,32 @@
                 </tbody>
               </table>
             </div>
+
+            <!-- Mobile: stacked cards -->
+            <div class="space-y-3 md:hidden">
+              {#each databases as database}
+                <div class="rounded-xl border border-border bg-surface p-4">
+                  <div class="flex items-center justify-between gap-2">
+                    <Badge variant={databaseVariant(database.type)}>{databaseLabel(database.type)}</Badge>
+                    <span class="min-w-0 break-words text-sm text-fg-muted">{database.version}</span>
+                  </div>
+                  <dl class="mt-3 grid grid-cols-2 gap-x-4 gap-y-2 text-sm">
+                    <div>
+                      <dt class="text-xs uppercase tracking-wide text-fg-subtle">Port</dt>
+                      <dd class="break-words text-fg-muted">{database.port}</dd>
+                    </div>
+                    <div>
+                      <dt class="text-xs uppercase tracking-wide text-fg-subtle">Size</dt>
+                      <dd class="break-words text-fg-muted">{formatDbSize(database.sizeMb)}</dd>
+                    </div>
+                    <div class="col-span-2">
+                      <dt class="text-xs uppercase tracking-wide text-fg-subtle">Data Directory</dt>
+                      <dd class="break-words text-fg-muted">{database.dataDir}</dd>
+                    </div>
+                  </dl>
+                </div>
+              {/each}
+            </div>
           {/if}
         </Card>
       {/if}
@@ -1283,7 +1411,7 @@
           {:else if !sortedPorts.length}
             <EmptyState title="No open ports detected" description="No listening ports were found in the latest snapshot." />
           {:else}
-            <div class="overflow-hidden rounded-xl border border-border bg-surface shadow-sm">
+            <div class="hidden overflow-x-auto rounded-xl border border-border bg-surface shadow-sm md:block">
               <table class="min-w-full divide-y divide-border text-left text-sm">
                 <thead class="bg-surface-muted text-fg-subtle">
                   <tr>
@@ -1306,6 +1434,32 @@
                   {/each}
                 </tbody>
               </table>
+            </div>
+
+            <!-- Mobile: stacked cards -->
+            <div class="space-y-3 md:hidden">
+              {#each sortedPorts as port}
+                <div class="rounded-xl border border-border bg-surface p-4">
+                  <div class="flex items-center justify-between gap-2">
+                    <span class="min-w-0 break-words font-medium text-fg">Port {port.port}</span>
+                    <span class="text-sm text-fg-muted">{port.protocol}</span>
+                  </div>
+                  <dl class="mt-3 grid grid-cols-2 gap-x-4 gap-y-2 text-sm">
+                    <div>
+                      <dt class="text-xs uppercase tracking-wide text-fg-subtle">Process</dt>
+                      <dd class="break-words text-fg-muted">{port.process}</dd>
+                    </div>
+                    <div>
+                      <dt class="text-xs uppercase tracking-wide text-fg-subtle">PID</dt>
+                      <dd class="break-words text-fg-muted">{port.pid}</dd>
+                    </div>
+                    <div class="col-span-2">
+                      <dt class="text-xs uppercase tracking-wide text-fg-subtle">Bind Address</dt>
+                      <dd class="break-words text-fg-muted">{port.address}</dd>
+                    </div>
+                  </dl>
+                </div>
+              {/each}
             </div>
           {/if}
         </Card>

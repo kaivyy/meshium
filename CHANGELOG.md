@@ -5,6 +5,72 @@ All notable changes to Meshium are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.5.0-beta.2] — 2026-07-07
+
+Second beta on the v1.5.0 line. Builds on v1.5.0-beta.1 by adding two
+connection-breaking backend fixes (WebSocket origin rejection behind a reverse
+proxy, and unregistered SSH key-management routes) and a full frontend redesign:
+a semantic CSS-variable token system with a light/dark/system theme toggle
+across all pages, plus WCAG-oriented tap-target and focus-visible handling.
+
+This is still a **pre-release / beta** — not production-ready or enterprise-grade,
+and no such claim is made. See the release notes for the validation checklist.
+
+### Fixed — WebSocket Origin Check Behind Reverse Proxy
+
+- **"Connection failed" on Test Connection / Terminal / Monitoring behind a proxy** — WebSocket upgrades were rejected with `403 Forbidden` whenever Meshium was accessed through a reverse proxy (e.g. Tailscale serve, nginx) on a public hostname. The origin check compared the browser's `Origin` (public host) against the request `Host` (internal `localhost:9527`); the mismatch killed the handshake before any steps streamed, while plain REST calls (which have no origin check) kept working — producing the misleading "everything works except connecting" symptom.
+  - `internal/shared/types.go` — `CheckWebSocketOrigin` is now **proxy-aware**: the Origin hostname (port-stripped) is compared against both `r.Host` and any `X-Forwarded-Host` set by the proxy. Genuine cross-origin requests are still rejected. This is safe because browsers cannot set `X-Forwarded-Host` on a WebSocket handshake — only a trusted proxy can.
+- **Inconsistent & broken origin checks across handlers** — Consolidated all 7 WebSocket upgraders onto the single shared `shared.CheckWebSocketOrigin`:
+  - `internal/handler/terminal_handler.go`, `job_handler.go`, `monitoring_handler.go`, `logview_handler.go` — previously used `CheckOrigin: return true` (no CSRF protection at all).
+  - `internal/mod/migration/handler.go` — its check read `r.Header.Get("Host")`, which is **always empty** in Go (the value is promoted to `r.Host`), so the same-origin comparison was broken.
+  - `internal/mod/migration/pipeline_handler.go` — used `strings.Contains(origin, host)` with that empty host, i.e. `Contains(origin, "")` which is **always true** — effectively no origin protection.
+  - Removed the now-dead `isSameOrigin` helper from the migration package.
+
+### Fixed — Unregistered SSH Key-Management Routes
+
+- **`/api/servers/{id}/test-auth` and 7 sibling routes returned `NOT_FOUND`** — `server.KeyHandler` was never instantiated or registered in `cmd/server/main.go`, so `test-auth`, `install-key`, `verify-key`, `rotate-key`, `clear-key`, `auth-status`, `history`, and `metrics` all fell through to the catch-all handler and returned `404 NOT_FOUND`.
+  - `cmd/server/main.go` — construct `serverKeyHandler := server.NewKeyHandler(...)` and call `serverKeyHandler.RegisterRoutes(mux)`.
+
+### Added — Tests
+
+- `internal/shared/crypto_test.go` — added coverage for the proxy scenario in `TestCheckWebSocketOrigin` (cross-origin request allowed when `X-Forwarded-Host` matches; still rejected without it).
+
+### Changed — Frontend Redesign (Light / Dark / System)
+
+- **Semantic CSS-variable token system** — all colors, surfaces, borders, and
+  accents are now driven by semantic tokens (`--color-bg`, `--color-surface`,
+  `--color-fg`, `--color-accent`, etc.) defined once and themed per mode, rather
+  than hard-coded palette values scattered across pages.
+  - `web/src/app.css` — light and dark token sets; added `--shadow-card` /
+    `--shadow-card-hover`; WCAG tap-target floor (44px on mobile) and global
+    `focus-visible` handling.
+  - `web/tailwind.config.ts` — exposes the tokens as Tailwind utilities and the
+    `shadow-card` / `shadow-card-hover` box-shadow utilities.
+- **Light / dark / system theme toggle** — a persisted theme store with a
+  three-state toggle (light / dark / follow-system) in the top bar.
+  - `web/src/lib/components/ThemeToggle.svelte`, theme store, `TopBar.svelte`,
+    `Sidebar.svelte`.
+- **Shared UI primitives restyled on the token layer** — `Button`, `Card`,
+  `DataTable`, `DropdownMenu` pick up the semantic tokens, card shadows, and
+  focus states (`web/src/lib/components/ui/`).
+- **All pages swept onto the token system** — cron, docker, drift, files,
+  firewall, migrations (list + pipeline), monitoring, plans (list + new),
+  processes, server detail, services, ssh (+ history, known-hosts), terminal,
+  updates. Existing page layouts were preserved; only the styling layer changed.
+- **Server-detail tabs on one line** — the Overview / SSH / Docker / Services /
+  Databases / Network / Nginx tab row now scrolls horizontally instead of
+  wrapping (`web/src/routes/servers/[id]/+page.svelte`).
+- **Terminal fits the mobile viewport** — fixed horizontal overflow on connect
+  by adding `min-w-0` to the grid column and `overflow-hidden` to the terminal
+  container (`web/src/routes/terminal/+page.svelte`).
+
+### Verification
+
+- `go test ./...` passes; Go backend and web frontend rebuilt.
+- Verified live on port 9527 across `/ws/connect`, `/ws/terminal`, and `/ws/monitoring`: same-origin → `101`, cross-origin without proxy header → `403`, cross-origin with `X-Forwarded-Host` → `101`.
+
+---
+
 ## [1.4.2] — 2026-07-03
 
 ### Fixed — WebSocket Authentication & Subprotocols

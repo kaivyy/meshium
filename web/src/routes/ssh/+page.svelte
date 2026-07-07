@@ -347,7 +347,7 @@
             No recent host key changes.
           </div>
         {:else}
-          <div class="overflow-x-auto rounded-2xl border border-border">
+          <div class="hidden overflow-x-auto rounded-2xl border border-border md:block">
             <table class="min-w-full divide-y divide-border">
               <thead class="bg-surface-muted">
                 <tr>
@@ -376,6 +376,37 @@
                 {/each}
               </tbody>
             </table>
+          </div>
+
+          <!-- Mobile: stacked cards -->
+          <div class="mt-4 space-y-3 md:hidden">
+            {#each hostKeyChanges as change}
+              <div class="rounded-xl border border-border bg-surface p-4">
+                <div class="flex items-start justify-between gap-2">
+                  <div class="min-w-0">
+                    <div class="break-words font-medium text-fg">{change.host}</div>
+                    <div class="mt-1 text-xs text-fg-subtle">Port {change.port}</div>
+                  </div>
+                  <span class={`inline-flex shrink-0 rounded-full px-2.5 py-1 text-xs font-medium ${badgeForLevel(change.riskLevel)}`}>
+                    {change.riskLevel || 'unknown'}
+                  </span>
+                </div>
+                <dl class="mt-3 grid grid-cols-2 gap-x-4 gap-y-2 text-sm">
+                  <div class="col-span-2">
+                    <dt class="text-xs uppercase tracking-wide text-fg-subtle">Fingerprint</dt>
+                    <dd class="break-all text-xs text-fg-muted">{change.newFingerprint || change.oldFingerprint || '—'}</dd>
+                  </div>
+                  <div>
+                    <dt class="text-xs uppercase tracking-wide text-fg-subtle">Action</dt>
+                    <dd class="break-words text-fg-muted">{change.actionTaken || '—'}</dd>
+                  </div>
+                  <div>
+                    <dt class="text-xs uppercase tracking-wide text-fg-subtle">Updated</dt>
+                    <dd class="break-words text-fg-subtle">{formatTimestamp(change.timestamp)}</dd>
+                  </div>
+                </dl>
+              </div>
+            {/each}
           </div>
         {/if}
       </section>

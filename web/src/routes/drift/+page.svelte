@@ -625,7 +625,7 @@
                       </div>
                     </div>
 
-                    <div class="flex shrink-0 items-start">
+                    <div class="hidden shrink-0 items-start sm:flex">
                       <span class={`inline-flex h-9 w-9 items-center justify-center rounded-full ${typeMeta.circleClass}`}>
                         <TypeIcon size={16} />
                       </span>
@@ -786,13 +786,13 @@
                     <Badge variant={typeMeta.badge}>{typeMeta.label}</Badge>
                   </div>
                   <p class="mt-1 text-xs text-fg-subtle">{change.category}</p>
-                  <div class="mt-2 text-sm text-fg-muted">
-                    {change.oldValue || '—'}
-                    <span class="mx-2 text-fg-subtle">→</span>
-                    {change.newValue || '—'}
+                  <div class="mt-2 flex flex-wrap items-center gap-x-2 gap-y-1 text-sm text-fg-muted">
+                    <span class="break-all">{change.oldValue || '—'}</span>
+                    <span class="text-fg-subtle">→</span>
+                    <span class="break-all">{change.newValue || '—'}</span>
                   </div>
                 </div>
-                <span class={`inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-full ${typeMeta.circleClass}`}>
+                <span class={`hidden h-8 w-8 shrink-0 items-center justify-center rounded-full sm:inline-flex ${typeMeta.circleClass}`}>
                   <TypeIcon size={14} />
                 </span>
               </div>

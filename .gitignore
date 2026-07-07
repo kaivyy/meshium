@@ -31,3 +31,9 @@ web/build/
 
 # Audit artifacts
 AUDIT.md
+
+# Runtime logs
+*.log
+
+# Local agent config
+.claude/

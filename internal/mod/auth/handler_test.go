@@ -41,7 +41,15 @@ func TestSetupEndpoint(t *testing.T) {
 		t.Errorf("expected 200, got %d", w.Code)
 	}
 
-	// GET /api/auth/status — should show setup=true, locked=false
+	var setupResp AuthResponse
+	json.NewDecoder(w.Body).Decode(&setupResp)
+	if setupResp.SessionToken == "" {
+		t.Fatal("expected session token in setup response")
+	}
+
+	// GET /api/auth/status WITHOUT the token — a tokenless caller must see
+	// locked=true even though the app is globally unlocked, so an
+	// unauthenticated browser is routed to the login screen.
 	req = httptest.NewRequest("GET", "/api/auth/status", nil)
 	w = httptest.NewRecorder()
 	h.handleStatus(w, req)
@@ -50,8 +58,20 @@ func TestSetupEndpoint(t *testing.T) {
 	if !status.Setup {
 		t.Error("should be setup after setup()")
 	}
+	if !status.Locked {
+		t.Error("tokenless status check should report locked, even when unlocked")
+	}
+
+	// GET /api/auth/status WITH the setup token — this client holds the
+	// session token, so it sees the true unlocked state.
+	req = httptest.NewRequest("GET", "/api/auth/status", nil)
+	req.Header.Set("Authorization", "Bearer "+setupResp.SessionToken)
+	w = httptest.NewRecorder()
+	h.handleStatus(w, req)
+
+	json.NewDecoder(w.Body).Decode(&status)
 	if status.Locked {
-		t.Error("should be unlocked after setup()")
+		t.Error("should be unlocked after setup() when the token is presented")
 	}
 }
 

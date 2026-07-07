@@ -556,7 +556,7 @@
               </div>
             </div>
           {:else}
-            <div class="overflow-x-auto rounded-xl border border-border">
+            <div class="hidden overflow-x-auto rounded-xl border border-border md:block">
               <table class="min-w-full divide-y divide-border bg-surface">
                 <thead class="bg-surface-muted">
                   <tr>
@@ -633,6 +633,79 @@
                   {/each}
                 </tbody>
               </table>
+            </div>
+
+            <!-- Mobile: stacked cards -->
+            <div class="space-y-3 md:hidden">
+              {#each updateRows as update (update.name)}
+                {@const isUpdated = recentlyUpdated.has(update.name)}
+                {@const isBusy = actionBusyPackage === update.name}
+                <div class={`rounded-xl border border-border p-4 ${isUpdated ? 'bg-success/15' : 'bg-surface'}`}>
+                  <div class="flex items-start justify-between gap-2">
+                    <div class="flex min-w-0 items-start gap-3">
+                      <div class={`mt-0.5 rounded-full p-2 ${update.security ? 'bg-error/15 text-error' : 'bg-surface-muted text-fg-subtle'}`} aria-hidden="true">
+                        {#if isUpdated}
+                          <CheckCircle2 size={16} class="text-success" />
+                        {:else if update.security}
+                          <ShieldAlert size={16} />
+                        {:else}
+                          <Package size={16} />
+                        {/if}
+                      </div>
+                      <div class="min-w-0">
+                        <div class="break-words font-medium text-fg">{update.name}</div>
+                        <div class="mt-1 text-xs text-fg-subtle">
+                          {#if update.architecture}
+                            <span>{update.architecture}</span>
+                          {/if}
+                          {#if update.repository}
+                            <span>{update.architecture ? ' · ' : ''}{update.repository}</span>
+                          {/if}
+                        </div>
+                        {#if isUpdated}
+                          <span class="mt-1 inline-flex items-center gap-1 text-xs font-medium text-success">
+                            <Check size={12} /> Updated
+                          </span>
+                        {/if}
+                      </div>
+                    </div>
+                    <Badge variant={updateTypeVariant(update.type)} size="sm">{updateTypeLabel(update.type)}</Badge>
+                  </div>
+                  <dl class="mt-3 grid grid-cols-2 gap-x-4 gap-y-2 text-sm">
+                    <div>
+                      <dt class="text-xs uppercase tracking-wide text-fg-subtle">Current</dt>
+                      <dd class="break-words text-fg-muted">{update.currentVersion || '—'}</dd>
+                    </div>
+                    <div>
+                      <dt class="text-xs uppercase tracking-wide text-fg-subtle">Available</dt>
+                      <dd class="break-words font-medium text-fg">{update.availableVersion || '—'}</dd>
+                    </div>
+                  </dl>
+                  <div class="mt-3 flex flex-wrap gap-2">
+                    {#if isUpdated}
+                      <span class="inline-flex items-center gap-1.5 rounded-lg bg-success/15 px-3 py-2 text-sm font-medium text-success">
+                        <CheckCircle2 size={16} />
+                        Up to Date
+                      </span>
+                    {:else}
+                      <button
+                        type="button"
+                        class="inline-flex items-center gap-2 rounded-lg bg-accent px-3 py-2 text-sm font-medium text-accent-fg transition hover:bg-accent-hover focus-visible:ring-2 focus-visible:ring-accent focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-50"
+                        onclick={() => void installPackageByName(update.name)}
+                        disabled={isBusy || isInstalling}
+                        aria-label="Install {update.name}"
+                      >
+                        {#if isBusy}
+                          <Spinner size="sm" label="Installing" />
+                        {:else}
+                          <Download size={16} />
+                        {/if}
+                        Install
+                      </button>
+                    {/if}
+                  </div>
+                </div>
+              {/each}
             </div>
 
             {#if !isInstalling && totalUpdates > 0}

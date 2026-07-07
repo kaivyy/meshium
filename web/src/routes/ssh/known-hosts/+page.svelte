@@ -166,7 +166,7 @@
         No known hosts match the current filters.
       </div>
     {:else}
-      <div class="overflow-x-auto rounded-2xl border border-border bg-surface shadow-sm">
+      <div class="hidden overflow-x-auto rounded-2xl border border-border bg-surface shadow-sm md:block">
         <table class="min-w-full divide-y divide-border">
           <thead class="bg-surface-muted">
             <tr>
@@ -222,7 +222,7 @@
                 <td class="px-4 py-4 align-top text-right">
                   <button
                     type="button"
-                    on:click={() => removeKnownHost(entry)}
+                    onclick={() => removeKnownHost(entry)}
                     disabled={removing === `${entry.host}:${entry.port}`}
                     class="inline-flex items-center gap-2 rounded-lg border border-error bg-surface px-3 py-2 text-sm font-medium text-error transition hover:bg-error/10 disabled:cursor-not-allowed disabled:opacity-50"
                   >
@@ -234,6 +234,71 @@
             {/each}
           </tbody>
         </table>
+      </div>
+
+      <!-- Mobile: stacked cards -->
+      <div class="mt-4 space-y-3 md:hidden">
+        {#each filteredEntries as entry}
+          <div class="rounded-xl border border-border bg-surface p-4">
+            <div class="flex items-start justify-between gap-2">
+              <div class="min-w-0">
+                <div class="break-words font-medium text-fg">{entry.host}</div>
+                <div class="mt-1 text-sm text-fg-subtle">Port {entry.port}</div>
+                {#if entry.serverId}
+                  <div class="mt-1 text-xs text-fg-subtle">Server #{entry.serverId}</div>
+                {/if}
+              </div>
+              <span class={`inline-flex shrink-0 rounded-full px-2.5 py-1 text-xs font-medium ${statusBadge(entry.status, entry.verified)}`}>
+                {entry.status || 'unknown'}
+              </span>
+            </div>
+            <dl class="mt-3 grid grid-cols-2 gap-x-4 gap-y-2 text-sm">
+              <div class="col-span-2">
+                <dt class="text-xs uppercase tracking-wide text-fg-subtle">Fingerprint SHA256</dt>
+                <dd class="break-all font-mono text-xs text-fg">{shortFingerprint(entry.fingerprintSha256)}</dd>
+              </div>
+              <div class="col-span-2">
+                <dt class="text-xs uppercase tracking-wide text-fg-subtle">Fingerprint MD5</dt>
+                <dd class="break-all font-mono text-xs text-fg">{shortFingerprint(entry.fingerprintMd5)}</dd>
+              </div>
+              <div>
+                <dt class="text-xs uppercase tracking-wide text-fg-subtle">Algorithm</dt>
+                <dd class="break-words text-fg-muted">{entry.algorithm || '—'}</dd>
+                <dd class="mt-1 text-xs text-fg-subtle">{entry.bits ? `${entry.bits} bits` : 'Unknown bit size'}</dd>
+              </div>
+              <div>
+                <dt class="text-xs uppercase tracking-wide text-fg-subtle">Verified</dt>
+                <dd class="text-fg-muted">
+                  {#if entry.verified}
+                    <span class="inline-flex items-center gap-1 rounded-full bg-success/10 px-2.5 py-1 text-xs font-medium text-success">
+                      <ShieldCheck size={14} /> Verified
+                    </span>
+                  {:else}
+                    <span class="inline-flex items-center gap-1 rounded-full bg-warning/10 px-2.5 py-1 text-xs font-medium text-warning">
+                      <HelpCircle size={14} /> Not verified
+                    </span>
+                  {/if}
+                </dd>
+              </div>
+              <div class="col-span-2">
+                <dt class="text-xs uppercase tracking-wide text-fg-subtle">Created / Updated</dt>
+                <dd class="break-words text-fg-muted">Created: {formatDate(entry.createdAt)}</dd>
+                <dd class="mt-1 break-words text-fg-muted">Updated: {formatDate(entry.updatedAt)}</dd>
+              </div>
+            </dl>
+            <div class="mt-3 flex flex-wrap gap-2">
+              <button
+                type="button"
+                onclick={() => removeKnownHost(entry)}
+                disabled={removing === `${entry.host}:${entry.port}`}
+                class="inline-flex items-center gap-2 rounded-lg border border-error bg-surface px-3 py-2 text-sm font-medium text-error transition hover:bg-error/10 disabled:cursor-not-allowed disabled:opacity-50"
+              >
+                <Trash2 size={16} />
+                {removing === `${entry.host}:${entry.port}` ? 'Removing...' : 'Remove'}
+              </button>
+            </div>
+          </div>
+        {/each}
       </div>
     {/if}
 

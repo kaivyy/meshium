@@ -472,7 +472,7 @@
     />
   {:else}
     <Card padding="lg">
-      <div class="overflow-x-auto">
+      <div class="hidden overflow-x-auto md:block">
         <table class="min-w-full divide-y divide-border text-left text-sm">
           <thead class="text-xs uppercase tracking-wide text-fg-subtle">
             <tr>
@@ -531,6 +531,59 @@
             {/each}
           </tbody>
         </table>
+      </div>
+
+      <!-- Mobile: stacked cards -->
+      <div class="mt-4 space-y-3 md:hidden">
+        {#each filteredJobs as job (job.source + '-' + job.id + '-' + job.command)}
+          <div class="rounded-xl border border-border bg-surface p-4">
+            <div class="flex items-center justify-between gap-2">
+              <span class="min-w-0 break-all font-mono font-medium text-fg">{job.schedule}</span>
+              {#if job.enabled}
+                <Badge variant={statusBadgeVariant(job.enabled)} size="sm">Enabled</Badge>
+              {:else}
+                <Badge variant={statusBadgeVariant(job.enabled)} size="sm">Disabled</Badge>
+              {/if}
+            </div>
+            <dl class="mt-3 grid grid-cols-2 gap-x-4 gap-y-2 text-sm">
+              <div class="col-span-2">
+                <dt class="text-xs uppercase tracking-wide text-fg-subtle">Command</dt>
+                <dd class="break-all font-mono text-fg-muted">{formatJobCommand(job.command)}</dd>
+                {#if job.comment}
+                  <dd class="mt-1 whitespace-pre-line text-xs text-fg-subtle">{job.comment}</dd>
+                {/if}
+              </div>
+              <div>
+                <dt class="text-xs uppercase tracking-wide text-fg-subtle">Source</dt>
+                <dd class="mt-1">
+                  <Badge variant={sourceBadgeVariant(job.source)} size="sm">{sourceLabel(job.source)}</Badge>
+                </dd>
+              </div>
+              <div>
+                <dt class="text-xs uppercase tracking-wide text-fg-subtle">User</dt>
+                <dd class="break-words font-mono text-xs text-fg-subtle">{job.user || '—'}</dd>
+              </div>
+            </dl>
+            <div class="mt-3 flex flex-wrap gap-2">
+              <button
+                type="button"
+                class="inline-flex items-center gap-1 rounded-lg border border-border-strong bg-surface px-3 py-1.5 text-xs font-medium text-fg-muted hover:bg-surface-muted disabled:opacity-40"
+                onclick={() => openEditModal(job)}
+                disabled={!canModify(job)}
+              >
+                <Pencil size={14} /> Edit
+              </button>
+              <button
+                type="button"
+                class="inline-flex items-center gap-1 rounded-lg border border-border-strong bg-surface px-3 py-1.5 text-xs font-medium text-error hover:bg-error/15 disabled:opacity-40"
+                onclick={() => openDeleteModal(job)}
+                disabled={!canModify(job)}
+              >
+                <Trash2 size={14} /> Delete
+              </button>
+            </div>
+          </div>
+        {/each}
       </div>
     </Card>
   {/if}

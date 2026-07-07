@@ -110,7 +110,7 @@
   {/if}
 
   {#if loading && rows.length === 0}
-    <div class="overflow-hidden rounded-2xl border border-border bg-surface shadow-sm">
+    <div class="overflow-x-auto rounded-2xl border border-border bg-surface shadow-sm">
       <div class="space-y-3 p-4">
         {#each Array(3) as _, index}
           <div class="grid grid-cols-[200px_80px_40px_100px_80px] items-center gap-4 rounded-lg border border-border bg-surface-muted px-4 py-3">

@@ -218,11 +218,15 @@ func (s *Service) ValidateSessionToken(token string) bool {
 }
 
 // generateSessionToken creates a cryptographically random session token.
+// It uses the URL-safe, unpadded base64 alphabet ([A-Za-z0-9_-]) so the token
+// is a valid WebSocket subprotocol name. Standard base64 emits "/" and "="
+// which are HTTP separators and therefore illegal in a Sec-WebSocket-Protocol
+// token, which would make every subprotocol-authenticated WS handshake fail.
 func generateSessionToken() string {
 	b := make([]byte, 32)
 	if _, err := rand.Read(b); err != nil {
 		// This should never happen; if it does, the system is broken
 		return ""
 	}
-	return base64.StdEncoding.EncodeToString(b)
+	return base64.RawURLEncoding.EncodeToString(b)
 }

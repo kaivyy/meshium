@@ -10,7 +10,7 @@ Migrate packages, configurations, services, and users across Linux servers — s
 [![SvelteKit](https://img.shields.io/badge/SvelteKit-2.x-FF3E00?style=flat-square&logo=svelte)](https://svelte.dev)
 [![CI](https://img.shields.io/badge/CI-GitHub%20Actions-2088FF?style=flat-square&logo=githubactions)](https://github.com/kaivyy/meshium/actions)
 [![License](https://img.shields.io/badge/License-MIT-22c55e?style=flat-square)](LICENSE)
-[![Release](https://img.shields.io/badge/Release-v1.4.0-22c55e?style=flat-square)](https://github.com/kaivyy/meshium/releases)
+[![Release](https://img.shields.io/badge/Release-v1.5.0--beta.2-f59e0b?style=flat-square)](https://github.com/kaivyy/meshium/releases)
 [![Tests](https://img.shields.io/badge/Tests-passing%20with%20%2Drace-22c55e?style=flat-square)](#testing)
 
 </div>
@@ -36,7 +36,8 @@ No agents. No daemons on target machines. Just SSH.
 ### Key Features
 
 - **Zero-Agent Architecture** — Everything runs over SSH. No software to install on target machines.
-- **Mobile-Friendly UI** — Responsive layout with bottom navigation bar on mobile, full sidebar on desktop.
+- **Mobile-Friendly UI** — Responsive layout with bottom navigation bar on mobile, full sidebar on desktop. Semantic-token theming with a light / dark / system toggle and WCAG-oriented tap targets and focus states.
+- **Light / Dark / System Theme** — Semantic CSS-variable token system drives every page; a top-bar toggle switches between light, dark, and follow-system, with WCAG-oriented tap targets and focus-visible handling.
 - **Live WebSocket Progress** — Watch each migration step unfold in real-time through the web UI.
 - **Discovery Engine** — 8 parallel collectors build a comprehensive ServerSnapshot: OS, hardware, Docker, systemd services, databases, Nginx, disk usage, and open ports.
 - **Shared Snapshot Cache** — A centralized snapshot store lets discovery, monitoring, Docker, files, alerts, dashboard, and server detail pages reuse cached snapshots and avoid redundant 404 retries.

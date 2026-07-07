@@ -430,7 +430,8 @@
             />
           </div>
         {:else}
-          <div class="overflow-x-auto">
+          <!-- Desktop: table -->
+          <div class="hidden overflow-x-auto md:block">
             <table class="min-w-full divide-y divide-border">
               <thead class="bg-surface-muted">
                 <tr>
@@ -476,6 +477,57 @@
                 {/each}
               </tbody>
             </table>
+          </div>
+
+          <!-- Mobile: stacked cards -->
+          <div class="mt-4 space-y-3 md:hidden">
+            {#each filteredProcesses as process}
+              <div class="rounded-xl border border-border bg-surface p-4">
+                <div class="flex items-center justify-between gap-2">
+                  <span class="min-w-0 break-words font-semibold text-fg">PID {process.pid}</span>
+                  <Button variant="danger" size="sm" onclick={() => openKillModal(process)}>
+                    <span class="inline-flex items-center gap-2">
+                      <Trash2 size={14} />
+                      Kill
+                    </span>
+                  </Button>
+                </div>
+                <dl class="mt-3 grid grid-cols-2 gap-x-4 gap-y-2 text-sm">
+                  <div>
+                    <dt class="text-xs uppercase tracking-wide text-fg-subtle">User</dt>
+                    <dd class="break-words text-fg-muted">{process.user}</dd>
+                  </div>
+                  <div>
+                    <dt class="text-xs uppercase tracking-wide text-fg-subtle">Stat</dt>
+                    <dd class="break-words text-fg-muted">{process.stat}</dd>
+                  </div>
+                  <div>
+                    <dt class="text-xs uppercase tracking-wide text-fg-subtle">CPU</dt>
+                    <dd class="mt-0.5">
+                      <span class={`inline-flex rounded-full px-2 py-0.5 font-medium ${isHighUsage(process.cpu)}`}>
+                        {formatPercent(process.cpu)}%
+                      </span>
+                    </dd>
+                  </div>
+                  <div>
+                    <dt class="text-xs uppercase tracking-wide text-fg-subtle">Memory</dt>
+                    <dd class="mt-0.5">
+                      <span class={`inline-flex rounded-full px-2 py-0.5 font-medium ${isHighUsage(process.memory)}`}>
+                        {formatPercent(process.memory)}%
+                      </span>
+                    </dd>
+                  </div>
+                  <div>
+                    <dt class="text-xs uppercase tracking-wide text-fg-subtle">RSS</dt>
+                    <dd class="break-words text-fg-muted">{formatKiB(process.rss)}</dd>
+                  </div>
+                  <div class="col-span-2">
+                    <dt class="text-xs uppercase tracking-wide text-fg-subtle">Command</dt>
+                    <dd class="break-all font-mono text-[13px] text-fg-muted" title={process.command}>{formatCommand(process.command)}</dd>
+                  </div>
+                </dl>
+              </div>
+            {/each}
           </div>
         {/if}
       </Card>

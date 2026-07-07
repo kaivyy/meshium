@@ -28,7 +28,7 @@ func NewMonitoringHandler(service *monitoringmod.Service, authSvc *auth.Service)
 		service: service,
 		authSvc: authSvc,
 		upgrader: websocket.Upgrader{
-			CheckOrigin: func(r *http.Request) bool { return true },
+			CheckOrigin: shared.CheckWebSocketOrigin,
 		},
 	}
 }

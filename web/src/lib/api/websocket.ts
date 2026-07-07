@@ -58,74 +58,24 @@ export function wsConnectGeneric<T = WSMessage>(
 ): WebSocket {
   const url = wsURL(path);
   const subprotocols = wsSubprotocols();
-  let gotMessage = false;
-  let retried = false;
-  let closed = false;
-  let activeSocket: WebSocket;
 
-  const ws = new Proxy({} as WebSocket, {
-    get(_target, prop) {
-      if (prop === 'close') {
-        return (code?: number, reason?: string) => {
-          closed = true;
-          activeSocket.close(code, reason);
-        };
-      }
-
-      const value = (activeSocket as any)[prop];
-      return typeof value === 'function' ? value.bind(activeSocket) : value;
-    },
-    set(_target, prop, value) {
-      (activeSocket as any)[prop] = value;
-      return true;
-    }
-  });
-
-  function bindSocket(socket: WebSocket, isRetry = false) {
-    activeSocket = socket;
-
-    socket.onopen = () => onOpen?.();
-    socket.onmessage = (e) => {
-      gotMessage = true;
-      try {
-        const msg = JSON.parse(e.data) as T;
-        onMessage(msg);
-      } catch {
-        // Ignore non-JSON messages
-      }
-    };
-
-    // Suppress error during first attempt if we have a token to retry without
-    socket.onerror = (e) => {
-      if (!isRetry && !retried && subprotocols.length > 0) return;
-      onError?.(e);
-    };
-
-    socket.onclose = () => {
-      if (closed) {
-        onClose?.();
-        return;
-      }
-
-      if (!gotMessage && !retried && subprotocols.length > 0) {
-        // First attempt failed with stale token — retry without token
-        retried = true;
-        if (typeof localStorage !== 'undefined') {
-          localStorage.removeItem('meshium_session_token');
-        }
-        bindSocket(new WebSocket(url), true);
-        return;
-      }
-
-      onClose?.();
-    };
-  }
-
-  bindSocket(subprotocols.length > 0
+  const socket = subprotocols.length > 0
     ? new WebSocket(url, subprotocols)
-    : new WebSocket(url));
+    : new WebSocket(url);
 
-  return ws;
+  socket.onopen = () => onOpen?.();
+  socket.onmessage = (e) => {
+    try {
+      const msg = JSON.parse(e.data) as T;
+      onMessage(msg);
+    } catch {
+      // Ignore non-JSON messages
+    }
+  };
+  socket.onerror = (e) => onError?.(e);
+  socket.onclose = () => onClose?.();
+
+  return socket;
 }
 
 /**

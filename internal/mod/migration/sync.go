@@ -3,6 +3,7 @@ package migration
 import (
 	"context"
 	"fmt"
+	"log"
 	"path"
 	"regexp"
 	"strconv"
@@ -117,16 +118,23 @@ func (e *SyncEngine) InitialSync(ctx context.Context, migrationID int, config Sy
 	cmd := e.buildRsyncCommand(config, false)
 
 	// Execute rsync via SSH on source, pushing to target
-	output, _, _, err := e.sourceSSH.ExecContext(ctx, cmd)
-	if err != nil {
-		e.repo.CompleteSyncSession(ctx, sessionID, "error", err.Error())
-		return nil, fmt.Errorf("rsync failed: %w", err)
+	output, stderr, exitCode, err := e.sourceSSH.ExecContext(ctx, cmd)
+	if err != nil || exitCode != 0 {
+		msg := rsyncExecError(err, exitCode, stderr)
+		if cerr := e.repo.CompleteSyncSession(ctx, sessionID, "error", msg); cerr != nil {
+			log.Printf("initial sync: failed to mark session %d as error: %v", sessionID, cerr)
+		}
+		return nil, fmt.Errorf("rsync failed: %s", msg)
 	}
 
 	// Parse rsync output for stats
 	bytesTransferred, filesTransferred, speed := parseRsyncOutput(output)
-	e.repo.UpdateSyncSession(ctx, sessionID, bytesTransferred, filesTransferred, speed, "completed")
-	e.repo.CompleteSyncSession(ctx, sessionID, "completed", "")
+	if uerr := e.repo.UpdateSyncSession(ctx, sessionID, bytesTransferred, filesTransferred, speed, "completed"); uerr != nil {
+		log.Printf("initial sync: failed to update session %d stats: %v", sessionID, uerr)
+	}
+	if cerr := e.repo.CompleteSyncSession(ctx, sessionID, "completed", ""); cerr != nil {
+		log.Printf("initial sync: failed to mark session %d as completed: %v", sessionID, cerr)
+	}
 
 	session.BytesTransferred = bytesTransferred
 	session.FilesTransferred = filesTransferred
@@ -158,15 +166,22 @@ func (e *SyncEngine) DeltaSync(ctx context.Context, migrationID int, sessionID i
 	// Build rsync command with --update flag for incremental
 	cmd := e.buildRsyncCommand(config, true)
 
-	output, _, _, err := e.sourceSSH.ExecContext(ctx, cmd)
-	if err != nil {
-		e.repo.CompleteSyncSession(ctx, newSessionID, "error", err.Error())
-		return nil, fmt.Errorf("delta rsync failed: %w", err)
+	output, stderr, exitCode, err := e.sourceSSH.ExecContext(ctx, cmd)
+	if err != nil || exitCode != 0 {
+		msg := rsyncExecError(err, exitCode, stderr)
+		if cerr := e.repo.CompleteSyncSession(ctx, newSessionID, "error", msg); cerr != nil {
+			log.Printf("delta sync: failed to mark session %d as error: %v", newSessionID, cerr)
+		}
+		return nil, fmt.Errorf("delta rsync failed: %s", msg)
 	}
 
 	bytesTransferred, filesTransferred, speed := parseRsyncOutput(output)
-	e.repo.UpdateSyncSession(ctx, newSessionID, bytesTransferred, filesTransferred, speed, "completed")
-	e.repo.CompleteSyncSession(ctx, newSessionID, "completed", "")
+	if uerr := e.repo.UpdateSyncSession(ctx, newSessionID, bytesTransferred, filesTransferred, speed, "completed"); uerr != nil {
+		log.Printf("delta sync: failed to update session %d stats: %v", newSessionID, uerr)
+	}
+	if cerr := e.repo.CompleteSyncSession(ctx, newSessionID, "completed", ""); cerr != nil {
+		log.Printf("delta sync: failed to mark session %d as completed: %v", newSessionID, cerr)
+	}
 
 	session.BytesTransferred = bytesTransferred
 	session.FilesTransferred = filesTransferred
@@ -206,17 +221,20 @@ func (e *SyncEngine) VerifyChecksums(ctx context.Context, migrationID int, sessi
 		return fmt.Errorf("generate target checksums: %w", err)
 	}
 
-	// Compare checksums
-	sourceLines := strings.Split(strings.TrimSpace(sourceChecksums), "\n")
-	targetLines := strings.Split(strings.TrimSpace(targetChecksums), "\n")
+	// Compare checksums by content, keyed on the path relative to each root.
+	// The raw md5sum lines are "<hash>  <absolute-path>"; source and target
+	// roots differ, so comparing whole lines always mismatches. Strip the root
+	// prefix and compare only the hash per relative path.
+	sourceHashes := parseChecksumsByRelPath(sourceChecksums, sourcePath)
+	targetHashes := parseChecksumsByRelPath(targetChecksums, targetPath)
 
-	if len(sourceLines) != len(targetLines) {
-		return fmt.Errorf("file count mismatch: source=%d target=%d", len(sourceLines), len(targetLines))
+	if len(sourceHashes) != len(targetHashes) {
+		return fmt.Errorf("file count mismatch: source=%d target=%d", len(sourceHashes), len(targetHashes))
 	}
 
 	mismatches := 0
-	for i := range sourceLines {
-		if sourceLines[i] != targetLines[i] {
+	for rel, srcHash := range sourceHashes {
+		if tgtHash, ok := targetHashes[rel]; !ok || tgtHash != srcHash {
 			mismatches++
 		}
 	}
@@ -230,12 +248,44 @@ func (e *SyncEngine) VerifyChecksums(ctx context.Context, migrationID int, sessi
 		MigrationID:      migrationID,
 		VerificationType: "checksum",
 		Target:           sourcePath,
-		Expected:         fmt.Sprintf("%d files", len(sourceLines)),
-		Actual:           fmt.Sprintf("%d files, %d mismatches", len(targetLines), mismatches),
+		Expected:         fmt.Sprintf("%d files", len(sourceHashes)),
+		Actual:           fmt.Sprintf("%d files, %d mismatches", len(targetHashes), mismatches),
 		Passed:           mismatches == 0,
 	})
 
 	return nil
+}
+
+// parseChecksumsByRelPath parses `md5sum` output lines of the form
+// "<hash>  <absolute-path>" into a map of path-relative-to-root -> hash.
+// Stripping the differing source/target root lets callers compare content
+// hashes for the same logical file rather than lines that include the path.
+func parseChecksumsByRelPath(output, root string) map[string]string {
+	result := make(map[string]string)
+	root = strings.TrimRight(root, "/")
+	for _, line := range strings.Split(output, "\n") {
+		line = strings.TrimRight(line, "\r")
+		if strings.TrimSpace(line) == "" {
+			continue
+		}
+		fields := strings.Fields(line)
+		if len(fields) < 2 {
+			continue
+		}
+		hash := fields[0]
+		// The filename follows the hash and a 2-char delimiter (space + space
+		// for text mode, or space + '*' for binary mode). Preserve any spaces
+		// within the filename by slicing rather than re-splitting on fields.
+		full := strings.TrimLeft(line[len(hash):], " ")
+		full = strings.TrimPrefix(full, "*")
+		rel := full
+		if root != "" && root != "/" {
+			rel = strings.TrimPrefix(full, root)
+		}
+		rel = strings.TrimPrefix(rel, "/")
+		result[rel] = hash
+	}
+	return result
 }
 
 // ResumeSync resumes an interrupted sync session.
@@ -269,15 +319,22 @@ func (e *SyncEngine) ResumeSync(ctx context.Context, migrationID int, sessionID 
 	// Re-run with the same resumable rsync command.
 	cmd := e.buildRsyncCommand(config, true)
 
-	output, _, _, err := e.sourceSSH.ExecContext(ctx, cmd)
-	if err != nil {
-		e.repo.CompleteSyncSession(ctx, sessionID, "error", err.Error())
-		return fmt.Errorf("resume rsync failed: %w", err)
+	output, stderr, exitCode, err := e.sourceSSH.ExecContext(ctx, cmd)
+	if err != nil || exitCode != 0 {
+		msg := rsyncExecError(err, exitCode, stderr)
+		if cerr := e.repo.CompleteSyncSession(ctx, sessionID, "error", msg); cerr != nil {
+			log.Printf("resume sync: failed to mark session %d as error: %v", sessionID, cerr)
+		}
+		return fmt.Errorf("resume rsync failed: %s", msg)
 	}
 
 	bytesTransferred, filesTransferred, speed := parseRsyncOutput(output)
-	e.repo.UpdateSyncSession(ctx, sessionID, bytesTransferred, filesTransferred, speed, "completed")
-	e.repo.CompleteSyncSession(ctx, sessionID, "completed", "")
+	if uerr := e.repo.UpdateSyncSession(ctx, sessionID, bytesTransferred, filesTransferred, speed, "completed"); uerr != nil {
+		log.Printf("resume sync: failed to update session %d stats: %v", sessionID, uerr)
+	}
+	if cerr := e.repo.CompleteSyncSession(ctx, sessionID, "completed", ""); cerr != nil {
+		log.Printf("resume sync: failed to mark session %d as completed: %v", sessionID, cerr)
+	}
 	return nil
 }
 
@@ -464,6 +521,26 @@ func (e *SyncEngine) recordSyncVerificationResult(ctx context.Context, migration
 		Passed:           passed,
 		ErrorMessage:     errMsg,
 	})
+}
+
+// rsyncExecError builds a diagnostic message for a failed rsync invocation.
+// ExecContext returns a nil error when the remote command runs but exits
+// non-zero (the failure is carried in exitCode), so callers must inspect the
+// exit code as well as err. rsync exit codes such as 23 (partial transfer),
+// 24 (files vanished), 12 (protocol error), and 11 (I/O error) all indicate
+// an incomplete transfer that must not be treated as success.
+func rsyncExecError(err error, exitCode int, stderr string) string {
+	stderr = strings.TrimSpace(stderr)
+	if err != nil {
+		if stderr != "" {
+			return fmt.Sprintf("%v: %s", err, stderr)
+		}
+		return err.Error()
+	}
+	if stderr != "" {
+		return fmt.Sprintf("rsync exited with code %d: %s", exitCode, stderr)
+	}
+	return fmt.Sprintf("rsync exited with code %d", exitCode)
 }
 
 // parseRsyncOutput extracts transfer statistics from rsync output.

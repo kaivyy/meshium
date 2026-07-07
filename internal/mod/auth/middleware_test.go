@@ -171,7 +171,7 @@ func TestMiddlewareBlocksAPIWhenLocked(t *testing.T) {
 	}
 }
 
-func TestMiddlewareAllowsAPIWithoutTokenWhenUnlocked(t *testing.T) {
+func TestMiddlewareBlocksAPIWithoutTokenWhenUnlocked(t *testing.T) {
 	d := setupTestDB(t)
 	defer d.Close()
 
@@ -190,11 +190,68 @@ func TestMiddlewareAllowsAPIWithoutTokenWhenUnlocked(t *testing.T) {
 	w := httptest.NewRecorder()
 	handler.ServeHTTP(w, req)
 
-	if !handlerCalled {
-		t.Error("handler should be called without token when unlocked")
+	// Being globally unlocked is not enough: the caller must present this
+	// session's token. A tokenless request must be rejected so an
+	// unauthenticated browser cannot ride on another session's unlock.
+	if handlerCalled {
+		t.Error("handler should NOT be called without a token, even when unlocked")
 	}
-	if w.Code != http.StatusOK {
-		t.Errorf("expected 200 OK without token when unlocked, got %d", w.Code)
+	if w.Code != http.StatusUnauthorized {
+		t.Errorf("expected 401 Unauthorized without token when unlocked, got %d", w.Code)
+	}
+}
+
+func TestMiddlewareBlocksWSWithoutTokenWhenUnlocked(t *testing.T) {
+	d := setupTestDB(t)
+	defer d.Close()
+
+	repo := NewRepo(d)
+	svc := NewService(repo)
+	svc.Setup("test-password")
+
+	mw := NewMiddleware(svc)
+
+	handlerCalled := false
+	handler := mw.RequireAuth(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		handlerCalled = true
+	}))
+
+	req := httptest.NewRequest("GET", "/ws/terminal/1", nil)
+	w := httptest.NewRecorder()
+	handler.ServeHTTP(w, req)
+
+	if handlerCalled {
+		t.Error("WS handler should NOT be called without a token, even when unlocked")
+	}
+	if w.Code != http.StatusUnauthorized {
+		t.Errorf("expected 401 Unauthorized for tokenless WS when unlocked, got %d", w.Code)
+	}
+}
+
+func TestMiddlewareAllowsWSWithValidToken(t *testing.T) {
+	d := setupTestDB(t)
+	defer d.Close()
+
+	repo := NewRepo(d)
+	svc := NewService(repo)
+	svc.Setup("test-password")
+	token := svc.GetSessionToken()
+
+	mw := NewMiddleware(svc)
+
+	handlerCalled := false
+	handler := mw.RequireAuth(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		handlerCalled = true
+		w.WriteHeader(http.StatusOK)
+	}))
+
+	req := httptest.NewRequest("GET", "/ws/terminal/1", nil)
+	req.Header.Set("Sec-WebSocket-Protocol", "meshium-auth."+token)
+	w := httptest.NewRecorder()
+	handler.ServeHTTP(w, req)
+
+	if !handlerCalled {
+		t.Error("WS handler should be called with a valid session token")
 	}
 }
 

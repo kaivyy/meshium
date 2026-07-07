@@ -108,6 +108,12 @@
         config = session.config;
         if (session.config.observationDuration) observationDuration = session.config.observationDuration;
       }
+      // The create wizard (/ws/plan) never writes a MigrationConfig, so config
+      // arrives empty and the user is forced to reselect categories at step 3.
+      // Seed categories from the migration plan when the config has none.
+      if (config.categories.length === 0 && session?.migration?.categories?.length) {
+        config = { ...config, categories: [...session.migration.categories] };
+      }
       if (session?.riskReport) riskReport = session.riskReport;
       if (session?.compatibilityResults) compatibilityResults = session.compatibilityResults;
       if (session?.healthHistory) healthResults = session.healthHistory;
@@ -125,7 +131,25 @@
     } catch {
       try {
         const plan = await migrationApi.get(migrationId);
-        session = { migration: plan as any, state: plan.status };
+        // MigrationPlan uses sourceServerId/targetServerId, but the page reads
+        // session.migration.sourceId/targetId — map the field names so Discovery
+        // shows servers and recoverStepFromRecords can markCompleted(0).
+        session = {
+          migration: {
+            id: plan.id,
+            sourceId: plan.sourceServerId,
+            targetId: plan.targetServerId,
+            categories: plan.categories ?? [],
+            status: plan.status,
+            state: plan.status,
+            riskScore: 0,
+            riskClass: '',
+            error: plan.errorMessage,
+            createdAt: plan.createdAt,
+            completedAt: plan.completedAt,
+          },
+          state: plan.status,
+        };
         currentState = plan.status;
         recoverStepFromRecords();
       } catch { /* ignore */ }
@@ -276,7 +300,19 @@
       case 4: return stepStatuses[4] === 'completed';
       case 5: return stepStatuses[5] === 'completed';
       case 6: return pipelineRunning;
-      case 7: return replicationLag <= 5 && stepStatuses[7] === 'completed';
+      // Step 7 is only auto-marked 'completed' by the WS transition, which also
+      // advances the step — so gating on that status alone leaves no manual path
+      // if the WS never emits pre_cutover/traffic_switch. Allow proceeding when
+      // replication has actually caught up (lag within threshold and no failed
+      // replicas), which is the real precondition for cutover.
+      case 7: {
+        if (stepStatuses[7] === 'completed') return true;
+        if (replicationLag > 5) return false;
+        if (replicationStatus.length > 0) {
+          return replicationStatus.every(r => r.replicationLag <= 5 && r.status !== 'failed');
+        }
+        return pipelineRunning;
+      }
       case 8: return stepStatuses[8] === 'completed';
       case 9: return stepStatuses[9] === 'completed';
       default: return false;
@@ -320,12 +356,22 @@
   // ══════════════════════════════════════════════════════
 
   async function runDiscovery() {
+    // No dedicated discovery endpoint exists; discovery data is produced by the
+    // planner and surfaced via the session. Re-load the session and reflect
+    // whether source/target discovery data is actually present rather than
+    // declaring success unconditionally.
     actionLoading = true;
     stepStatuses[0] = 'running';
     try {
       await loadSession().catch(() => {});
-      stepStatuses[0] = 'completed';
-      toast.success('Discovery completed');
+      const hasServers = !!session?.migration?.sourceId && !!session?.migration?.targetId;
+      if (hasServers) {
+        stepStatuses[0] = 'completed';
+        toast.success('Discovery data loaded');
+      } else {
+        stepStatuses[0] = 'failed';
+        toast.error('No discovery data found for source/target servers');
+      }
     } catch {
       stepStatuses[0] = 'failed';
       toast.error('Discovery failed');
@@ -377,10 +423,22 @@
     actionLoading = true;
     stepStatuses[5] = 'running';
     try {
-      await pipelineApi.provision(migrationId);
-      provisionStates = await pipelineApi.getProvisionStates(migrationId);
-      stepStatuses[5] = 'completed';
-      toast.success('Provisioning completed');
+      // The provision endpoint returns the current provision states rather than a
+      // success flag, so trust the states — not the mere fact the call succeeded.
+      provisionStates = await pipelineApi.provision(migrationId);
+      const anyFailed = provisionStates.some(p => p.error);
+      const ready = provisionStates.length > 0 && provisionStates.every(p => p.verified || p.installed);
+      if (anyFailed) {
+        stepStatuses[5] = 'failed';
+        toast.error('Provisioning reported errors on the target');
+      } else if (ready) {
+        stepStatuses[5] = 'completed';
+        toast.success('Provisioning completed');
+      } else {
+        // Nothing was actually provisioned yet — don't claim success.
+        stepStatuses[5] = 'pending';
+        toast.info('No provisioning changes reported. Verify target dependencies before proceeding.');
+      }
     } catch {
       stepStatuses[5] = 'failed';
       toast.error('Provisioning failed');
@@ -483,9 +541,38 @@
     } finally { actionLoading = false; }
   }
 
+  // Resolve the real observation start time so the countdown reflects actual
+  // elapsed time across reloads instead of restarting from Date.now() each time.
+  // Prefer the observation stage's startedAt from the loaded session; fall back
+  // to a localStorage value keyed by migration id (persisted on first start).
+  function resolveObservationStart(): number {
+    const storageKey = `meshium_obs_start_${migrationId}`;
+    const stage = session?.stages?.find(
+      s => s.stageName === 'post_cutover_observation' && s.startedAt
+    );
+    if (stage?.startedAt) {
+      const parsed = Date.parse(stage.startedAt);
+      if (!Number.isNaN(parsed)) {
+        try { localStorage.setItem(storageKey, String(parsed)); } catch { /* ignore */ }
+        return parsed;
+      }
+    }
+    try {
+      const saved = localStorage.getItem(storageKey);
+      if (saved) {
+        const parsed = parseInt(saved, 10);
+        if (!Number.isNaN(parsed)) return parsed;
+      }
+    } catch { /* ignore */ }
+    // No persisted start available (e.g. first entry via WS): use now and persist it.
+    const now = Date.now();
+    try { localStorage.setItem(storageKey, String(now)); } catch { /* ignore */ }
+    return now;
+  }
+
   function startObservationTimer() {
-    observationStart = Date.now();
-    observationElapsed = 0;
+    observationStart = resolveObservationStart();
+    observationElapsed = Math.floor((Date.now() - observationStart) / 1000);
     if (observationTimer) clearInterval(observationTimer);
     observationTimer = setInterval(() => {
       observationElapsed = Math.floor((Date.now() - (observationStart || Date.now())) / 1000);

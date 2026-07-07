@@ -53,10 +53,8 @@ class FakeWebSocket {
   }
 }
 
-test('wsConnectGeneric retries stale subprotocol auth and delegates to the retry socket', () => {
-  FakeWebSocket.instances = [];
-  let removedToken = '';
-
+function installGlobals(token: string | null): { removed: string[] } {
+  const removed: string[] = [];
   Object.defineProperty(globalThis, 'location', {
     configurable: true,
     value: { protocol: 'http:', host: 'meshium.test' },
@@ -64,33 +62,53 @@ test('wsConnectGeneric retries stale subprotocol auth and delegates to the retry
   Object.defineProperty(globalThis, 'localStorage', {
     configurable: true,
     value: {
-      getItem: (key: string) => key === 'meshium_session_token' ? 'stale-token' : null,
-      removeItem: (key: string) => { removedToken = key; },
+      getItem: (key: string) => (key === 'meshium_session_token' ? token : null),
+      removeItem: (key: string) => { removed.push(key); },
     },
   });
   Object.defineProperty(globalThis, 'WebSocket', {
     configurable: true,
     value: FakeWebSocket,
   });
+  return { removed };
+}
+
+test('wsConnectGeneric connects once with the token subprotocol and never discards it', () => {
+  FakeWebSocket.instances = [];
+  const { removed } = installGlobals('valid-token');
+
+  const received: unknown[] = [];
+  let closed = false;
+  const ws = wsConnectGeneric('/ws/terminal/1', (message) => received.push(message), undefined, () => {
+    closed = true;
+  });
+
+  assert.equal(FakeWebSocket.instances.length, 1);
+  assert.deepEqual(FakeWebSocket.instances[0].protocols, ['meshium-auth.valid-token']);
+
+  // A transient close must NOT delete the token or open a second (tokenless) socket.
+  FakeWebSocket.instances[0].fail();
+
+  assert.deepEqual(removed, []);
+  assert.equal(FakeWebSocket.instances.length, 1);
+  assert.equal(closed, true);
+
+  void ws;
+});
+
+test('wsConnectGeneric delivers messages from the single socket', () => {
+  FakeWebSocket.instances = [];
+  installGlobals('valid-token');
 
   const received: unknown[] = [];
   const ws = wsConnectGeneric('/ws/terminal/1', (message) => received.push(message));
 
-  assert.equal(FakeWebSocket.instances.length, 1);
-  assert.deepEqual(FakeWebSocket.instances[0].protocols, ['meshium-auth.stale-token']);
-
-  FakeWebSocket.instances[0].fail();
-
-  assert.equal(removedToken, 'meshium_session_token');
-  assert.equal(FakeWebSocket.instances.length, 2);
-  assert.deepEqual(FakeWebSocket.instances[1].protocols, []);
-
-  FakeWebSocket.instances[1].open();
+  FakeWebSocket.instances[0].open();
   assert.equal(ws.readyState, FakeWebSocket.OPEN);
 
   ws.send('ping');
-  assert.deepEqual(FakeWebSocket.instances[1].sent, ['ping']);
+  assert.deepEqual(FakeWebSocket.instances[0].sent, ['ping']);
 
-  FakeWebSocket.instances[1].message({ type: 'connected' });
+  FakeWebSocket.instances[0].message({ type: 'connected' });
   assert.deepEqual(received, [{ type: 'connected' }]);
 });
