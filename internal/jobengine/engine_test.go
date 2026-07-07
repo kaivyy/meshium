@@ -1455,6 +1455,47 @@ func TestIntegration_DiscoverySnapshotStore(t *testing.T) {
 	}
 }
 
+// TestInMemoryJobQueueConcurrentAccess guards the concurrency contract of the
+// InMemoryJobQueue test double. The engine's worker loop calls Dequeue on its
+// own goroutine while producers call Enqueue; the queue must tolerate that the
+// same way the production SQLiteJobQueue does. Run under -race, this fails if
+// the double's slice is mutated without synchronization.
+func TestInMemoryJobQueueConcurrentAccess(t *testing.T) {
+	q := NewInMemoryJobQueue()
+	ctx := context.Background()
+
+	const n = 200
+	var wg sync.WaitGroup
+	wg.Add(3)
+
+	// Producer.
+	go func() {
+		defer wg.Done()
+		for i := 0; i < n; i++ {
+			_ = q.Enqueue(ctx, &Job{ID: fmt.Sprintf("job-%d", i)})
+		}
+	}()
+
+	// Consumer.
+	go func() {
+		defer wg.Done()
+		for i := 0; i < n; i++ {
+			_, _ = q.Dequeue(ctx)
+		}
+	}()
+
+	// Concurrent readers (Peek/Size race the slice header too).
+	go func() {
+		defer wg.Done()
+		for i := 0; i < n; i++ {
+			_, _ = q.Peek(ctx)
+			_, _ = q.Size(ctx)
+		}
+	}()
+
+	wg.Wait()
+}
+
 // --- Compile-time interface checks ---
 
 var _ JobQueue = (*SQLiteJobQueue)(nil)

@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"sync"
 	"time"
 )
 
@@ -214,7 +215,13 @@ func (q *SQLiteJobQueue) Remove(ctx context.Context, jobID string) error {
 // --- InMemoryJobQueue ---
 
 // InMemoryJobQueue is an in-memory implementation for testing.
+//
+// Like the production SQLiteJobQueue, it is accessed concurrently: the engine's
+// worker loop calls Dequeue while producers call Enqueue. SQLite serializes that
+// access for the real queue; this test double must guard its slice with a mutex
+// to honor the same concurrency contract, otherwise the race detector fires.
 type InMemoryJobQueue struct {
+	mu   sync.Mutex
 	jobs []*Job
 }
 
@@ -226,11 +233,15 @@ func (q *InMemoryJobQueue) Enqueue(ctx context.Context, job *Job) error {
 	if job == nil {
 		return fmt.Errorf("job is nil")
 	}
+	q.mu.Lock()
+	defer q.mu.Unlock()
 	q.jobs = append(q.jobs, job)
 	return nil
 }
 
 func (q *InMemoryJobQueue) Dequeue(ctx context.Context) (*Job, error) {
+	q.mu.Lock()
+	defer q.mu.Unlock()
 	if len(q.jobs) == 0 {
 		return nil, nil
 	}
@@ -240,6 +251,8 @@ func (q *InMemoryJobQueue) Dequeue(ctx context.Context) (*Job, error) {
 }
 
 func (q *InMemoryJobQueue) Peek(ctx context.Context) (*Job, error) {
+	q.mu.Lock()
+	defer q.mu.Unlock()
 	if len(q.jobs) == 0 {
 		return nil, nil
 	}
@@ -247,10 +260,14 @@ func (q *InMemoryJobQueue) Peek(ctx context.Context) (*Job, error) {
 }
 
 func (q *InMemoryJobQueue) Size(ctx context.Context) (int, error) {
+	q.mu.Lock()
+	defer q.mu.Unlock()
 	return len(q.jobs), nil
 }
 
 func (q *InMemoryJobQueue) Remove(ctx context.Context, jobID string) error {
+	q.mu.Lock()
+	defer q.mu.Unlock()
 	for i, j := range q.jobs {
 		if j.ID == jobID {
 			q.jobs = append(q.jobs[:i], q.jobs[i+1:]...)
