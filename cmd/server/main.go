@@ -201,6 +201,21 @@ func main() {
 		fmt.Fprintf(os.Stderr, "Failed to create pipeline: %v\n", err)
 		os.Exit(1)
 	}
+	// Recover interrupted pipeline (Jalur B) migrations left in StatusRunning by
+	// a crash or forced shutdown, so they are marked Interrupted and can be
+	// resumed. Both migration paths persist the legacy StatusRunning to the same
+	// migrations table via the same repo, so this mirrors the executor recovery
+	// above; the StatusRunning filter makes the two passes idempotent (whichever
+	// runs second finds no running rows), so there is no double update. Kept
+	// explicit so Jalur B recovery is guaranteed by name and stays correct even
+	// if the two paths ever use different repositories.
+	pipelineRecovered, err := pipeline.RecoverInterrupted()
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Warning: failed to recover interrupted pipeline migrations: %v\n", err)
+	} else if len(pipelineRecovered) > 0 {
+		fmt.Printf("Recovered %d interrupted pipeline migration(s): %v\n", len(pipelineRecovered), pipelineRecovered)
+	}
+
 	pipelineHandler := migration.NewPipelineHandler(pipeline, pipelineRepo, migrationRepo)
 
 	// 5. Setup graceful shutdown
