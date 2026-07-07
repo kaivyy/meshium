@@ -479,7 +479,12 @@ func (e *ReplicationEngine) redisLag(ctx context.Context, config ReplicationConf
 			return strconv.ParseInt(val, 10, 64)
 		}
 	}
-	return 0, nil
+	// No master_last_io_seconds_ago line means the target is not acting as a
+	// replica (e.g. still role:master, or replication was never established).
+	// Returning 0 here would let WaitForCatchUp treat replication as instantly
+	// caught up and promote on un-replicated data. Fail closed instead, matching
+	// the postgres and mongo lag paths.
+	return -1, fmt.Errorf("redis replication lag unavailable: no master_last_io_seconds_ago in INFO replication (is the target configured as a replica?)")
 }
 
 func (e *ReplicationEngine) promoteRedis(ctx context.Context, config ReplicationConfig) error {
