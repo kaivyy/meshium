@@ -205,6 +205,11 @@ func main() {
 
 	// 5. Setup graceful shutdown
 	httpServer := &http.Server{}
+	// Closed by the shutdown goroutine once the full teardown sequence has run
+	// (pipeline drain, engine stop, HTTP shutdown, root-context cancel, SSH
+	// pool close). main() waits on it before returning so the deferred
+	// database.Close() is guaranteed to run strictly last.
+	shutdownDone := make(chan struct{})
 	go func() {
 		sigCh := make(chan os.Signal, 1)
 		signal.Notify(sigCh, syscall.SIGINT, syscall.SIGTERM)
@@ -234,8 +239,15 @@ func main() {
 			fmt.Fprintf(os.Stderr, "HTTP server shutdown error: %v\n", err)
 		}
 
-		// Only now cancel the root context, then resources close via defers.
+		// All request handlers and background workers that could still touch a
+		// pooled SSH connection or the database have now stopped. Cancel the
+		// root context, then close the SSH pool (connections + keepalive
+		// goroutine). database.Close() runs last, via main()'s defer, once this
+		// goroutine signals completion below.
 		cancel()
+		sshPool.CloseAll()
+
+		close(shutdownDone)
 	}()
 
 	mux := http.NewServeMux()
@@ -283,4 +295,10 @@ func main() {
 		fmt.Fprintf(os.Stderr, "Server error: %v\n", err)
 		os.Exit(1)
 	}
+
+	// On a graceful stop ListenAndServe returns http.ErrServerClosed as soon as
+	// httpServer.Shutdown is called, but the shutdown goroutine still has to
+	// cancel the root context and close the SSH pool. Wait for it to finish so
+	// the deferred database.Close() runs strictly last.
+	<-shutdownDone
 }
