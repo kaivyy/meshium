@@ -87,7 +87,7 @@ var _ transport.SSHExecuter = (*mockSSHExecuter)(nil)
 
 func newTestDB(t *testing.T) *sql.DB {
 	t.Helper()
-	dbPath := fmt.Sprintf(":memory:")
+	dbPath := ":memory:"
 	database, err := db.Open(dbPath)
 	if err != nil {
 		t.Fatalf("open db: %v", err)

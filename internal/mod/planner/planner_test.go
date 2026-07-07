@@ -641,7 +641,7 @@ func TestParseImageSize(t *testing.T) {
 
 func newTestDB(t *testing.T) *sql.DB {
 	t.Helper()
-	dbPath := fmt.Sprintf(":memory:")
+	dbPath := ":memory:"
 	db, err := db.Open(dbPath)
 	if err != nil {
 		t.Fatalf("open db: %v", err)

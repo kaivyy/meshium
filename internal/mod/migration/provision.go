@@ -265,7 +265,7 @@ func (e *ProvisionEngine) InstallCompose(ctx context.Context, distro string) err
 		return nil
 	}
 	// If not available, install standalone
-	cmd := fmt.Sprintf("mkdir -p /usr/local/lib/docker/cli-plugins && curl -SL https://github.com/docker/compose/releases/latest/download/docker-compose-linux-x86_64 -o /usr/local/lib/docker/cli-plugins/docker-compose && chmod +x /usr/local/lib/docker/cli-plugins/docker-compose 2>&1")
+	cmd := "mkdir -p /usr/local/lib/docker/cli-plugins && curl -SL https://github.com/docker/compose/releases/latest/download/docker-compose-linux-x86_64 -o /usr/local/lib/docker/cli-plugins/docker-compose && chmod +x /usr/local/lib/docker/cli-plugins/docker-compose 2>&1"
 	_, _, _, err := e.targetSSH.ExecContext(ctx, cmd)
 	return err
 }

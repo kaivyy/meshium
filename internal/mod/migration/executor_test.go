@@ -365,9 +365,7 @@ func TestCompositeRunnerHasResumeAndRecover(t *testing.T) {
 	var runner interface {
 		Resume(ctx context.Context, migrationID int, onProgress StepCallback) error
 		RecoverInterrupted() ([]int, error)
-	}
-
-	runner = &CompositeRunner{}
+	} = &CompositeRunner{}
 
 	// If we get here, the methods exist
 	_ = runner
