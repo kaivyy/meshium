@@ -1596,18 +1596,34 @@ func (s *preCutoverValidationStage) Rollback(ctx context.Context, pc *PipelineCo
 	return nil
 }
 
-// trafficSwitchStage switches traffic from source to target.
+// trafficSwitchStage records a manual-cutover checkpoint. It does NOT perform an
+// automatic traffic switch: the real DNS/reverse-proxy/load-balancer switch lives
+// in TrafficSwitchEngine (traffic.go), which is only driven by CutoverEngine
+// (cutover.go) — and CutoverEngine has no live caller, so no automatic switch is
+// wired into this pipeline. Rather than silently report a successful cutover that
+// never moved any traffic, this stage records the checkpoint as manual_required
+// and tells the operator to perform the cutover themselves.
 type trafficSwitchStage struct {
 	repo PipelineRepo
 }
 
+// trafficSwitchManualState is the switch_state persisted for the traffic switch
+// config when no automatic traffic switch runs. It must NOT be "switched": that
+// value would falsely assert traffic was moved to the target.
+const trafficSwitchManualState = "manual_required"
+
+// trafficSwitchManualNote explains, on the cutover record and in the operator
+// message, why traffic was not switched automatically and what to do next.
+const trafficSwitchManualNote = "automatic traffic switch is not enabled in this pipeline; traffic still points at the source — manual cutover required (switch DNS / reverse proxy / load balancer to the target, then verify)"
+
 func (s *trafficSwitchStage) Name() PipelineStageName { return StageTrafficSwitch }
 
 func (s *trafficSwitchStage) Execute(ctx context.Context, pc *PipelineContext) error {
-	pc.OnProgress(WSMessage{Step: "traffic_switch", Status: "progress", Value: fmt.Sprintf("Switching traffic via %s...", pc.Config.TrafficProvider)})
+	pc.OnProgress(WSMessage{Step: "traffic_switch", Status: "progress", Value: "Recording manual-cutover checkpoint (automatic traffic switch is not enabled in this pipeline)..."})
 
-	// The actual traffic switch logic is in traffic.go (created by the background agent)
-	// For now, we record the switch and verify target is reachable
+	// No automatic traffic switch is performed here. The real TrafficSwitchEngine
+	// (traffic.go) is not wired into the live pipeline, so this stage only records
+	// that a manual cutover is required. It must never claim traffic was switched.
 
 	// Idempotency guard: this stage's completion checkpoint is written by the
 	// pipeline loop only after Execute returns. If the process crashed after a
@@ -1626,14 +1642,16 @@ func (s *trafficSwitchStage) Execute(ctx context.Context, pc *PipelineContext) e
 		if _, err := pc.Repo.CreateTrafficSwitchConfig(ctx, TrafficSwitchConfig{
 			MigrationID:    pc.MigrationID,
 			Provider:       pc.Config.TrafficProvider,
-			SwitchState:    "switched",
+			SwitchState:    trafficSwitchManualState,
 			HealthCheckURL: pc.Config.HealthCheckURL,
 		}); err != nil {
 			return fmt.Errorf("persist traffic switch config failed: %w", err)
 		}
 	}
 
-	// Record cutover (skip if a traffic_switch cutover record already exists)
+	// Record cutover (skip if a traffic_switch cutover record already exists).
+	// TrafficSwitched is false and the state is unchanged (source → source)
+	// because no traffic was moved; the note records why.
 	cutovers, err := pc.Repo.GetCutoverHistory(pc.MigrationID)
 	if err != nil {
 		return fmt.Errorf("check existing cutover history failed: %w", err)
@@ -1650,26 +1668,33 @@ func (s *trafficSwitchStage) Execute(ctx context.Context, pc *PipelineContext) e
 			MigrationID:     pc.MigrationID,
 			CutoverType:     "traffic_switch",
 			PreviousState:   "source",
-			NewState:        "target",
-			TrafficSwitched: true,
+			NewState:        "source",
+			TrafficSwitched: false,
+			Error:           trafficSwitchManualNote,
 			StartedAt:       time.Now().Format(time.RFC3339),
 		}); err != nil {
 			return fmt.Errorf("persist cutover record failed: %w", err)
 		}
 	}
 
-	pc.OnProgress(WSMessage{Step: "traffic_switch", Status: "success", Value: "Traffic switched to target"})
+	// Warning, not success: the pipeline did not move traffic. The operator must
+	// complete the cutover manually.
+	pc.OnProgress(WSMessage{Step: "traffic_switch", Status: "warning", Value: trafficSwitchManualNote})
 	return nil
 }
 
 func (s *trafficSwitchStage) Rollback(ctx context.Context, pc *PipelineContext) error {
-	pc.OnProgress(WSMessage{Step: "traffic_switch", Status: "progress", Value: "Reverting traffic to source..."})
+	pc.OnProgress(WSMessage{Step: "traffic_switch", Status: "progress", Value: "Recording traffic-cutover rollback checkpoint (no automatic traffic switch was performed)..."})
 
-	// Revert traffic switch
+	// No automatic traffic switch was performed on the forward path, so there is
+	// nothing to revert automatically. Record the rollback checkpoint honestly:
+	// TrafficReverted is false. If the operator performed a manual cutover, they
+	// must manually revert it.
 	pc.Repo.CreateRollbackRecord(ctx, RollbackRecord{
 		MigrationID:     pc.MigrationID,
 		RollbackType:    "traffic",
-		TrafficReverted: true,
+		TrafficReverted: false,
+		Error:           "no automatic traffic switch was performed; if a manual cutover was done, revert DNS / reverse proxy / load balancer to the source manually",
 		StartedAt:       time.Now().Format(time.RFC3339),
 	})
 
