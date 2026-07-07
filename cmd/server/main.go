@@ -210,7 +210,6 @@ func main() {
 		signal.Notify(sigCh, syscall.SIGINT, syscall.SIGTERM)
 		<-sigCh
 		fmt.Printf("\nShutting down...\n")
-		cancel()
 		shutdownCtx, shutdownCancel := context.WithTimeout(context.Background(), 30*time.Second)
 		defer shutdownCancel()
 		if err := engine.Stop(shutdownCtx); err != nil {
@@ -219,6 +218,7 @@ func main() {
 		if err := httpServer.Shutdown(shutdownCtx); err != nil {
 			fmt.Fprintf(os.Stderr, "HTTP server shutdown error: %v\n", err)
 		}
+		cancel()
 	}()
 
 	mux := http.NewServeMux()
