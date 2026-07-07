@@ -1584,23 +1584,54 @@ func (s *trafficSwitchStage) Execute(ctx context.Context, pc *PipelineContext) e
 	// The actual traffic switch logic is in traffic.go (created by the background agent)
 	// For now, we record the switch and verify target is reachable
 
-	// Create traffic switch config record
-	pc.Repo.CreateTrafficSwitchConfig(ctx, TrafficSwitchConfig{
-		MigrationID:    pc.MigrationID,
-		Provider:       pc.Config.TrafficProvider,
-		SwitchState:    "switched",
-		HealthCheckURL: pc.Config.HealthCheckURL,
-	})
+	// Idempotency guard: this stage's completion checkpoint is written by the
+	// pipeline loop only after Execute returns. If the process crashed after a
+	// record was inserted but before that checkpoint landed, resume re-runs this
+	// stage — so guard each side effect against an existing row keyed by
+	// migration_id before inserting, or resume duplicates it. The two creates are
+	// guarded independently to also cover a crash between them (config written,
+	// cutover record not).
 
-	// Record cutover
-	pc.Repo.CreateCutoverRecord(ctx, CutoverRecord{
-		MigrationID:     pc.MigrationID,
-		CutoverType:     "traffic_switch",
-		PreviousState:   "source",
-		NewState:        "target",
-		TrafficSwitched: true,
-		StartedAt:       time.Now().Format(time.RFC3339),
-	})
+	// Create traffic switch config record (skip if one already exists for this migration)
+	existingCfg, err := pc.Repo.GetTrafficSwitchConfig(pc.MigrationID)
+	if err != nil {
+		return fmt.Errorf("check existing traffic switch config failed: %w", err)
+	}
+	if existingCfg == nil {
+		if _, err := pc.Repo.CreateTrafficSwitchConfig(ctx, TrafficSwitchConfig{
+			MigrationID:    pc.MigrationID,
+			Provider:       pc.Config.TrafficProvider,
+			SwitchState:    "switched",
+			HealthCheckURL: pc.Config.HealthCheckURL,
+		}); err != nil {
+			return fmt.Errorf("persist traffic switch config failed: %w", err)
+		}
+	}
+
+	// Record cutover (skip if a traffic_switch cutover record already exists)
+	cutovers, err := pc.Repo.GetCutoverHistory(pc.MigrationID)
+	if err != nil {
+		return fmt.Errorf("check existing cutover history failed: %w", err)
+	}
+	trafficCutoverExists := false
+	for _, cr := range cutovers {
+		if cr.CutoverType == "traffic_switch" {
+			trafficCutoverExists = true
+			break
+		}
+	}
+	if !trafficCutoverExists {
+		if _, err := pc.Repo.CreateCutoverRecord(ctx, CutoverRecord{
+			MigrationID:     pc.MigrationID,
+			CutoverType:     "traffic_switch",
+			PreviousState:   "source",
+			NewState:        "target",
+			TrafficSwitched: true,
+			StartedAt:       time.Now().Format(time.RFC3339),
+		}); err != nil {
+			return fmt.Errorf("persist cutover record failed: %w", err)
+		}
+	}
 
 	pc.OnProgress(WSMessage{Step: "traffic_switch", Status: "success", Value: "Traffic switched to target"})
 	return nil
