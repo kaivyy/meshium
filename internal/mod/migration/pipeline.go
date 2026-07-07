@@ -70,6 +70,7 @@ type Pipeline struct {
 	stages           []PipelineStageHandler
 	mu               sync.Mutex
 	runningPipelines sync.Map // migrationID → struct{} (prevents concurrent execution)
+	lifecycle        *pipelineRegistry
 }
 
 // NewPipeline creates a new Pipeline with the given dependencies.
@@ -87,13 +88,14 @@ func NewPipeline(
 		return nil, fmt.Errorf("category registry is required")
 	}
 	p := &Pipeline{
-		repo:     repo,
-		jobRepo:  jobRepo,
-		srvRepo:  srvRepo,
-		pool:     pool,
-		authSvc:  authSvc,
-		hosts:    hosts,
-		registry: registry,
+		repo:      repo,
+		jobRepo:   jobRepo,
+		srvRepo:   srvRepo,
+		pool:      pool,
+		authSvc:   authSvc,
+		hosts:     hosts,
+		registry:  registry,
+		lifecycle: newPipelineRegistry(),
 	}
 	defaultRegistry = registry
 	p.registerDefaultStages()
@@ -155,6 +157,20 @@ func (p *Pipeline) Execute(ctx context.Context, migrationID int, onProgress Step
 		return fmt.Errorf("migration %d is already running", migrationID)
 	}
 	defer p.release(migrationID)
+
+	// Register with the lifecycle registry so application shutdown can drain
+	// this run. The derived execCtx is cancelled either by the caller (WS
+	// disconnect) or by the registry during shutdown; on cancellation the stage
+	// loop below calls interruptPipeline, which persists the checkpoint via
+	// context.Background(). If the registry has stopped accepting (shutdown in
+	// progress), refuse to start a new run.
+	execCtx, execCancel := context.WithCancel(ctx)
+	defer execCancel()
+	if !p.lifecycle.register(migrationID, execCancel) {
+		return fmt.Errorf("server is shutting down; migration %d not started", migrationID)
+	}
+	defer p.lifecycle.unregister(migrationID)
+	ctx = execCtx
 
 	// Load the migration
 	migration, err := p.jobRepo.GetMigration(migrationID)
@@ -823,6 +839,17 @@ func (p *Pipeline) RecoverInterrupted() ([]int, error) {
 }
 
 // --- Internal helpers ---
+
+// GracefulDrain stops accepting new pipeline runs and waits for in-flight runs
+// to reach a safe checkpoint, up to the registry's timeout. If the timeout is
+// exceeded, remaining runs are force-cancelled; their Execute loop then calls
+// interruptPipeline, which persists the checkpoint via context.Background() so
+// it survives cancellation. It returns the number of runs that were
+// force-cancelled. This is the shutdown-lifecycle entry point for the pipeline
+// (Jalur B), mirroring the Job Engine's Stop() drain.
+func (p *Pipeline) GracefulDrain(ctx context.Context) (int, error) {
+	return p.lifecycle.drain(ctx)
+}
 
 func (p *Pipeline) tryAcquire(migrationID int) bool {
 	_, loaded := p.runningPipelines.LoadOrStore(migrationID, struct{}{})

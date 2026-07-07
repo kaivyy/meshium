@@ -210,6 +210,21 @@ func main() {
 		signal.Notify(sigCh, syscall.SIGINT, syscall.SIGTERM)
 		<-sigCh
 		fmt.Printf("\nShutting down...\n")
+
+		// Jalur B (zero-downtime pipeline): stop accepting new runs, wait for
+		// active runs to reach a safe checkpoint, and force-cancel on timeout.
+		// On force-cancel each run's Execute loop calls interruptPipeline, which
+		// persists the checkpoint via context.Background() so it survives the
+		// cancellation. Give the drain its own budget so the registry's internal
+		// timeout (and its post-cancel checkpoint window) is honored, and the
+		// job-engine drain below still gets a full, separate window.
+		pipelineDrainCtx, pipelineDrainCancel := context.WithTimeout(context.Background(), migration.DefaultPipelineDrainTimeout+5*time.Second)
+		if _, err := pipeline.GracefulDrain(pipelineDrainCtx); err != nil {
+			fmt.Fprintf(os.Stderr, "Pipeline drain error: %v\n", err)
+		}
+		pipelineDrainCancel()
+
+		// Jalur A (job engine): drain running jobs, then stop the HTTP server.
 		shutdownCtx, shutdownCancel := context.WithTimeout(context.Background(), 30*time.Second)
 		defer shutdownCancel()
 		if err := engine.Stop(shutdownCtx); err != nil {
@@ -218,6 +233,8 @@ func main() {
 		if err := httpServer.Shutdown(shutdownCtx); err != nil {
 			fmt.Fprintf(os.Stderr, "HTTP server shutdown error: %v\n", err)
 		}
+
+		// Only now cancel the root context, then resources close via defers.
 		cancel()
 	}()
 
