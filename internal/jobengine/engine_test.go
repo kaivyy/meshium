@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -275,6 +276,60 @@ func TestJobExecution_Failure(t *testing.T) {
 		time.Sleep(50 * time.Millisecond)
 	}
 	t.Fatal("job did not complete within timeout")
+}
+
+// nilHandlerFactory returns (nil, nil): no handler and no error. A real
+// factory never does this, but the JobHandler/HandlerFactory boundary allows
+// it, and if the engine trusts the result it dereferences a nil interface in
+// handler.Execute and crashes the worker goroutine (SIGSEGV). This factory
+// reproduces that exact condition so the guard can be verified.
+type nilHandlerFactory struct{}
+
+func (nilHandlerFactory) CreateHandler(job *Job) (JobHandler, error) {
+	return nil, nil
+}
+
+// TestJobExecution_NilHandler proves the engine fails a job cleanly when the
+// factory yields a nil handler, instead of panicking. Before the guard, this
+// would SIGSEGV inside executeJob; now the job must reach a terminal failed
+// state with a descriptive error and the engine must stay alive.
+func TestJobExecution_NilHandler(t *testing.T) {
+	engine, _ := newTestEngine(t, nilHandlerFactory{})
+
+	ctx := context.Background()
+	if err := engine.Start(ctx); err != nil {
+		t.Fatalf("start engine: %v", err)
+	}
+	defer engine.Stop(ctx)
+
+	job, err := engine.Submit(ctx, JobRequest{
+		Type: JobTypeMigration,
+	})
+	if err != nil {
+		t.Fatalf("submit job: %v", err)
+	}
+
+	deadline := time.Now().Add(5 * time.Second)
+	for time.Now().Before(deadline) {
+		loaded, err := engine.GetJob(ctx, job.ID)
+		if err != nil {
+			t.Fatalf("get job: %v", err)
+		}
+		if loaded.Status.IsTerminal() {
+			if loaded.Status != JobStatusFailed {
+				t.Fatalf("expected failed, got %s", loaded.Status)
+			}
+			if loaded.Error == "" {
+				t.Fatal("expected a non-empty error explaining the missing handler")
+			}
+			if !strings.Contains(loaded.Error, "no handler created") {
+				t.Fatalf("expected error to explain the missing handler, got %q", loaded.Error)
+			}
+			return
+		}
+		time.Sleep(50 * time.Millisecond)
+	}
+	t.Fatal("job did not reach a terminal state — the engine may have crashed on a nil handler")
 }
 
 func TestCancelJob_Queued(t *testing.T) {

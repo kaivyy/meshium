@@ -397,6 +397,13 @@ func (e *Engine) executeJob(parentCtx context.Context, job *Job) {
 		e.failJob(ctx, job, fmt.Sprintf("create handler: %v", err))
 		return
 	}
+	// A factory that returns (nil, nil) would otherwise cause handler.Execute
+	// below to dereference a nil interface and crash the worker (SIGSEGV).
+	// Fail the job cleanly instead so the panic can never take down the engine.
+	if handler == nil {
+		e.failJob(ctx, job, fmt.Sprintf("no handler created for job type %q (job %s)", job.Type, job.ID))
+		return
+	}
 
 	// Progress and log callbacks
 	onProgress := func(progress JobProgress) {
