@@ -90,20 +90,29 @@ func distroPackageManager(id string) string {
 }
 
 // GetAdapter returns the appropriate DistroAdapter for the detected distro.
-func GetAdapter(info DistroInfo) DistroAdapter {
+// It fails closed: an unrecognized family returns an error rather than silently
+// defaulting to apt. The old apt fallback would run `apt-get install` on hosts
+// that have no apt (e.g. Amazon Linux, Gentoo), corrupting the target instead
+// of reporting an unsupported distro. Callers must surface this error and not
+// proceed with package/service migration.
+func GetAdapter(info DistroInfo) (DistroAdapter, error) {
 	switch info.Family {
 	case "debian":
-		return &aptAdapter{}
+		return &aptAdapter{}, nil
 	case "rhel":
-		return &dnfAdapter{}
+		return &dnfAdapter{}, nil
 	case "arch":
-		return &pacmanAdapter{}
+		return &pacmanAdapter{}, nil
 	case "alpine":
-		return &apkAdapter{}
+		return &apkAdapter{}, nil
 	case "suse":
-		return &zypperAdapter{}
+		return &zypperAdapter{}, nil
 	default:
-		return &aptAdapter{} // fallback
+		name := info.Name
+		if name == "" {
+			name = "unknown"
+		}
+		return nil, fmt.Errorf("unsupported distro %q (family %q): no package manager adapter — automatic package/service migration is not supported for this distribution", name, info.Family)
 	}
 }
 

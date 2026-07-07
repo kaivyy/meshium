@@ -89,10 +89,58 @@ func TestGetAdapter(t *testing.T) {
 		{"suse", "zypper"},
 	}
 	for _, tt := range tests {
-		adapter := GetAdapter(DistroInfo{Family: tt.family})
+		adapter, err := GetAdapter(DistroInfo{Family: tt.family})
+		if err != nil {
+			t.Errorf("family %q: unexpected error: %v", tt.family, err)
+			continue
+		}
 		if adapter.PackageManager() != tt.want {
 			t.Errorf("family %q: expected %q, got %q", tt.family, tt.want, adapter.PackageManager())
 		}
+	}
+}
+
+// TestGetAdapterUnknownFailsClosed proves GetAdapter refuses an unrecognized
+// distro family instead of silently returning the apt adapter. The old fallback
+// ran `apt-get install` on hosts with no apt (Amazon Linux, Gentoo, etc.),
+// which would fail or corrupt the target while reporting nothing wrong.
+func TestGetAdapterUnknownFailsClosed(t *testing.T) {
+	cases := []DistroInfo{
+		{Name: "amzn", Family: "unknown"},   // Amazon Linux — not recognized by distroFamily
+		{Name: "gentoo", Family: "unknown"}, // Gentoo — no adapter
+		{Family: ""},                        // family never determined
+	}
+	for _, info := range cases {
+		adapter, err := GetAdapter(info)
+		if err == nil {
+			t.Errorf("GetAdapter(%+v) returned no error; unknown distros must fail closed", info)
+		}
+		if adapter != nil {
+			t.Errorf("GetAdapter(%+v) returned a non-nil adapter %T; must be nil on failure", info, adapter)
+		}
+	}
+}
+
+// TestDetectDistroAmazonLinux documents current behavior: Amazon Linux
+// (ID=amzn) is not in the recognized set, so it resolves to family "unknown"
+// and no package manager. Combined with TestGetAdapterUnknownFailsClosed, this
+// means an Amazon Linux target is safely refused rather than mistakenly driven
+// with apt. (Adding real amzn→dnf support is deliberately out of scope until a
+// dnf-based migration path is verified end-to-end.)
+func TestDetectDistroAmazonLinux(t *testing.T) {
+	ssh := newMockSSH()
+	ssh.execOutput["cat /etc/os-release"] = `NAME="Amazon Linux"
+ID="amzn"
+VERSION_ID="2023"`
+	info, err := DetectDistro(context.Background(), ssh)
+	if err != nil {
+		t.Fatalf("DetectDistro failed: %v", err)
+	}
+	if info.Family != "unknown" {
+		t.Errorf("expected family 'unknown' for amzn, got %q", info.Family)
+	}
+	if _, err := GetAdapter(info); err == nil {
+		t.Error("expected GetAdapter to fail closed for Amazon Linux, got nil error")
 	}
 }
 

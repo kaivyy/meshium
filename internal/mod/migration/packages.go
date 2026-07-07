@@ -29,7 +29,10 @@ func (c *PackagesCollector) Collect(ctx context.Context, ssh SSHExecuter) (Categ
 	if err != nil {
 		return CategoryData{}, err
 	}
-	adapter := GetAdapter(info)
+	adapter, err := GetAdapter(info)
+	if err != nil {
+		return CategoryData{}, err
+	}
 
 	data := PackagesData{
 		Distro: adapter.PackageManager(),
@@ -113,7 +116,10 @@ func (a *PackagesApplier) Backup(ctx context.Context, ssh SSHExecuter) (BackupDa
 	if err != nil {
 		return BackupData{}, err
 	}
-	adapter := GetAdapter(info)
+	adapter, err := GetAdapter(info)
+	if err != nil {
+		return BackupData{}, err
+	}
 
 	stdout, _, _, err := ssh.ExecContext(ctx, adapter.ListPackages())
 	if err != nil {
@@ -140,7 +146,10 @@ func (a *PackagesApplier) Apply(ctx context.Context, ssh SSHExecuter, data Categ
 	if err != nil {
 		return err
 	}
-	adapter := GetAdapter(info)
+	adapter, err := GetAdapter(info)
+	if err != nil {
+		return err
+	}
 	targetPM := adapter.PackageManager()
 
 	// Get currently installed packages on target
@@ -225,7 +234,10 @@ func (a *PackagesApplier) Rollback(ctx context.Context, ssh SSHExecuter, backup 
 	if err != nil {
 		return err
 	}
-	adapter := GetAdapter(info)
+	adapter, err := GetAdapter(info)
+	if err != nil {
+		return err
+	}
 
 	stdout, _, _, _ := ssh.ExecContext(ctx, adapter.ListPackages())
 	currentPackages := make(map[string]bool)

@@ -812,7 +812,10 @@ func (s *Service) listPackages(ctx context.Context, srv *server.Server, snap *di
 	if err != nil {
 		return nil, "", err
 	}
-	adapter := migration.GetAdapter(distro)
+	adapter, err := migration.GetAdapter(distro)
+	if err != nil {
+		return nil, "", err
+	}
 	stdout, stderr, exitCode, err := client.ExecContext(ctx, adapter.ListPackages())
 	if err != nil {
 		return nil, "", err

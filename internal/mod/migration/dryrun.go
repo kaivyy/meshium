@@ -164,7 +164,14 @@ func (e *Executor) dryRunPackages(ctx context.Context, ssh SSHExecuter, data Cat
 	if err != nil {
 		return nil
 	}
-	adapter := GetAdapter(info)
+	adapter, err := GetAdapter(info)
+	if err != nil {
+		return []DryRunChange{{
+			Type:     "blocked",
+			Resource: "packages",
+			Detail:   fmt.Sprintf("package migration is not supported on this distro: %v", err),
+		}}
+	}
 
 	stdout, _, _, _ := ssh.ExecContext(ctx, adapter.ListPackages())
 	installed := make(map[string]bool)

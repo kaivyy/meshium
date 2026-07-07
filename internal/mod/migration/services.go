@@ -99,7 +99,10 @@ func (a *ServicesApplier) Apply(ctx context.Context, ssh SSHExecuter, data Categ
 	if err != nil {
 		return err
 	}
-	adapter := GetAdapter(info)
+	adapter, err := GetAdapter(info)
+	if err != nil {
+		return err
+	}
 
 	if onProgress != nil {
 		onProgress(WSMessage{
