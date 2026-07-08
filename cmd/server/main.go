@@ -50,6 +50,11 @@ func main() {
 
 	authRepo := auth.NewRepo(database)
 	authSvc := auth.NewService(authRepo)
+	authSvc.SetPersistence(cfg.DataDir)
+	// Re-establish a prior unlock across a restart so browsers stay logged in.
+	// persistence is best-effort: if no key file exists the service stays locked
+	// and the user unlocks normally (fresh install or after a Lock).
+	authSvc.Restore()
 	authHandler := auth.NewHandler(authSvc)
 	authMiddleware := auth.NewMiddleware(authSvc)
 

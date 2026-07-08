@@ -4,6 +4,8 @@ import (
 	"crypto/rand"
 	"encoding/base64"
 	"errors"
+	"os"
+	"path/filepath"
 	"sync"
 
 	"meshium/internal/mod/ssh"
@@ -16,10 +18,64 @@ type Service struct {
 	aesKey    []byte
 	locked    bool
 	sessionToken string
+
+	// keyFile/tokenFile make the unlock survive a process restart. They are
+	// empty until SetPersistence is called. The AES key (which decrypts the
+	// SSH private key) is written here in plaintext at 0600 — this intentionally
+	// trades zero-knowledge-at-rest for not having to re-unlock after every
+	// restart. Lock() removes these files so the manual lock button still takes
+	// effect across restarts.
+	keyFile   string
+	tokenFile string
 }
 
 func NewService(repo Repo) *Service {
 	return &Service{repo: repo, locked: true}
+}
+
+// SetPersistence enables on-disk unlock persistence. keyFile/tokenFile live
+// inside dataDir (created 0700 by config load). Call before Unlock/Setup.
+func (s *Service) SetPersistence(dataDir string) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.keyFile = filepath.Join(dataDir, "auth.key")
+	s.tokenFile = filepath.Join(dataDir, "auth.token")
+}
+
+// persist writes the AES key and current session token to disk so an unlock
+// survives a restart. No-op until SetPersistence has been called (keyFile set).
+func (s *Service) persist() {
+	if s.keyFile == "" {
+		return
+	}
+	// Best-effort: a write failure must not block the unlock, but it means the
+	// next restart will start locked again.
+	_ = os.WriteFile(s.keyFile, s.aesKey, 0600)
+	_ = os.WriteFile(s.tokenFile, []byte(s.sessionToken), 0600)
+}
+
+// Restore re-loads a previously persisted unlock from disk. Called once at
+// startup while the service is still locked. If the key file is absent (fresh
+// install, or Lock() removed it) the service stays locked and the user must
+// unlock. The same session token is restored so browsers that already hold it
+// remain logged in — no re-login required after a restart.
+func (s *Service) Restore() {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if !s.locked || s.keyFile == "" {
+		return
+	}
+	key, err := os.ReadFile(s.keyFile)
+	if err != nil || len(key) != 32 {
+		return
+	}
+	s.aesKey = key
+	s.locked = false
+	if tok, err := os.ReadFile(s.tokenFile); err == nil && len(tok) > 0 {
+		s.sessionToken = string(tok)
+	} else {
+		s.sessionToken = generateSessionToken()
+	}
 }
 
 // IsSetup returns true if a master password has been set.
@@ -94,6 +150,7 @@ func (s *Service) Setup(password string) error {
 	s.aesKey = aesKey
 	s.locked = false
 	s.sessionToken = generateSessionToken()
+	s.persist()
 	return nil
 }
 
@@ -184,6 +241,7 @@ func (s *Service) Unlock(password string) (string, error) {
 	s.aesKey = shared.DeriveKey(password, salt)
 	s.locked = false
 	s.sessionToken = generateSessionToken()
+	s.persist()
 	return s.sessionToken, nil
 }
 
@@ -198,6 +256,11 @@ func (s *Service) Lock() {
 	s.aesKey = nil
 	s.locked = true
 	s.sessionToken = ""
+	// Remove persisted unlock so the locked state survives the restart too.
+	if s.keyFile != "" {
+		_ = os.Remove(s.keyFile)
+		_ = os.Remove(s.tokenFile)
+	}
 }
 
 // GetSessionToken returns the current session token (empty if locked).

@@ -336,3 +336,73 @@ func TestRegenerateSSHKeyIsAtomic(t *testing.T) {
 		t.Fatalf("expected encrypted private key to remain unchanged after rollback")
 	}
 }
+
+// Unlock persistence survives a simulated restart: a second Service instance
+// (same data dir) Restore()s the key + token from disk and comes up unlocked
+// with the same session token, so a browser holding the original token stays
+// logged in without re-unlocking.
+func TestUnlockPersistsAndRestoresAcrossRestart(t *testing.T) {
+	d1 := setupTestDB(t)
+	svc1 := NewService(NewRepo(d1))
+	dir := t.TempDir()
+	svc1.SetPersistence(dir)
+
+	if err := svc1.Setup("persist-pw"); err != nil {
+		t.Fatalf("Setup failed: %v", err)
+	}
+	tok1, err := svc1.Unlock("persist-pw")
+	if err != nil {
+		t.Fatalf("Unlock failed: %v", err)
+	}
+	if tok1 == "" {
+		t.Fatal("expected non-empty session token after unlock")
+	}
+	if svc1.IsLocked() {
+		t.Fatal("service should be unlocked after unlock")
+	}
+	d1.Close()
+
+	// Simulate restart: brand-new service + db handle, same data dir.
+	d2 := setupTestDB(t)
+	defer d2.Close()
+	svc2 := NewService(NewRepo(d2))
+	svc2.SetPersistence(dir)
+	svc2.Restore()
+
+	if svc2.IsLocked() {
+		t.Fatal("expected service to come up unlocked after Restore")
+	}
+	if got := svc2.GetSessionToken(); got != tok1 {
+		t.Fatalf("expected restored token %q, got %q", tok1, got)
+	}
+	// The restored key must actually decrypt the SSH private key.
+	if key := svc2.GetAESKey(); key == nil {
+		t.Fatal("GetAESKey returned nil after restore")
+	}
+}
+
+// Lock removes the persisted unlock so the locked state survives a restart too.
+func TestLockClearsPersistence(t *testing.T) {
+	dir := t.TempDir()
+	svc := NewService(NewRepo(setupTestDB(t)))
+	svc.SetPersistence(dir)
+
+	if err := svc.Setup("lock-pw"); err != nil {
+		t.Fatalf("Setup failed: %v", err)
+	}
+	if _, err := svc.Unlock("lock-pw"); err != nil {
+		t.Fatalf("Unlock failed: %v", err)
+	}
+	svc.Lock()
+	if !svc.IsLocked() {
+		t.Fatal("expected service locked after Lock")
+	}
+
+	// A fresh instance restored from the (now deleted) files stays locked.
+	svc2 := NewService(NewRepo(setupTestDB(t)))
+	svc2.SetPersistence(dir)
+	svc2.Restore()
+	if !svc2.IsLocked() {
+		t.Fatal("expected service to stay locked after restart when Lock removed persistence")
+	}
+}
