@@ -38,16 +38,28 @@ enterprise-grade, and no such claim is made.
   Plan" only on a real error, and "Create Migration Plan" for plain progress
   (`web/src/routes/migrations/new/+page.svelte`).
 
+- **Empty Dashboard / Migrations pages fixed.** `ListMigrations` scanned the
+  nullable `migrations.error` column directly into a `string`, so any migration
+  that never failed (`error IS NULL`) made `GET /api/migrations` return HTTP 500.
+  That broke both the Dashboard and the Migrations list (both call this
+  endpoint) while Servers, Files, and Terminal kept working on different routes.
+  The scan now uses `sql.NullString` like `GetMigration` already did
+  (`internal/mod/migration/repo.go`).
+
 ### Added — Tests
 - `TestKnownHostsCallbackStripsPortFromHostname` reproduces the broken lookup
   (trust stored under bare host, callback invoked with `host:port`) and proves
   the fix recognizes the trusted host.
+- `TestListMigrationsHandlesNullError` inserts a migration with a NULL error
+  column and proves `ListMigrations` returns it (HTTP 500 before the fix).
 
 ### Verification
-- `go test ./internal/mod/ssh/...` passes (including the new port-strip test);
-  `go build ./...` and `go vet ./...` are clean. Verified live: a new server's
-  Test Connection fails with "host key not trusted", the Trust button appears,
-  and the retry succeeds.
+- `go test ./internal/mod/ssh/... ./internal/mod/migration/...` pass (including
+  the new tests); `go build ./...` and `go vet ./...` are clean. Verified live:
+  a new server's Test Connection fails with "host key not trusted", the Trust
+  button appears, and the retry succeeds; after the ListMigrations fix the
+  engine logs "Recovered 2 interrupted migration(s)" at startup with no
+  NULL-scan warning, and `GET /api/migrations` no longer 500s.
 
 ---
 
