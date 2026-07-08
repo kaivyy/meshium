@@ -51,9 +51,9 @@
 
   const servers = $derived($serverStore.servers);
   const serversLoading = $derived($serverStore.loading);
-  const selectedServer = $derived(servers.find((server) => String(server.id) === selectedServerID) ?? null);
-  const compareSourceServer = $derived(servers.find((server) => String(server.id) === compareSourceID) ?? null);
-  const compareTargetServer = $derived(servers.find((server) => String(server.id) === compareTargetID) ?? null);
+  const selectedServer = $derived(servers.find((server) => server.id === Number(selectedServerID)) ?? null);
+  const compareSourceServer = $derived(servers.find((server) => server.id === Number(compareSourceID)) ?? null);
+  const compareTargetServer = $derived(servers.find((server) => server.id === Number(compareTargetID)) ?? null);
   const summary = $derived(
     report?.summary ?? {
       packagesAdded: 0,

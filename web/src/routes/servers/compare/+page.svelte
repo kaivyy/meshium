@@ -16,8 +16,8 @@
   let compareError = $state('');
   let lastAutoCheckKey = $state('');
 
-  const sourceServer = $derived(servers.find((server) => String(server.id) === sourceID) ?? null);
-  const targetServer = $derived(servers.find((server) => String(server.id) === targetID) ?? null);
+  const sourceServer = $derived(servers.find((server) => server.id === Number(sourceID)) ?? null);
+  const targetServer = $derived(servers.find((server) => server.id === Number(targetID)) ?? null);
   const canCheck = $derived(Boolean(sourceID && targetID && !checking));
 
   $effect(() => {
