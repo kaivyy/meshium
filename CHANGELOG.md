@@ -5,6 +5,110 @@ All notable changes to Meshium are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.5.0-beta.4] — 2026-07-08
+
+Migration-correctness beta. This release does not add migration features — it
+makes the migration paths **stop claiming or reporting work the live pipeline
+did not actually perform**, and fails closed on operations that cannot be
+verified as safe. Every change below is a safety or honesty fix grounded in the
+Migration Functional Audit; behavior that was previously "report success and
+continue" now either does the safe thing or refuses with a clear error.
+
+This is still a **pre-release / beta** — not production-ready or
+enterprise-grade, and no such claim is made. The migration paths are safer and
+more honest at this tag, not complete.
+
+### Fixed — False-success and crash safety
+
+- **Traffic switch no longer reports success when it did not switch** — the
+  cutover traffic-switch path could record a successful switch even when the
+  underlying switch was not performed. It no longer reports success it did not
+  achieve (`internal/mod/migration`, commit `8846934`).
+- **Missing step handlers no longer crash the migration** — a pipeline step with
+  no registered handler dereferenced a nil handler and took down the process with
+  a SIGSEGV. Missing handlers are now guarded and surfaced as an error instead of
+  a panic (commit `8c6ce9f`).
+
+### Fixed — Fail closed on unverifiable operations
+
+- **Unknown distributions no longer fall back to `apt`** — an unrecognized source
+  distro (e.g. Amazon Linux) previously fell through to an `apt`-based path that
+  is wrong for non-Debian systems. The package path now refuses an unknown distro
+  rather than running an unsafe fallback (`internal/mod/planner/risk.go` and
+  distro handling, commit `1250472`).
+- **Alpine service migration is gated without OpenRC support** — systemd-oriented
+  service migration does not apply to Alpine/OpenRC, so that path is now gated off
+  rather than issuing `systemctl` against a host that does not use it
+  (commit `17332dd`).
+- **Replication lag paths fail closed** — the PostgreSQL, MongoDB, and Redis lag
+  measurements returned `0` (i.e. "caught up") on error paths, which could let a
+  cutover promote a target on **un-replicated data**. They now return `-1` plus an
+  error, and `WaitForCatchUp` propagates the error instead of treating a failed
+  measurement as caught-up (`internal/mod/migration/replication.go`,
+  commit `17c9565`).
+- **MongoDB replication cutover is refused up front** — there is no real
+  replica-set lag measurement, so catch-up can never be verified before promotion.
+  `setupMongoDB` now fails closed **before** issuing `rs.add()`, so a cutover that
+  cannot complete safely never reconfigures the live source's replica set
+  (commit `837885e`).
+
+### Changed — Truthful capability reporting
+
+- **"Initial sync" stage describes what it actually does** — the pipeline's
+  initial-sync stage does not perform a file-level rsync; it replays the data
+  collected during the collect phase via each category's `Applier.Apply`. The
+  stage name, progress messages, and code comments now say so, and the unused
+  `SyncEngine`/`InitialSync` path is documented as not driven by the live pipeline
+  (`internal/mod/migration/pipeline.go`, commit `6a8fd78`).
+- **Docker image migration documented as registry-only** — image transfer is
+  `docker pull` only; images built locally and never pushed to a reachable
+  registry cannot be migrated. Pull failures are now counted and reflected in the
+  completion summary instead of being silently downgraded while success is still
+  reported (`internal/mod/migration/docker.go`, `dryrun.go`, commit `8d22655`).
+- **Assisted-cutover limitations clarified** — documentation no longer implies a
+  fully automated zero-downtime cutover where the path is assisted/manual
+  (commit `29b785e`).
+
+### Added — Architecture & validation documentation
+
+- **Migration orchestrator consolidation plan** (`docs/orchestrator-consolidation.md`)
+  — records that three orchestrators (Job Engine `Engine`, `Executor`/
+  `CompositeRunner`, and the `Pipeline`) each drive their own backup→apply→
+  rollback loop, why that divergence is a correctness risk, and the decision to
+  designate the Pipeline as the single go-forward path with guard rails while the
+  others are frozen (commit `0e87fcf`).
+- **Migration validation matrix and non-destructive scripts**
+  (`docs/validation/migration-matrix.md`, `scripts/validate-fresh-clone.sh`,
+  `scripts/validate-migration-lab.sh`) — a manual E2E test matrix plus a local
+  mirror of CI's fresh-clone build guard and a lab bring-up/health-check script.
+  Both scripts are non-destructive and never trigger a migration themselves
+  (migrations remain UI/API-driven) (commit `f8e326c`).
+
+### Added — CI
+
+- **Fresh-clone build guard** — CI now builds and tests from a `git archive` of
+  `HEAD` (tracked files only) and fails if a tracked source file is swallowed by a
+  `.gitignore` rule — the exact regression that broke the beta.1/beta.2 tags
+  (commit `547f85d`).
+
+### Verification
+
+- `go build ./...`, `go vet ./...`, `go test ./...`, and `go test -race ./...`
+  pass; the migration package suite (including the new fail-closed tests) is
+  green under `-race`. Each stage was built and tested before commit.
+
+### Known limitations (unchanged safety posture)
+
+- **MongoDB replication cutover is unsupported** — refused until real replica-set
+  lag measurement is implemented.
+- **Locally-built Docker images cannot be migrated** — image transfer is
+  registry-pull only.
+- **Three migration orchestrators still coexist** — consolidation onto the
+  Pipeline is planned, not yet performed (see the consolidation doc).
+- All limitations carried from v1.5.0-beta.3 still apply.
+
+---
+
 ## [1.5.0-beta.3] — 2026-07-08
 
 Build-fix release. **v1.5.0-beta.1 and v1.5.0-beta.2 do not compile from a
