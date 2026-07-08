@@ -29,6 +29,15 @@ enterprise-grade, and no such claim is made.
   only be trusted out-of-band (`web/src/routes/servers/[id]/+page.svelte`,
   `web/src/lib/stores/servers.ts`).
 
+- **New-migration "Retry" button no longer mislabels in-progress plans.** The
+  plan button showed "Retry Migration Plan" whenever any progress message
+  existed, so switching apps on mobile (which drops the WebSocket and leaves the
+  stale message stream) made a still-running or already-completed plan look
+  failed. The label now reflects the actual outcome: disabled "Planning…" while
+  running, disabled "Plan created — redirecting…" on success, "Retry Migration
+  Plan" only on a real error, and "Create Migration Plan" for plain progress
+  (`web/src/routes/migrations/new/+page.svelte`).
+
 ### Added — Tests
 - `TestKnownHostsCallbackStripsPortFromHostname` reproduces the broken lookup
   (trust stored under bare host, callback invoked with `host:port`) and proves

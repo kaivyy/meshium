@@ -17,6 +17,13 @@
   let planning = false;
   let planMessages: WSMessage[] = [];
   let ws: WebSocket | null = null;
+  // Derived plan outcome, computed from the messages we've received so far.
+  // A message stream can contain progress lines long before it ends in either
+  // success or failure, so the button label must reflect the actual outcome —
+  // not merely "a message exists" (which previously mislabeled in-progress
+  // plans as "Retry").
+  $: planDone = planMessages.some(m => m.step === 'plan' && m.status === 'complete');
+  $: planFailed = planMessages.some(m => m.status === 'error') && !planDone;
 
   const categories = [
     { id: 'packages', label: 'Packages', icon: Package, desc: 'Installed packages (apt, dnf, pacman, etc.)' },
@@ -294,12 +301,31 @@
       {/if}
 
       {#if !planning}
-        <button
-          on:click={startPlanning}
-          class="w-full px-4 py-3 bg-accent text-accent-fg rounded-lg font-medium hover:bg-accent-hover"
-        >
-          {planMessages.length > 0 ? 'Retry Migration Plan' : 'Create Migration Plan'}
-        </button>
+        {#if planDone}
+          <button
+            type="button"
+            disabled
+            class="w-full px-4 py-3 bg-success/20 text-success rounded-lg font-medium cursor-default"
+          >
+            Plan created — redirecting…
+          </button>
+        {:else if planFailed}
+          <button
+            type="button"
+            on:click={startPlanning}
+            class="w-full px-4 py-3 bg-accent text-accent-fg rounded-lg font-medium hover:bg-accent-hover"
+          >
+            Retry Migration Plan
+          </button>
+        {:else}
+          <button
+            type="button"
+            on:click={startPlanning}
+            class="w-full px-4 py-3 bg-accent text-accent-fg rounded-lg font-medium hover:bg-accent-hover"
+          >
+            Create Migration Plan
+          </button>
+        {/if}
       {:else if planning}
         <div class="flex items-center justify-center gap-2 text-sm text-fg-subtle">
           <Loader size={16} class="animate-spin" />
