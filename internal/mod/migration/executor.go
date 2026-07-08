@@ -153,21 +153,48 @@ func isRunningStatus(status string) bool {
 // so the migration stays resumable (Resume reads GetMigrationState, which
 // prefers `state` and requires CanResume()); it always sets the legacy status
 // and error via UpdateMigrationStatus so the recovery reason is preserved.
-func markInterrupted(repo Repo, migrationID int) error {
+// The reason string explains why the migration was interrupted.
+func markInterrupted(repo Repo, migrationID int, reason string) error {
 	if resetter, ok := repo.(stateResetter); ok {
 		if err := resetter.SetMigrationState(migrationID, StateInterrupted); err != nil {
 			return err
 		}
 	}
-	return repo.UpdateMigrationStatus(migrationID, StatusInterrupted, "process may have crashed")
+	return repo.UpdateMigrationStatus(migrationID, StatusInterrupted, reason)
+}
+
+// hasCompletedCollectStep reports whether the migration has at least one
+// persisted `collect` step that completed successfully. Planner.Plan only
+// writes these steps after all category collectors finish, so their absence
+// on a StatusPlanned row means collection was interrupted (e.g. by a process
+// restart) before any category data was saved — leaving a plan that looks
+// finished but has no data to migrate.
+func hasCompletedCollectStep(repo Repo, migrationID int) bool {
+	steps, err := repo.GetSteps(migrationID)
+	if err != nil {
+		return false
+	}
+	for _, s := range steps {
+		if s.Action == "collect" && s.Status == StepStatusCompleted {
+			return true
+		}
+	}
+	return false
 }
 
 // RecoverInterrupted detects migrations left in an in-progress state by a
 // crashed process and marks them as StatusInterrupted so they can be resumed.
 // Detection covers the legacy literal "running" as well as any state-machine
 // string that maps to a running MigrationState (e.g. "initial_sync"), because
-// SetMigrationState persists the state string into the status column. Returns
-// the IDs of migrations that were recovered.
+// SetMigrationState persists the state string into the status column.
+//
+// It also catches a migration that was interrupted during collection: such a
+// row sits in StatusPlanned (the default written by CreateMigration before
+// any collection runs) with zero completed `collect` steps, looking like a
+// finished plan when in fact no category data was saved. Marking it
+// interrupted — instead of leaving it as a fake "planned" — stops the product
+// from presenting an empty plan as usable. Returns the IDs of migrations that
+// were recovered.
 func (e *Executor) RecoverInterrupted() ([]int, error) {
 	migrations, err := e.repo.ListMigrations()
 	if err != nil {
@@ -176,8 +203,21 @@ func (e *Executor) RecoverInterrupted() ([]int, error) {
 
 	var recovered []int
 	for _, m := range migrations {
-		if isRunningStatus(m.Status) {
-			if err := markInterrupted(e.repo, m.ID); err != nil {
+		switch {
+		// A literal "planned" / StateCreated row is the initial pre-collection
+		// state, not an in-flight pipeline state, so it is never a crashed run.
+		// (If it were treated as running here, every freshly created migration
+		// would be wrongly flipped to interrupted at startup.) It is handled by
+		// the collection-interrupted case below instead.
+		case m.Status != StatusPlanned && isRunningStatus(m.Status):
+			if err := markInterrupted(e.repo, m.ID, "process may have crashed"); err != nil {
+				return recovered, fmt.Errorf("failed to update migration %d: %w", m.ID, err)
+			}
+			recovered = append(recovered, m.ID)
+		case m.Status == StatusPlanned && !hasCompletedCollectStep(e.repo, m.ID):
+			// Collection was interrupted before any category data was saved.
+			// Mark honestly so this is not presented as a usable plan.
+			if err := markInterrupted(e.repo, m.ID, "collection was interrupted before any category data was saved — recreate this plan"); err != nil {
 				return recovered, fmt.Errorf("failed to update migration %d: %w", m.ID, err)
 			}
 			recovered = append(recovered, m.ID)

@@ -74,6 +74,40 @@ enterprise-grade, and no such claim is made.
   assignment effect and the DOM effect share one reactive variable and the
   attribute re-applies on change (`web/src/routes/migrations/new/+page.svelte`).
 
+### Fixed — Interrupted collection is no longer presented as a usable plan
+- **An interrupted-in-collection migration is now marked `interrupted`, not
+  left as a fake `planned`.** `Planner.Plan` writes the migrations row with
+  default `status='planned'` before launching the category collectors, and
+  only persists the collected snapshots (`migration_steps`) once all of them
+  finish. If the process restarts mid-collection (as happened to migration
+  #11 during the beta.5 deploy), the row is left `planned` with zero
+  collected steps and `plan=NULL` — looking like a finished plan that then
+  shows all-zero Dry Run / "no provisioning" results downstream. Startup
+  recovery (`Executor.RecoverInterrupted`) now also detects a `planned`
+  migration with no completed `collect` steps and marks it `interrupted` with
+  a clear error ("collection was interrupted before any category data was
+  saved — recreate this plan"), so it is never presented as usable
+  (`internal/mod/migration/executor.go`).
+- **Latent bug in both recovery paths, also fixed.** `StateCreated` ("planned")
+  is in `MigrationState.IsRunning()`, so `isRunningStatus("planned")` returned
+  `true`. This made the collection-interrupted branch in `Executor.RecoverInterrupted`
+  **unreachable** (the generic "crashed" branch matched first) and, in
+  `Pipeline.RecoverInterrupted`, would flip **every** freshly created `planned`
+  migration to `interrupted` at startup — and clobber the executor's clearer
+  message. Both paths now exclude `StatusPlanned` from the "crashed-running"
+  classification (`m.Status != StatusPlanned && isRunningStatus(...)`), so the
+  collection-interrupted detection is reachable, healthy `planned` migrations
+  (e.g. #12) survive restart, and the clearer reason is preserved
+  (`internal/mod/migration/executor.go`, `internal/mod/migration/pipeline.go`).
+  `markInterrupted` now takes a reason string; the pipeline crash-recovery
+  caller is updated too.
+- **The pipeline page refuses to proceed past an unusable plan.** Instead of
+  letting the user walk into empty Dry Run / Provision / Execute steps, the
+  pipeline page detects an interrupted (or `planned`-with-error) migration
+  and shows a clear "This migration plan was not fully collected — recreate"
+  banner with a Recreate link, and disables Next
+  (`web/src/routes/migrations/[id]/pipeline/+page.svelte`).
+
 ### Added — Tests
 - `TestKnownHostsCallbackStripsPortFromHostname` reproduces the broken lookup
   (trust stored under bare host, callback invoked with `host:port`) and proves
@@ -85,6 +119,12 @@ enterprise-grade, and no such claim is made.
   unlocked with the same session token and a usable AES key.
 - `TestLockClearsPersistence` proves `Lock` removes the persisted unlock so a
   fresh instance stays locked after restart.
+- `TestRecoverInterruptedMarksPlannedWithNoCollectSteps` proves a `planned`
+  migration with zero completed `collect` steps is flipped to `interrupted`
+  with an explanatory error; `TestRecoverInterruptedLeavesCompletePlannedAlone`
+  proves a `planned` migration that did finish collecting is left alone; and
+  `TestRecoverInterruptedIdempotent` proves a second startup pass does not
+  re-touch an already-interrupted row.
 
 ### Verification
 - `go test ./internal/mod/ssh/... ./internal/mod/migration/... ./internal/mod/auth/...`
@@ -99,6 +139,16 @@ enterprise-grade, and no such claim is made.
   assignment effect tracks `step`/`sourceServerId`/`targetServerId`/
   `selectedCategories` and the DOM effect reads the same reactive variable, so
   `disabled` re-applies when a server is selected.
+- **Interrupted-collection stage — verified.** `go test ./...` is green (all
+  packages), `go build ./...`/`go vet` clean, `npm run check` clean. Live:
+  `systemctl restart meshium` runs recovery; migration #11 is now
+  `status='interrupted'` (was a fake `planned`), healthy #12 stays `planned`,
+  and `GET /migrations/11/pipeline` serves 200 with the new "plan was not fully
+  collected" banner embedded in the bundle. The executor's clearer reason string
+  is covered by `TestRecoverInterruptedMarksPlannedWithNoCollectSteps`; the live
+  #11 message reads "process may have crashed" because it was first flipped by
+  the pre-fix pipeline recovery and, per the no-touch-local-DB rule, was not
+  reset — the executor path is proven by the unit test, not the post-hoc row.
 
 ---
 

@@ -292,6 +292,10 @@
   // ══════════════════════════════════════════════════════
 
   function canProceed(step: number): boolean {
+    // Never let the user advance into Dry Run / Provision / Execute when the
+    // plan was never fully collected — those steps would show empty results
+    // and there is nothing to migrate. The banner explains how to recreate.
+    if (incompletePlan) return false;
     switch (step) {
       case 0: return stepStatuses[0] === 'completed';
       case 1: return stepStatuses[1] === 'completed' && !compatibilityResults.some(r => r.severity === 'critical' && !r.passed);
@@ -718,6 +722,21 @@
   $: sourceId = session?.migration?.sourceId ?? null;
   $: targetId = session?.migration?.targetId ?? null;
   $: rollbackAvailable = !isTerminalState(currentState) && currentStep >= 6;
+
+  // A plan is unusable when collection was interrupted before any category
+  // data was saved. The backend marks such migrations `interrupted` at
+  // startup with a clear error; treat that (and a stale `planned` row that
+  // somehow carries an error) as "do not proceed — recreate the plan". This
+  // stops the page from showing empty Dry Run / Provision results as if the
+  // plan were real.
+  $: incompletePlan =
+    !!session &&
+    (session.migration?.status === 'interrupted' ||
+      (session.migration?.status === 'planned' && !!session.migration?.error));
+  $: recreateHref =
+    session?.migration?.sourceId && session?.migration?.targetId
+      ? `/migrations/new?source=${session.migration.sourceId}&target=${session.migration.targetId}`
+      : '/migrations/new';
 </script>
 
 <div class="h-full flex flex-col bg-bg text-fg">
@@ -798,6 +817,36 @@
         <div class="flex items-center justify-center h-64 text-fg-subtle">
           <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" class="animate-spin mr-3"><path d="M21 12a9 9 0 1 1-6.219-8.56"/></svg>
           Loading migration data...
+        </div>
+
+      {:else if incompletePlan}
+        <!-- UNUSABLE PLAN: collection was interrupted before any category data
+             was saved. There is nothing to migrate; do not let the user walk
+             into empty Dry Run / Provision / Execute steps. -->
+        <div class="bg-error/10 border border-error/30 rounded-xl p-5 sm:p-6 mb-4">
+          <div class="flex items-start gap-3">
+            <div class="mt-0.5 shrink-0 w-9 h-9 rounded-lg bg-error/15 text-error flex items-center justify-center">
+              <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg>
+            </div>
+            <div class="min-w-0">
+              <h2 class="text-lg font-semibold text-error">This migration plan was not fully collected</h2>
+              <p class="text-sm text-fg-muted mt-1">
+                Collection was interrupted before any category data was saved, so there is nothing to migrate yet. This can happen if the server restarted while planning.
+              </p>
+              {#if session?.migration?.error}
+                <p class="text-xs font-mono text-fg-subtle mt-2 break-all">{session.migration.error}</p>
+              {/if}
+              <div class="mt-4 flex flex-wrap gap-2">
+                <a href={recreateHref} class="inline-flex items-center gap-2 px-4 py-2 bg-accent hover:bg-accent-hover text-accent-fg rounded-lg text-sm font-medium transition-colors">
+                  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 5v14"/><path d="M5 12h14"/></svg>
+                  Recreate Migration Plan
+                </a>
+                <a href="/migrations" class="inline-flex items-center gap-2 px-4 py-2 bg-surface-muted hover:bg-surface rounded-lg text-sm font-medium transition-colors">
+                  Back to Migrations
+                </a>
+              </div>
+            </div>
+          </div>
         </div>
 
       {:else if currentStep === 0}

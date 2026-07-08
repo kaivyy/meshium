@@ -840,8 +840,14 @@ func (p *Pipeline) RecoverInterrupted() ([]int, error) {
 
 	var recovered []int
 	for _, m := range migrations {
-		if isRunningStatus(m.Status) {
-			if err := markInterrupted(p.jobRepo, m.ID); err != nil {
+		// A literal "planned" / StateCreated row is the initial pre-collection
+		// state, not an in-flight pipeline run, so it is never a crashed run.
+		// (isRunningStatus reports it as running because StateCreated.IsRunning()
+		// is true; that would wrongly flip every freshly created migration to
+		// interrupted at startup, and would also clobber the clearer
+		// collection-interrupted message the executor writes for such rows.)
+		if m.Status != StatusPlanned && isRunningStatus(m.Status) {
+			if err := markInterrupted(p.jobRepo, m.ID, "process may have crashed"); err != nil {
 				return recovered, fmt.Errorf("failed to update migration %d: %w", m.ID, err)
 			}
 			recovered = append(recovered, m.ID)
