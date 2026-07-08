@@ -46,20 +46,59 @@ enterprise-grade, and no such claim is made.
   The scan now uses `sql.NullString` like `GetMigration` already did
   (`internal/mod/migration/repo.go`).
 
+### Fixed — Session, server lookup, and wizard reactivity
+
+- **Unlock now survives a restart.** The AES key and session token were held in
+  memory only, so every service restart wiped the unlock and forced a re-unlock
+  (and lost the browser's session). They are now persisted to disk
+  (`auth.key`, `auth.token`, mode `0600`) in the data dir and restored at
+  startup, so a restart auto-unlocks and a browser holding the original token
+  stays logged in. `Lock` removes both files so the locked state also survives a
+  restart. Trade-off (accepted for beta): this is no longer zero-knowledge-at-rest;
+  root plus the data dir can now decrypt the SSH private key
+  (`internal/mod/auth/service.go`, `cmd/server/main.go`).
+- **Compare / Drift selected-server labels render again.** The lookups used
+  `String(server.id) === sourceID`, but `<select bind:value>` binds the numeric
+  `server.id`, so the strict string compare never matched and the
+  "Source: … / Target: …" labels stayed blank. Now compares
+  `server.id === Number(sourceID)` (`web/src/routes/servers/compare/+page.svelte`,
+  `web/src/routes/drift/+page.svelte`).
+- **New-migration Next button enables after selecting a server.** The wizard's
+  Next button stayed disabled even after a source server was chosen. Proven via
+  in-page diagnostic (state `canProceed=true` but DOM `disabled=true`): Svelte 5
+  legacy mode did not re-apply a function-call binding
+  `disabled={!canProceed()}` to the DOM when the function's reactive
+  dependencies changed, because the DOM effect never tracked the reads inside
+  the call. Replaced the `canProceed()` function with a top-level reactive
+  statement `$: canProceed = …` and bound `disabled={!canProceed}`, so the
+  assignment effect and the DOM effect share one reactive variable and the
+  attribute re-applies on change (`web/src/routes/migrations/new/+page.svelte`).
+
 ### Added — Tests
 - `TestKnownHostsCallbackStripsPortFromHostname` reproduces the broken lookup
   (trust stored under bare host, callback invoked with `host:port`) and proves
   the fix recognizes the trusted host.
 - `TestListMigrationsHandlesNullError` inserts a migration with a NULL error
   column and proves `ListMigrations` returns it (HTTP 500 before the fix).
+- `TestUnlockPersistsAndRestoresAcrossRestart` simulates a restart (second
+  `Service` + DB handle, same data dir) and proves `Restore()` comes up
+  unlocked with the same session token and a usable AES key.
+- `TestLockClearsPersistence` proves `Lock` removes the persisted unlock so a
+  fresh instance stays locked after restart.
 
 ### Verification
-- `go test ./internal/mod/ssh/... ./internal/mod/migration/...` pass (including
-  the new tests); `go build ./...` and `go vet ./...` are clean. Verified live:
+- `go test ./internal/mod/ssh/... ./internal/mod/migration/... ./internal/mod/auth/...`
+  pass (including the new tests); `go build ./...` and `go vet ./...` are clean;
+  `npm run check` is clean (0 errors, 0 warnings). Verified live:
   a new server's Test Connection fails with "host key not trusted", the Trust
   button appears, and the retry succeeds; after the ListMigrations fix the
   engine logs "Recovered 2 interrupted migration(s)" at startup with no
-  NULL-scan warning, and `GET /api/migrations` no longer 500s.
+  NULL-scan warning, and `GET /api/migrations` no longer 500s. After the
+  session fix, restarting `meshium` leaves the browser logged in. The
+  new-migration fix was confirmed at the compiled level: the reactive
+  assignment effect tracks `step`/`sourceServerId`/`targetServerId`/
+  `selectedCategories` and the DOM effect reads the same reactive variable, so
+  `disabled` re-applies when a server is selected.
 
 ---
 
