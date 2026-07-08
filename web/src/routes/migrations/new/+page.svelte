@@ -25,6 +25,21 @@
   $: planDone = planMessages.some(m => m.step === 'plan' && m.status === 'complete');
   $: planFailed = planMessages.some(m => m.status === 'error') && !planDone;
 
+  // Reactive gate for the Next button. Declared as a top-level reactive
+  // statement (not a function called in the template) so Svelte 5's legacy
+  // mode tracks sourceServerId/targetServerId/selectedCategories as
+  // dependencies and re-applies the `disabled` attribute to the DOM when they
+  // change. Calling a function in disabled={!canProceed()} did not reliably
+  // re-evaluate, leaving the button disabled even after a server was selected.
+  $: canProceed =
+    step === 1
+      ? sourceServerId > 0
+      : step === 2
+        ? targetServerId > 0 && targetServerId !== sourceServerId
+        : step === 3
+          ? selectedCategories.length > 0
+          : true;
+
   const categories = [
     { id: 'packages', label: 'Packages', icon: Package, desc: 'Installed packages (apt, dnf, pacman, etc.)' },
     { id: 'configs', label: 'Config Files', icon: FileCode, desc: 'Configuration files from /etc/ and custom paths' },
@@ -60,15 +75,6 @@
   onDestroy(() => {
     ws?.close();
   });
-
-  function canProceed(): boolean {
-    switch (step) {
-      case 1: return sourceServerId > 0;
-      case 2: return targetServerId > 0 && targetServerId !== sourceServerId;
-      case 3: return selectedCategories.length > 0;
-      default: return true;
-    }
-  }
 
   function nextStep() {
     if (step < 4) step++;
@@ -347,7 +353,7 @@
       </button>
       <button
         on:click={nextStep}
-        disabled={!canProceed()}
+        disabled={!canProceed}
         class="flex items-center gap-1 px-4 py-2 bg-accent text-accent-fg rounded-lg text-sm hover:bg-accent-hover disabled:opacity-50"
       >
         Next <ArrowRight size={16} />
