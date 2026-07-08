@@ -121,9 +121,15 @@ func (r *sqliteRepo) ListMigrations() ([]Migration, error) {
 		var m Migration
 		var categoriesJSON string
 		var completedAt sql.NullString
-		if err := rows.Scan(&m.ID, &m.SourceID, &m.TargetID, &categoriesJSON, &m.Status, &m.Error, &m.CreatedAt, &completedAt); err != nil {
+		var errorStr sql.NullString
+		// The error column is NULL for migrations that never failed; scanning it
+		// directly into a string fails with "converting NULL to string". Scan
+		// into sql.NullString and let NullString.String yield "" when invalid —
+		// matching GetMigration above.
+		if err := rows.Scan(&m.ID, &m.SourceID, &m.TargetID, &categoriesJSON, &m.Status, &errorStr, &m.CreatedAt, &completedAt); err != nil {
 			return nil, err
 		}
+		m.Error = errorStr.String
 		if err := json.Unmarshal([]byte(categoriesJSON), &m.Categories); err != nil {
 			return nil, fmt.Errorf("unmarshal migration categories: %w", err)
 		}
