@@ -135,6 +135,13 @@ func (s *KnownHostsStore) Save(host string, port int, key string, serverID int) 
 // The serverID associates the host key with the server record.
 func (s *KnownHostsStore) MakeHostKeyCallback(serverID int) ssh.HostKeyCallback {
 	return func(hostname string, remote net.Addr, key ssh.PublicKey) error {
+		// The SSH library passes hostname verbatim as dialed, i.e. "host:port"
+		// when the client was given a host:port address. TrustHostKey stores the
+		// key under the bare host (see Save), so strip the port here to match.
+		if h, _, err := net.SplitHostPort(hostname); err == nil {
+			hostname = h
+		}
+
 		port := 22
 		if tcpAddr, ok := remote.(*net.TCPAddr); ok {
 			port = tcpAddr.Port

@@ -106,6 +106,25 @@ func TestKnownHostsMismatchedHostKeyReturnsMismatch(t *testing.T) {
 	}
 }
 
+// Reproduces the first-connection failure: TrustHostKey stores the key under
+// the bare host (Save(host, port)), but the SSH library invokes the callback
+// with hostname as "host:port". The callback must strip the port to match.
+// Before the fix this returned ErrHostKeyNotTrusted after trusting.
+func TestKnownHostsCallbackStripsPortFromHostname(t *testing.T) {
+	store, d := newKnownHostsTestStore(t)
+	defer d.Close()
+
+	keyString, pubKey := makeTestAuthorizedKey(t)
+	if err := store.Save("example.com", 2222, keyString, 9); err != nil {
+		t.Fatalf("Save failed: %v", err)
+	}
+
+	callback := store.MakeHostKeyCallback(9)
+	if err := callback("example.com:2222", &net.TCPAddr{IP: net.ParseIP("127.0.0.1"), Port: 2222}, pubKey); err != nil {
+		t.Fatalf("callback rejected host key addressed as host:port: %v", err)
+	}
+}
+
 func TestKnownHostsTrustHostKeySavesAndReturnsFingerprint(t *testing.T) {
 	store, d := newKnownHostsTestStore(t)
 	defer d.Close()

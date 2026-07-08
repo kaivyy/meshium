@@ -5,6 +5,43 @@ All notable changes to Meshium are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.5.0-beta.5] — 2026-07-08
+
+Host-key trust fix. This release repairs first-connection trust, which was
+broken in beta.4: clicking **Trust host key & retry** trusted the host, but the
+subsequent connection test still failed with "host key not trusted" because the
+backend looked the key up by a `host:port` string while it had been stored under
+the bare host. The connection test could never succeed on a brand-new server.
+
+This is still a **pre-release / beta** — not production-ready or
+enterprise-grade, and no such claim is made.
+
+### Fixed — Host-key trust on first connection
+- **Known-hosts lookup strips the port from the hostname.** The SSH library
+  invokes the host-key callback with `hostname` as `host:port`, but
+  `TrustHostKey` stores the key under the bare host. `MakeHostKeyCallback` now
+  strips the port before lookup so a trusted host is actually recognized on the
+  next connection (`internal/mod/ssh/knownhosts.go`).
+- **UI Trust button added.** The first-connection failure in the server detail
+  view now shows a **Trust host key & retry** button that calls the existing
+  `POST /api/servers/{id}/trust-host` endpoint and re-runs the connection test.
+  Previously the endpoint existed but no UI invoked it, so a new server could
+  only be trusted out-of-band (`web/src/routes/servers/[id]/+page.svelte`,
+  `web/src/lib/stores/servers.ts`).
+
+### Added — Tests
+- `TestKnownHostsCallbackStripsPortFromHostname` reproduces the broken lookup
+  (trust stored under bare host, callback invoked with `host:port`) and proves
+  the fix recognizes the trusted host.
+
+### Verification
+- `go test ./internal/mod/ssh/...` passes (including the new port-strip test);
+  `go build ./...` and `go vet ./...` are clean. Verified live: a new server's
+  Test Connection fails with "host key not trusted", the Trust button appears,
+  and the retry succeeds.
+
+---
+
 ## [1.5.0-beta.4] — 2026-07-08
 
 Migration-correctness beta. This release does not add migration features — it
