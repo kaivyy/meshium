@@ -254,6 +254,10 @@ export async function testAuth(serverId: number): Promise<AuthTestResult> {
   return api.post(`/servers/${serverId}/test-auth`) as Promise<AuthTestResult>;
 }
 
+export async function trustHost(serverId: number): Promise<FingerprintResult> {
+  return api.post(`/servers/${serverId}/trust-host`) as Promise<FingerprintResult>;
+}
+
 export async function getConnectionHistory(serverId: number, limit: number = 100): Promise<ConnectionHistoryEntry[]> {
   return api.get(`/servers/${serverId}/history?limit=${limit}`) as Promise<ConnectionHistoryEntry[]>;
 }

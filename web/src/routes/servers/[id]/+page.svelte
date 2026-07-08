@@ -9,7 +9,7 @@
   import { Badge, Card, DropdownMenu, EmptyState, Spinner } from '$lib/components/ui';
   import { formatBytes, formatDateTime, formatDuration, formatRelativeTime } from '$lib/utils/format';
   import { toast } from '$lib/stores/toast';
-  import { deleteServer, type Server, installKey, verifyKey, rotateKey, getFingerprint, testAuth, getConnectionHistory, getConnectionMetrics, removePassword, clearSSHKey, type KeyInstallResult, type KeyVerifyResult, type KeyRotationResult, type FingerprintResult, type AuthTestResult, type ConnectionHistoryEntry, type ConnectionMetrics } from '$lib/stores/servers';
+  import { deleteServer, type Server, installKey, verifyKey, rotateKey, getFingerprint, testAuth, trustHost, getConnectionHistory, getConnectionMetrics, removePassword, clearSSHKey, type KeyInstallResult, type KeyVerifyResult, type KeyRotationResult, type FingerprintResult, type AuthTestResult, type ConnectionHistoryEntry, type ConnectionMetrics } from '$lib/stores/servers';
   import { loadSnapshot as loadSnapshotFromStore, invalidateSnapshot } from '$lib/stores/snapshots';
   import { getSnapshot as getCachedSnapshot } from '$lib/stores/snapshots';
 
@@ -26,6 +26,7 @@
   let connecting = $state(false);
   let wsError = $state('');
   let wsSteps = $state<{ step: string; status: string; value?: string; error?: string }[]>([]);
+  let trusting = $state(false);
   let activeTab = $state<TabKey>('overview');
   let showOnlyActive = $state(false);
   let ws: WebSocket | null = null;
@@ -214,6 +215,28 @@
         }
       }
     );
+  }
+
+  // A server's host key is untrusted on first connection. The connection test
+  // refuses with "host key not trusted"; this trusts the presented key
+  // (recorded as a verified known host) and re-runs the test. Trust is explicit
+  // — it captures the key the server actually presents, exactly like ssh's
+  // TOFU, and is the only path to mark an unknown host as verified.
+  async function handleTrustHost() {
+    const id = serverId;
+    if (!Number.isFinite(id) || trusting) return;
+    trusting = true;
+    try {
+      await trustHost(id);
+      wsError = '';
+      toast.success('Host key trusted — re-running connection test');
+      await handleConnect();
+    } catch (e) {
+      wsError = e instanceof Error ? e.message : 'Failed to trust host key';
+      toast.error(wsError);
+    } finally {
+      trusting = false;
+    }
   }
 
   async function handleRescan() {
@@ -595,6 +618,20 @@
               <div class="mb-4 rounded-xl border border-error bg-error/10 px-4 py-3 text-sm text-error" role="alert">
                 <p class="font-semibold text-error">Connection test failed</p>
                 <p class="mt-1">{wsError}</p>
+                {#if wsError.includes('host key not trusted')}
+                  <button
+                    type="button"
+                    onclick={handleTrustHost}
+                    disabled={trusting}
+                    class="mt-3 inline-flex items-center justify-center gap-2 rounded-lg bg-accent px-4 py-2 text-sm font-medium text-accent-fg transition hover:bg-accent-hover disabled:cursor-not-allowed disabled:opacity-50"
+                  >
+                    {trusting ? 'Trusting...' : 'Trust host key & retry'}
+                  </button>
+                  <p class="mt-2 text-xs text-fg-subtle">
+                    First connection to this host. Trusting records the key the server presents as a verified
+                    known host (same as ssh's trust-on-first-use). Only do this on a network you control.
+                  </p>
+                {/if}
               </div>
             {/if}
 
