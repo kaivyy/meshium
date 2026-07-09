@@ -390,9 +390,17 @@ func (e *Executor) dryRunDocker(ctx context.Context, ssh SSHExecuter, data Categ
 		return nil
 	}
 
-	// Check if Docker is installed
-	stdout, _, exitCode, _ := ssh.ExecContext(ctx, "which docker 2>/dev/null")
-	if exitCode != 0 || strings.TrimSpace(stdout) == "" {
+	// One SSH round-trip for the whole docker pass: detect install + list images
+	// and containers in a single shell command. The two daemon calls (images,
+	// ps) are the slow part on a stalled daemon — fusing them means one
+	// command-timeout instead of two sequential ones. Daemon-down degrades to
+	// empty sections (stderr suppressed), so everything flags as "add" — same
+	// behavior as the prior per-command path.
+	const dockerProbe = "command -v docker >/dev/null 2>&1 || echo NO_DOCKER; " +
+		"echo ---IMAGES---; docker images --format '{{.Repository}}:{{.Tag}}' 2>/dev/null; " +
+		"echo ---CONTAINERS---; docker ps -a --format '{{.Names}}' 2>/dev/null"
+	stdout, _, _, _ := ssh.ExecContext(ctx, dockerProbe)
+	if strings.Contains(stdout, "NO_DOCKER") {
 		return []DryRunChange{
 			{
 				Type:     "add",
@@ -402,13 +410,29 @@ func (e *Executor) dryRunDocker(ctx context.Context, ssh SSHExecuter, data Categ
 		}
 	}
 
-	// Get existing images on target
-	stdout, _, _, _ = ssh.ExecContext(ctx, "docker images --format '{{.Repository}}:{{.Tag}}' 2>/dev/null")
+	// Split stdout into the IMAGES and CONTAINERS sections.
 	existingImages := make(map[string]bool)
-	for _, line := range strings.Split(strings.TrimSpace(stdout), "\n") {
+	existingContainers := make(map[string]bool)
+	section := ""
+	for _, line := range strings.Split(stdout, "\n") {
 		line = strings.TrimSpace(line)
-		if line != "" && line != "<none>:<none>" {
-			existingImages[line] = true
+		switch line {
+		case "---IMAGES---":
+			section = "images"
+			continue
+		case "---CONTAINERS---":
+			section = "containers"
+			continue
+		case "":
+			continue
+		}
+		switch section {
+		case "images":
+			if line != "<none>:<none>" {
+				existingImages[line] = true
+			}
+		case "containers":
+			existingContainers[line] = true
 		}
 	}
 
@@ -420,16 +444,6 @@ func (e *Executor) dryRunDocker(ctx context.Context, ssh SSHExecuter, data Categ
 				Resource: "docker:image:" + image,
 				Detail:   fmt.Sprintf("Image %s will be pulled from a registry (locally-built images not pushed to a reachable registry cannot be migrated)", image),
 			})
-		}
-	}
-
-	// Get existing containers
-	stdout, _, _, _ = ssh.ExecContext(ctx, "docker ps -a --format '{{.Names}}' 2>/dev/null")
-	existingContainers := make(map[string]bool)
-	for _, line := range strings.Split(strings.TrimSpace(stdout), "\n") {
-		line = strings.TrimSpace(line)
-		if line != "" {
-			existingContainers[line] = true
 		}
 	}
 

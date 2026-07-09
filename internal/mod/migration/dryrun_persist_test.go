@@ -5,6 +5,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
+	"strings"
 	"testing"
 )
 
@@ -162,6 +163,73 @@ func TestDryRunPersistsResultForRefresh(t *testing.T) {
 	}
 	if restored2.Summary.TotalChanges != 2 {
 		t.Fatalf("expected latest dry run (total=2), got %d", restored2.Summary.TotalChanges)
+	}
+}
+
+// dryRunDocker must fuse install-check + images + containers into ONE SSH
+// round-trip (the two daemon calls are the slow part on a stalled daemon).
+// Verifies single command, section parsing, and the NO_DOCKER short-circuit.
+func TestDryRunDockerSingleProbeCommand(t *testing.T) {
+	ssh := newMockSSH()
+
+	// Docker present; one image and one container already on target.
+	probe := "command -v docker >/dev/null 2>&1 || echo NO_DOCKER; echo ---IMAGES---; docker images --format '{{.Repository}}:{{.Tag}}' 2>/dev/null; echo ---CONTAINERS---; docker ps -a --format '{{.Names}}' 2>/dev/null"
+	ssh.execOutput[probe] = "---IMAGES---\nnginx:1.25\n---CONTAINERS---\nweb\n"
+
+	dd := DockerData{
+		Images:     []string{"nginx:1.25", "redis:7"}, // nginx present, redis missing -> add
+		Containers: []DockerContainer{
+			{Name: "web", Image: "nginx:1.25"}, // present -> modify
+			{Name: "db", Image: "redis:7"},     // missing -> add
+		},
+	}
+	data := CategoryData{Data: json.RawMessage(mustJSON(dd))}
+
+	e := &Executor{}
+	changes := e.dryRunDocker(context.Background(), ssh, data)
+
+	var got []string
+	for _, c := range changes {
+		got = append(got, c.Resource+":"+c.Type)
+	}
+	if !containsStrExact(got, "docker:image:redis:7:add") {
+		t.Fatalf("missing image add; got %v", got)
+	}
+	if !containsStrExact(got, "docker:container:db:add") {
+		t.Fatalf("missing container add; got %v", got)
+	}
+	if !containsStrExact(got, "docker:container:web:modify") {
+		t.Fatalf("existing container must be modify; got %v", got)
+	}
+	// nginx:1.25 already present -> must NOT be flagged as add.
+	if containsStrExact(got, "docker:image:nginx:1.25:add") {
+		t.Fatalf("existing image re-flagged; got %v", got)
+	}
+	// Decisive: exactly one docker probe command, not three.
+	dockerCmds := 0
+	for _, c := range ssh.commands {
+		if strings.Contains(c, "docker") || strings.Contains(c, "NO_DOCKER") {
+			dockerCmds++
+		}
+	}
+	if dockerCmds != 1 {
+		t.Fatalf("expected a single fused docker probe, got %d docker-related commands: %v", dockerCmds, ssh.commands)
+	}
+}
+
+// NO_DOCKER short-circuit: docker absent -> exactly one add (install), no
+// daemon calls attempted.
+func TestDryRunDockerNotInstalledShortCircuits(t *testing.T) {
+	ssh := newMockSSH()
+	probe := "command -v docker >/dev/null 2>&1 || echo NO_DOCKER; echo ---IMAGES---; docker images --format '{{.Repository}}:{{.Tag}}' 2>/dev/null; echo ---CONTAINERS---; docker ps -a --format '{{.Names}}' 2>/dev/null"
+	ssh.execOutput[probe] = "NO_DOCKER\n"
+
+	dd := DockerData{Images: []string{"nginx:1.25"}}
+	data := CategoryData{Data: json.RawMessage(mustJSON(dd))}
+
+	changes := (&Executor{}).dryRunDocker(context.Background(), ssh, data)
+	if len(changes) != 1 || changes[0].Resource != "docker:install" {
+		t.Fatalf("expected single docker:install, got %+v", changes)
 	}
 }
 
