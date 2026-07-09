@@ -40,6 +40,14 @@ var configExclusions = []string{
 	"/etc/default/grub",
 }
 
+// maxConfigFileSize is the per-file cap for collected config content. A plan
+// stores every file's full body in one migration_steps row, so an unbounded
+// /etc scan writes ~100MB+ per plan (logs, caches, state DBs in /etc) and
+// bloats SQLite. 1MiB covers real config files; anything larger is skipped.
+// ponytail: raise or make per-path configurable if large config files must
+// be migrated verbatim.
+const maxConfigFileSize = 1 << 20 // 1 MiB
+
 // isExcluded returns true if the given path matches any exclusion entry.
 // Matches both exact file paths and directory prefixes (ending with /).
 func isExcluded(path string) bool {
@@ -91,11 +99,13 @@ func (c *ConfigsCollector) Collect(ctx context.Context, ssh SSHExecuter) (Catego
 			cleanPath = "/etc"
 		}
 
-		// Build a find command that excludes OS-critical files, then tar the result.
-		// This downloads ALL files in a single SSH round-trip via tar stream.
+		// Build a find command that excludes OS-critical files and oversized
+		// files, then tar the result. The -size cap keeps logs/caches/state DBs
+		// out of the archive so the plan step doesn't pull and store ~100MB+
+		// per /etc scan. parseTarArchive re-checks the size as a guard.
 		excludeArgs := buildExcludeArgs()
 		cmd := fmt.Sprintf(
-			`find %s -type f %s 2>/dev/null | tar -cf - -T - 2>/dev/null | base64`,
+			`find %s -type f -size -2M %s 2>/dev/null | tar -cf - -T - 2>/dev/null | base64`,
 			shared.ShellQuote(cleanPath), excludeArgs,
 		)
 
@@ -177,6 +187,10 @@ func base64Decode(s string) ([]byte, error) {
 }
 
 // parseTarArchive parses a tar archive in memory and returns map[path]content.
+// Files larger than maxConfigFileSize are skipped: a plan stores every config's
+// full content in one migration_steps row, so without a cap a single /etc scan
+// writes ~100MB+ per plan and bloats the DB (and stalls the step). Large files
+// in /etc are almost always logs/caches/state DBs, not real config.
 func parseTarArchive(data []byte) (map[string][]byte, error) {
 	files := make(map[string][]byte)
 	r := tar.NewReader(bytes.NewReader(data))
@@ -189,6 +203,11 @@ func parseTarArchive(data []byte) (map[string][]byte, error) {
 			return files, err
 		}
 		if header.Typeflag != tar.TypeReg {
+			continue
+		}
+		if header.Size > maxConfigFileSize {
+			// Discard the body so the tar reader stays aligned.
+			io.CopyN(io.Discard, r, header.Size)
 			continue
 		}
 		content, err := io.ReadAll(r)
