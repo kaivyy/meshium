@@ -143,8 +143,13 @@ func (c *DockerCollector) Collect(ctx context.Context, ssh SSHExecuter) (Categor
 		}
 	}
 
-	// Collect docker-compose files
-	stdout, _, _, _ = ssh.ExecContext(ctx, `find / -maxdepth 5 -name 'docker-compose*.yml' -o -name 'docker-compose*.yaml' -o -name 'compose*.yml' -o -name 'compose*.yaml' 2>/dev/null | head -20`)
+	// Collect docker-compose files. Search only common deploy roots — `find /`
+	// walks the whole filesystem (incl. /proc, /sys, remote mounts) and can take
+	// minutes on a busy box, which stalls the whole plan step. The parentheses
+	// are required: without them `-o` binds looser than the trailing pipe, so
+	// `head -20` only limits the last alternative and the first match set runs
+	// unbounded.
+	stdout, _, _, _ = ssh.ExecContext(ctx, `find /root /home /opt /srv /etc /var -maxdepth 4 \( -name 'docker-compose*.yml' -o -name 'docker-compose*.yaml' -o -name 'compose*.yml' -o -name 'compose*.yaml' \) 2>/dev/null | head -20`)
 	for _, filePath := range strings.Split(strings.TrimSpace(stdout), "\n") {
 		filePath = strings.TrimSpace(filePath)
 		if filePath == "" {

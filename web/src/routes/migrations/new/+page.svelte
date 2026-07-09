@@ -123,7 +123,16 @@
           }, 1000);
         }
       },
-      () => { planning = false; },
+      () => {
+        // WS closed. If we never got `complete`, the plan may still have been
+        // committed server-side (CreateMigration runs before collection), so a
+        // silent reset to "Create" would hide it and risk a duplicate. Tell the
+        // user to check the list instead of pretending nothing happened.
+        planning = false;
+        if (!planMessages.some(m => m.step === 'plan' && m.status === 'complete')) {
+          toast.warning('Connection closed mid-plan. Check the migration list — the plan may already exist.');
+        }
+      },
       () => {
         planning = false;
         toast.error('Migration planning failed');
