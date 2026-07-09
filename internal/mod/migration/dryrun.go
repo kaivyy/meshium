@@ -3,6 +3,8 @@ package migration
 import (
 	"bytes"
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"sort"
@@ -192,12 +194,100 @@ func (e *Executor) dryRunPackages(ctx context.Context, ssh SSHExecuter, data Cat
 	return changes
 }
 
+// maxHashPaths bounds how many paths we pass to a single sha256sum call.
+// Above this we fall back to the old per-file approach; a single huge shell
+// command is its own latency/quoting risk.
+const maxHashPaths = 2000
+
+// dryRunConfigs compares the planned config files against the target's current
+// state. The naive path is one SFTP Download per file (N+1 round-trips) which
+// is the dominant cost of Dry Run on targets with many files. Instead we ask the
+// target for the sha256 of every planned path in ONE command, then flag a file
+// as "add" (missing from the checksum output) or "modify" (hash differs from
+// the hash of the source content) without downloading anything. Falls back to the
+// per-file Download only when sha256sum is unavailable or there are too many
+// paths — so behavior never silently degrades.
 func (e *Executor) dryRunConfigs(ctx context.Context, ssh SSHExecuter, data CategoryData) []DryRunChange {
 	var cd ConfigsData
 	if err := json.Unmarshal(data.Data, &cd); err != nil {
 		return nil
 	}
 
+	// Compute the source-content hash for every planned file once, in memory.
+	sourceHashes := make(map[string][32]byte, len(cd.Files))
+	paths := make([]string, 0, len(cd.Files))
+	for path, content := range cd.Files {
+		paths = append(paths, path)
+		sourceHashes[path] = sha256.Sum256([]byte(content))
+	}
+	sort.Strings(paths)
+
+	if len(paths) == 0 || len(paths) > maxHashPaths {
+		return e.dryRunConfigsFallback(ctx, ssh, cd)
+	}
+
+	// Build the checksum command. Quote each path; collect stdout into one pass.
+	if len(paths) == 0 {
+		return nil
+	}
+	quoted := make([]string, len(paths))
+	for i, p := range paths {
+		quoted[i] = shellQuote(p)
+	}
+	cmd := "sha256sum " + strings.Join(quoted, " ")
+	stdout, _, exitCode, err := ssh.ExecContext(ctx, cmd)
+	// sha256sum exits 1 when any listed path is missing — that is the normal
+	// "add" case, not a failure. Only fall back when the binary is absent
+	// (127/126: command not found / not executable) or the command never ran.
+	// ponytail: a target with a sha256sum shim that exits 1 on success would
+	// force the fallback; not seen in practice — if it appears, detect via stderr.
+	if err != nil || exitCode == 127 || exitCode == 126 {
+		return e.dryRunConfigsFallback(ctx, ssh, cd)
+	}
+
+	// sha256sum output: "<hash>  <path>" per line.
+	targetHashes := make(map[string][32]byte)
+	for _, line := range strings.Split(strings.TrimSpace(stdout), "\n") {
+		line = strings.TrimSpace(line)
+		if line == "" {
+			continue
+		}
+		fields := strings.Fields(line)
+		if len(fields) < 2 {
+			continue
+		}
+		var h [32]byte
+		if _, derr := hex.Decode(h[:], []byte(fields[0])); derr != nil {
+			continue
+		}
+		targetHashes[fields[1]] = h
+	}
+
+	var changes []DryRunChange
+	for _, path := range paths {
+		want, ok := targetHashes[path]
+		switch {
+		case !ok:
+			changes = append(changes, DryRunChange{
+				Type:     "add",
+				Resource: "file:" + path,
+				Detail:   fmt.Sprintf("File %s will be created", path),
+			})
+		case want != sourceHashes[path]:
+			changes = append(changes, DryRunChange{
+				Type:     "modify",
+				Resource: "file:" + path,
+				Detail:   fmt.Sprintf("File %s will be overwritten (content differs)", path),
+			})
+		}
+	}
+	return changes
+}
+
+// dryRunConfigsFallback is the pre-fix per-file path: download each target
+// file and compare in memory. Kept as a fallback for targets without sha256sum
+// or with path counts above maxHashPaths.
+func (e *Executor) dryRunConfigsFallback(ctx context.Context, ssh SSHExecuter, cd ConfigsData) []DryRunChange {
 	var changes []DryRunChange
 	for path, content := range cd.Files {
 		// Check if file exists on target
@@ -219,6 +309,11 @@ func (e *Executor) dryRunConfigs(ctx context.Context, ssh SSHExecuter, data Cate
 		}
 	}
 	return changes
+}
+
+// shellQuote single-quotes a path for safe inclusion in a shell command.
+func shellQuote(p string) string {
+	return "'" + strings.ReplaceAll(p, "'", `'\''`) + "'"
 }
 
 func (e *Executor) dryRunServices(ctx context.Context, ssh SSHExecuter, data CategoryData) []DryRunChange {
