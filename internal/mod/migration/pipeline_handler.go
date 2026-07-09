@@ -74,6 +74,7 @@ func (h *PipelineHandler) RegisterRoutes(mux *http.ServeMux) {
 
 	// WebSocket endpoints
 	mux.HandleFunc("/ws/pipeline/", h.handlePipelineWS)
+	mux.HandleFunc("/ws/compatibility/", h.handleCompatibilityWS)
 }
 
 // --- REST: Create Pipeline Migration ---
@@ -655,7 +656,7 @@ func (h *PipelineHandler) handleCompatibilityByID(w http.ResponseWriter, r *http
 			}
 		}
 
-		results := h.runCompatibilityPreflight(r.Context(), id)
+		results := h.runCompatibilityPreflight(r.Context(), id, nil)
 		for _, result := range results {
 			_, _ = h.repo.CreateVerificationResult(r.Context(), VerificationResult{
 				MigrationID:      id,
@@ -678,6 +679,60 @@ func compatibilityErrorMessage(result CompatibilityCheckResult) string {
 		return ""
 	}
 	return result.Message
+}
+
+// handleCompatibilityWS streams per-check progress over a WebSocket while the
+// compatibility preflight runs, then signals completion. Mirrors handleDryRunWS.
+// The result itself is persisted to verification_result and surfaced via
+// loadSession (getStoredCompatibilityResults), so the WS carries only progress.
+func (h *PipelineHandler) handleCompatibilityWS(w http.ResponseWriter, r *http.Request) {
+	if h == nil || h.pipeline == nil {
+		http.Error(w, "service unavailable", http.StatusServiceUnavailable)
+		return
+	}
+
+	path := strings.TrimPrefix(r.URL.Path, "/ws/compatibility/")
+	id, err := strconv.Atoi(strings.TrimSpace(path))
+	if err != nil {
+		http.Error(w, "invalid migration ID", http.StatusBadRequest)
+		return
+	}
+
+	responseHeader := http.Header{}
+	if proto := auth.WebSocketSubprotocolToken(r); proto != "" {
+		responseHeader.Set("Sec-WebSocket-Protocol", proto)
+	}
+	conn, err := h.upgrader.Upgrade(w, r, responseHeader)
+	if err != nil {
+		log.Printf("websocket upgrade failed: %v", err)
+		return
+	}
+	defer conn.Close()
+
+	ctx, cancel := context.WithCancel(r.Context())
+	defer cancel()
+
+	writeMsg := func(msg WSMessage) {
+		if writeErr := conn.WriteJSON(msg); writeErr != nil {
+			log.Printf("websocket write failed: %v", writeErr)
+			cancel()
+		}
+	}
+
+	results := h.runCompatibilityPreflight(ctx, id, writeMsg)
+	for _, result := range results {
+		_, _ = h.repo.CreateVerificationResult(ctx, VerificationResult{
+			MigrationID:      id,
+			VerificationType: "compatibility",
+			Target:           result.CheckName,
+			Expected:         string(result.Severity),
+			Actual:           result.Message,
+			Passed:           result.Passed,
+			ErrorMessage:     compatibilityErrorMessage(result),
+		})
+	}
+
+	writeMsg(WSMessage{Step: "compat", Status: "complete", Value: fmt.Sprintf("Completed %d checks", len(results))})
 }
 
 func (h *PipelineHandler) getStoredCompatibilityResults(id int) ([]CompatibilityCheckResult, error) {
@@ -708,7 +763,11 @@ func (h *PipelineHandler) getStoredCompatibilityResults(id int) ([]Compatibility
 	return results, nil
 }
 
-func (h *PipelineHandler) runCompatibilityPreflight(ctx context.Context, id int) []CompatibilityCheckResult {
+func (h *PipelineHandler) runCompatibilityPreflight(ctx context.Context, id int, onProgress StepCallback) []CompatibilityCheckResult {
+	if onProgress == nil {
+		onProgress = func(WSMessage) {}
+	}
+	onProgress(WSMessage{Step: "compat", Status: "progress", Value: "Loading migration..."})
 	migration, err := h.baseRepo.GetMigration(id)
 	if err != nil || migration == nil {
 		return []CompatibilityCheckResult{{
@@ -775,7 +834,8 @@ func (h *PipelineHandler) runCompatibilityPreflight(ctx context.Context, id int)
 		return results
 	}
 
-	sshResults, err := NewCompatibilityEngine(sourceSSH, targetSSH, h.repo).CheckCompatibility(ctx, id)
+	onProgress(WSMessage{Step: "compat", Status: "progress", Value: "Running server compatibility checks..."})
+	sshResults, err := NewCompatibilityEngine(sourceSSH, targetSSH, h.repo).CheckCompatibility(ctx, id, onProgress)
 	if err != nil {
 		results = append(results, CompatibilityCheckResult{
 			CheckName: "server_compatibility",

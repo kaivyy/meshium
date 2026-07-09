@@ -12,7 +12,7 @@
     type StrategySelection
   } from '$lib/api/pipeline';
   import { APIError } from '$lib/api/client';
-  import { migrationApi, type DryRunResult, wsDryRun, type WSMessage } from '$lib/api/migrations';
+  import { migrationApi, type DryRunResult, wsDryRun, wsCompatibility, type WSMessage } from '$lib/api/migrations';
   import { toast } from '$lib/stores/toast';
   import PlannerView from '$lib/components/PlannerView.svelte';
   import LiveMonitor from '$lib/components/LiveMonitor.svelte';
@@ -48,6 +48,10 @@
   let dryRunProgress: { category: string; label: string; status: 'pending' | 'running' | 'done' | 'error' }[] = [];
   let dryRunCaption = '';
   let dryRunWs: WebSocket | null = null;
+  // Live compatibility-check progress: one row per check as the backend runs it.
+  let compatProgress: { key: string; label: string; status: 'pending' | 'running' | 'done' | 'error' }[] = [];
+  let compatCaption = '';
+  let compatWs: WebSocket | null = null;
   let plannerResult: PlannerResult | null = null;
   let plannerLoading = false;
   let migrationEvents: MigrationEvent[] = [];
@@ -98,6 +102,7 @@
   onDestroy(() => {
     wsControl?.close();
     dryRunWs?.close();
+    compatWs?.close();
     if (observationTimer) clearInterval(observationTimer);
   });
 
@@ -421,19 +426,75 @@
     } finally { actionLoading = false; }
   }
 
+  // Pretty label for a compatibility-check key (e.g. "docker_version" -> "Docker Version").
+  function compatLabel(key: string): string {
+    return key.split('_').map(w => w.charAt(0).toUpperCase() + w.slice(1)).join(' ');
+  }
+
+  // Upsert a check row in the live compatibility progress checklist.
+  function setCompatCheck(key: string, status: 'pending' | 'running' | 'done' | 'error') {
+    const label = compatLabel(key);
+    const existing = compatProgress.find(r => r.key === key);
+    if (existing) {
+      existing.status = status;
+      compatProgress = [...compatProgress];
+    } else {
+      compatProgress = [...compatProgress, { key, label, status }];
+    }
+  }
+
   async function runCompatibilityCheck() {
     actionLoading = true;
     stepStatuses[1] = 'running';
-    try {
-      compatibilityResults = await pipelineApi.checkCompatibility(migrationId);
-      const hasCritical = compatibilityResults.some(r => r.severity === 'critical' && !r.passed);
-      stepStatuses[1] = hasCritical ? 'failed' : 'completed';
-      if (hasCritical) toast.error('Critical compatibility issues found');
-      else toast.success('Compatibility check passed');
-    } catch {
-      stepStatuses[1] = 'failed';
-      toast.error('Compatibility check failed');
-    } finally { actionLoading = false; }
+    compatibilityResults = [];
+    compatProgress = [];
+    compatCaption = 'Starting…';
+    let errored = false;
+
+    await new Promise<void>((resolve) => {
+      compatWs = wsCompatibility(
+        migrationId,
+        (msg: WSMessage) => {
+          if (msg.step === 'compat') {
+            if (msg.value) compatCaption = msg.value;
+            if (msg.status === 'error') { errored = true; toast.error(msg.error || 'Compatibility check failed'); }
+            if (msg.status === 'complete') compatCaption = 'Completed';
+            return;
+          }
+          if (msg.step.startsWith('compat:')) {
+            const key = msg.step.slice('compat:'.length);
+            if (msg.value) compatCaption = msg.value;
+            if (msg.status === 'progress') setCompatCheck(key, 'running');
+            else if (msg.status === 'success') setCompatCheck(key, 'done');
+            else if (msg.status === 'error') setCompatCheck(key, 'error');
+          }
+        },
+        async () => {
+          if (!errored) {
+            try {
+              await loadSession();
+              const hasCritical = compatibilityResults.some(r => r.severity === 'critical' && !r.passed);
+              stepStatuses[1] = hasCritical ? 'failed' : 'completed';
+              if (hasCritical) toast.error('Critical compatibility issues found');
+              else toast.success('Compatibility check passed');
+            } catch {
+              stepStatuses[1] = 'failed';
+              toast.error('Compatibility results could not be loaded');
+            }
+          }
+          actionLoading = false;
+          resolve();
+        },
+        () => {
+          errored = true;
+          stepStatuses[1] = 'failed';
+          toast.error('Compatibility check connection failed');
+          actionLoading = false;
+          resolve();
+        },
+      );
+    });
+    compatWs = null;
   }
 
   async function runRiskAssessment() {
@@ -1034,6 +1095,29 @@
                 </div>
               {/each}
             </div>
+          {:else if actionLoading || compatProgress.length}
+            <!-- LIVE PROGRESS: per-check checklist built from the WS stream -->
+            <div class="space-y-2 mb-3">
+              {#each compatProgress as row (row.key)}
+                <div class="flex items-center gap-3 text-sm">
+                  {#if row.status === 'running'}
+                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" class="text-info animate-spin"><path d="M21 12a9 9 0 1 1-6.219-8.56"/></svg>
+                  {:else if row.status === 'done'}
+                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" class="text-success"><path d="M20 6 9 17l-5-5"/></svg>
+                  {:else if row.status === 'error'}
+                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" class="text-error"><circle cx="12" cy="12" r="10"/><line x1="15" y1="9" x2="9" y2="15"/><line x1="9" y1="9" x2="15" y2="15"/></svg>
+                  {:else}
+                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" class="text-fg-subtle"><circle cx="12" cy="12" r="10"/></svg>
+                  {/if}
+                  <span class={row.status === 'running' ? 'text-fg' : row.status === 'done' ? 'text-fg-muted' : row.status === 'error' ? 'text-error' : 'text-fg-subtle'}>
+                    {row.label}
+                  </span>
+                </div>
+              {/each}
+            </div>
+            {#if compatCaption}
+              <div class="text-xs text-fg-subtle text-center pb-2">{compatCaption}</div>
+            {/if}
           {:else}
             <div class="text-center py-8 text-fg-subtle"><p>No compatibility check results yet.</p></div>
           {/if}

@@ -43,33 +43,63 @@ type CompatibilityCheckResult struct {
 }
 
 // CheckCompatibility runs all compatibility checks between source and target.
-func (e *CompatibilityEngine) CheckCompatibility(ctx context.Context, migrationID int) ([]CompatibilityCheckResult, error) {
-	var results []CompatibilityCheckResult
+// onProgress, if non-nil, is called with "compat:<label>" progress/success
+// messages as each check runs — streamed over the /ws/compatibility/{id}
+// WebSocket so the UI shows a live checklist instead of a bare spinner.
+func (e *CompatibilityEngine) CheckCompatibility(ctx context.Context, migrationID int, onProgress StepCallback) ([]CompatibilityCheckResult, error) {
+	if onProgress == nil {
+		onProgress = func(WSMessage) {}
+	}
 
 	// Collect source info
+	onProgress(WSMessage{Step: "compat", Status: "progress", Value: "Collecting source server info..."})
 	sourceInfo, err := e.collectServerInfo(ctx, e.sourceSSH)
 	if err != nil {
 		return nil, fmt.Errorf("collect source info: %w", err)
 	}
 
 	// Collect target info
+	onProgress(WSMessage{Step: "compat", Status: "progress", Value: "Collecting target server info..."})
 	targetInfo, err := e.collectServerInfo(ctx, e.targetSSH)
 	if err != nil {
 		return nil, fmt.Errorf("collect target info: %w", err)
 	}
 
-	// Run checks
-	results = append(results, e.checkArchitecture(sourceInfo, targetInfo))
-	results = append(results, e.checkRAM(sourceInfo, targetInfo))
-	results = append(results, e.checkDisk(sourceInfo, targetInfo))
-	results = append(results, e.checkDockerVersion(sourceInfo, targetInfo))
-	results = append(results, e.checkKernel(sourceInfo, targetInfo))
-	results = append(results, e.checkPackageManager(sourceInfo, targetInfo))
-	results = append(results, e.checkTimezone(sourceInfo, targetInfo))
-	results = append(results, e.checkOpenSSL(sourceInfo, targetInfo))
-	results = append(results, e.checkDockerStorageDriver(sourceInfo, targetInfo))
-	results = append(results, e.checkNetworkPorts(ctx, sourceInfo))
-	results = append(results, e.checkSELinux(sourceInfo, targetInfo))
+	// checks is the ordered list of compatibility checks. Each entry runs one
+	// discrete check; the label drives both the progress message and the
+	// compat:<label> WS step name the frontend renders as a checklist row.
+	checks := []struct {
+		label string
+		run   func(*serverInfo, *serverInfo) CompatibilityCheckResult
+	}{
+		{"architecture", e.checkArchitecture},
+		{"ram", e.checkRAM},
+		{"disk", e.checkDisk},
+		{"docker_version", e.checkDockerVersion},
+		{"kernel", e.checkKernel},
+		{"package_manager", e.checkPackageManager},
+		{"timezone", e.checkTimezone},
+		{"openssl", e.checkOpenSSL},
+		{"docker_storage", e.checkDockerStorageDriver},
+		{"network_ports", func(s, _ *serverInfo) CompatibilityCheckResult { return e.checkNetworkPorts(ctx, s) }},
+		{"selinux", e.checkSELinux},
+	}
+
+	var results []CompatibilityCheckResult
+	for i, c := range checks {
+		onProgress(WSMessage{
+			Step:   "compat:" + c.label,
+			Status: "progress",
+			Value:  fmt.Sprintf("Checking %s (%d/%d)...", c.label, i+1, len(checks)),
+		})
+		r := c.run(sourceInfo, targetInfo)
+		results = append(results, r)
+		onProgress(WSMessage{
+			Step:   "compat:" + c.label,
+			Status: "success",
+			Value:  fmt.Sprintf("%s: %s", c.label, r.Message),
+		})
+	}
 
 	// Record verification results
 	for _, r := range results {

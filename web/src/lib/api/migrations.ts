@@ -153,3 +153,17 @@ export function wsDryRun(migrationId: number, onMessage: (msg: WSMessage) => voi
   ws.onerror = () => onError?.();
   return ws;
 }
+
+// wsCompatibility streams per-check progress for the compatibility preflight
+// over /ws/compatibility/{id}. Same shape as wsDryRun; the result itself is
+// persisted server-side and surfaced via loadSession on close.
+export function wsCompatibility(migrationId: number, onMessage: (msg: WSMessage) => void, onClose?: () => void, onError?: () => void): WebSocket {
+  const ws = createWs(`/ws/compatibility/${migrationId}`);
+  ws.onmessage = (event) => {
+    const msg = JSON.parse(event.data) as WSMessage;
+    onMessage(msg);
+  };
+  ws.onclose = () => onClose?.();
+  ws.onerror = () => onError?.();
+  return ws;
+}
