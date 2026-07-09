@@ -86,20 +86,32 @@ func (p *Planner) Plan(ctx context.Context, req PlanRequest, onProgress StepCall
 		Categories:     req.Categories,
 	}
 
-	// 4. Collect data for each category IN PARALLEL
+	// 4. Collect data for each category IN PARALLEL. Each goroutine persists its
+	// own collect step and streams its own progress/success/error as it finishes
+	// — so the UI shows per-category completion live (not five "Collecting…"
+	// lines then a long silence), and a category that finishes is recorded even
+	// if a sibling hangs. Previously all progress/success was emitted only after
+	// wg.Wait(), so a single slow collector stalled the whole step and left zero
+	// steps if it never returned.
 	type collectResult struct {
 		catName string
-		data    CategoryData
 		err     error
 	}
-
 	results := make([]collectResult, len(req.Categories))
 	var wg sync.WaitGroup
+	// onProgress writes to the WebSocket; conn.WriteJSON is not safe for
+	// concurrent use, so serialize progress emission across goroutines.
+	var progMu sync.Mutex
+	emit := func(msg WSMessage) {
+		progMu.Lock()
+		defer progMu.Unlock()
+		onProgress(msg)
+	}
 
 	for i, catName := range req.Categories {
 		// If the caller (e.g. the plan WebSocket) disconnected, stop launching
 		// new collection goroutines — but do NOT return early: already-launched
-		// goroutines write into results[] and must be joined by wg.Wait() below,
+		// goroutines write their steps and must be joined by wg.Wait() below,
 		// and the migration row must be marked honestly (interrupted) rather than
 		// left as StatusPlanned with zero steps, which dead-ends the wizard.
 		if ctx.Err() != nil {
@@ -108,7 +120,7 @@ func (p *Planner) Plan(ctx context.Context, req PlanRequest, onProgress StepCall
 
 		mod, ok := p.registry.Get(catName)
 		if !ok {
-			onProgress(WSMessage{
+			emit(WSMessage{
 				Step:   "plan:" + catName,
 				Status: "error",
 				Error:  "unknown category: " + catName,
@@ -129,7 +141,7 @@ func (p *Planner) Plan(ctx context.Context, req PlanRequest, onProgress StepCall
 			}
 		}
 
-		onProgress(WSMessage{
+		emit(WSMessage{
 			Step:   "plan:" + catName,
 			Status: "progress",
 			Value:  "Collecting " + catName + "...",
@@ -139,7 +151,23 @@ func (p *Planner) Plan(ctx context.Context, req PlanRequest, onProgress StepCall
 		go func(idx int, name string, coll Collector) {
 			defer wg.Done()
 			data, err := coll.Collect(ctx, sshClient)
-			results[idx] = collectResult{catName: name, data: data, err: err}
+			results[idx] = collectResult{catName: name, err: err}
+			if err != nil {
+				emit(WSMessage{
+					Step:   "plan:" + name,
+					Status: "error",
+					Error:  fmt.Sprintf("collect failed: %v", err),
+				})
+				p.repo.CreateStep(planID, name, "collect", fmt.Sprintf(`{"error":"collect failed: %s"}`, err.Error()))
+				return
+			}
+			rawData, _ := json.Marshal(data)
+			p.repo.CreateStep(planID, name, "collect", string(rawData))
+			emit(WSMessage{
+				Step:   "plan:" + name,
+				Status: "success",
+				Value:  "Collected " + name,
+			})
 		}(i, catName, collector)
 	}
 
@@ -151,39 +179,17 @@ func (p *Planner) Plan(ctx context.Context, req PlanRequest, onProgress StepCall
 	// the user can never proceed. Interrupted lets recovery resync on next load.
 	if ctx.Err() != nil {
 		p.repo.UpdateMigrationStatus(planID, StatusInterrupted, "collection interrupted: client disconnected")
-		onProgress(WSMessage{Step: "plan", Status: "error", Error: "collection interrupted"})
+		emit(WSMessage{Step: "plan", Status: "error", Error: "collection interrupted"})
 		return plan, ctx.Err()
 	}
 
-	// Process results
+	// Tally results and mark the migration failed if any collection errored.
 	collectionErrors := 0
 	for _, res := range results {
 		if res.err != nil {
-			// Check if it was the "unknown category" error
-			if res.data.Type == "" && res.catName != "" {
-				// Already reported above
-				collectionErrors++
-				continue
-			}
-			onProgress(WSMessage{
-				Step:   "plan:" + res.catName,
-				Status: "error",
-				Error:  fmt.Sprintf("collect failed: %v", res.err),
-			})
-			p.repo.CreateStep(planID, res.catName, "collect", fmt.Sprintf(`{"error":"collect failed: %s"}`, res.err.Error()))
-			p.repo.UpdateMigrationStatus(planID, StatusFailed, fmt.Sprintf("collection failed for %s: %v", res.catName, res.err))
 			collectionErrors++
-			continue
+			p.repo.UpdateMigrationStatus(planID, StatusFailed, fmt.Sprintf("collection failed for %s: %v", res.catName, res.err))
 		}
-
-		rawData, _ := json.Marshal(res.data)
-		p.repo.CreateStep(planID, res.catName, "collect", string(rawData))
-
-		onProgress(WSMessage{
-			Step:   "plan:" + res.catName,
-			Status: "success",
-			Value:  "Collected " + res.catName,
-		})
 	}
 
 	// 5. Update plan status — only set to "planned" if all collections succeeded.

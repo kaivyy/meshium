@@ -157,14 +157,14 @@
     } catch {
       try {
         const plan = await migrationApi.get(migrationId);
-        // MigrationPlan uses sourceServerId/targetServerId, but the page reads
-        // session.migration.sourceId/targetId — map the field names so Discovery
+        // The backend Migration record uses sourceId/targetId; the page reads
+        // session.migration.sourceId/targetId. Map the field names so Discovery
         // shows servers and recoverStepFromRecords can markCompleted(0).
         session = {
           migration: {
             id: plan.id,
-            sourceId: plan.sourceServerId,
-            targetId: plan.targetServerId,
+            sourceId: plan.sourceId ?? plan.sourceServerId ?? 0,
+            targetId: plan.targetId ?? plan.targetServerId ?? 0,
             categories: plan.categories ?? [],
             status: plan.status,
             state: plan.status,
@@ -226,7 +226,11 @@
     if (st === 'backup') { setStep(5); return; }
     if (st === 'risk_assessment') { setStep(2); return; }
     if (st === 'compatibility_check') { setStep(1); return; }
-    if (st === 'discovery' || st === 'planning') { setStep(0); return; }
+    // `created` is the state-machine name for a `planned` migration (status
+    // "planned" ↔ StateCreated). It must recover to step 0 like discovery/
+    // planning, otherwise a freshly planned migration falls through with no
+    // step set and the Next button stays disabled.
+    if (st === 'discovery' || st === 'planning' || st === 'created') { setStep(0); return; }
   }
 
   function recoverStepFromRecords() {
@@ -1039,7 +1043,7 @@
           Retry
         </button>
       {/if}
-      {#if !isTerminalState(currentState)}
+      {#if rollbackAvailable}
         <button on:click={() => openConfirmation('rollback')} class="flex items-center gap-1.5 px-3 py-1.5 bg-error hover:bg-error/90 text-accent-fg rounded-lg text-xs font-medium transition-colors">
           <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 12a9 9 0 1 0 9-9 9.75 9.75 0 0 0-6.74 2.74L3 8"/><path d="M3 3v5h5"/></svg>
           Rollback

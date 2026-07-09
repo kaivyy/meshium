@@ -709,19 +709,23 @@ func (h *PipelineHandler) handleCompatibilityWS(w http.ResponseWriter, r *http.R
 	}
 	defer conn.Close()
 
-	ctx, cancel := context.WithCancel(r.Context())
-	defer cancel()
+	// Decouple the preflight's lifetime from the WebSocket's: a page refresh
+	// mid-check closes the WS and cancels r.Context(), but the work should still
+	// complete and persist so the next loadSession shows the results instead of
+	// dropping the user back to Discovery. workCtx is bounded by a timeout only;
+	// the WS writeMsg no-ops once the connection is gone.
+	workCtx, workCancel := context.WithTimeout(context.Background(), 5*time.Minute)
+	defer workCancel()
 
 	writeMsg := func(msg WSMessage) {
 		if writeErr := conn.WriteJSON(msg); writeErr != nil {
 			log.Printf("websocket write failed: %v", writeErr)
-			cancel()
 		}
 	}
 
-	results := h.runCompatibilityPreflight(ctx, id, writeMsg)
+	results := h.runCompatibilityPreflight(workCtx, id, writeMsg)
 	for _, result := range results {
-		_, _ = h.repo.CreateVerificationResult(ctx, VerificationResult{
+		_, _ = h.repo.CreateVerificationResult(workCtx, VerificationResult{
 			MigrationID:      id,
 			VerificationType: "compatibility",
 			Target:           result.CheckName,

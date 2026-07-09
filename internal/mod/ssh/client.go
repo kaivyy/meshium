@@ -559,9 +559,30 @@ func (c *Client) Upload(src io.Reader, remotePath string) error {
 	if err != nil {
 		return err
 	}
-	defer dst.Close()
 
-	_, err = io.Copy(dst, src)
+	// Same stall protection as Download: bound the copy so a wedged SFTP write
+	// (e.g. during rollback/apply) can't hang the caller forever.
+	timeout := c.timeouts.FileTransfer
+	if timeout <= 0 {
+		timeout = DefaultTimeouts.FileTransfer
+	}
+	type copyResult struct {
+		n   int64
+		err error
+	}
+	done := make(chan copyResult, 1)
+	go func() {
+		n, err := io.Copy(dst, src)
+		done <- copyResult{n, err}
+	}()
+	select {
+	case r := <-done:
+		dst.Close()
+		return r.err
+	case <-time.After(timeout):
+		dst.Close()
+		return fmt.Errorf("sftp upload timed out after %s: %s", timeout, remotePath)
+	}
 	return err
 }
 
@@ -579,10 +600,36 @@ func (c *Client) Download(remotePath string, dst io.Writer) error {
 	if err != nil {
 		return err
 	}
-	defer src.Close()
 
-	_, err = io.Copy(dst, src)
-	return err
+	// Bound the transfer so a stalled SFTP read can't hang the caller forever
+	// (e.g. a migration plan step waiting on wg.Wait()). sftp v1.13 has no
+	// per-Client context, so run the copy on a goroutine and, on timeout, close
+	// the remote file to unblock the Read — then report the timeout as an error.
+	// Without this a wedged session leaves the plan spinner spinning and the
+	// migration stuck at StatusPlanned with zero collect steps.
+	timeout := c.timeouts.FileTransfer
+	if timeout <= 0 {
+		timeout = DefaultTimeouts.FileTransfer
+	}
+
+	type copyResult struct {
+		n   int64
+		err error
+	}
+	done := make(chan copyResult, 1)
+	go func() {
+		n, err := io.Copy(dst, src)
+		done <- copyResult{n, err}
+	}()
+
+	select {
+	case r := <-done:
+		src.Close()
+		return r.err
+	case <-time.After(timeout):
+		src.Close() // unblock the pending Read
+		return fmt.Errorf("sftp download timed out after %s: %s", timeout, remotePath)
+	}
 }
 
 // IsAlive checks whether the SSH connection is still responsive.

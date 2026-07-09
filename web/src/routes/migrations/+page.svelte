@@ -309,9 +309,9 @@
                 <div class="flex items-center gap-3">
                   <div class="w-2 h-2 rounded-full {statusDot(m.status)}"></div>
                   <div class="flex items-center gap-2">
-                    <span class="text-sm font-medium text-fg">{serverName(m.sourceServerId)}</span>
+                    <span class="text-sm font-medium text-fg">{serverName(m.sourceId ?? m.sourceServerId ?? 0)}</span>
                     <ArrowRight size={14} class="text-fg-subtle" />
-                    <span class="text-sm font-medium text-fg">{serverName(m.targetServerId)}</span>
+                    <span class="text-sm font-medium text-fg">{serverName(m.targetId ?? m.targetServerId ?? 0)}</span>
                   </div>
                 </div>
                 <div class="flex items-center gap-3">

@@ -2,14 +2,19 @@ import { api } from '$lib/api/client';
 
 export interface MigrationPlan {
   id: number;
-  sourceServerId: number;
-  targetServerId: number;
+  // The backend Migration record serializes these as sourceId/targetId.
+  // sourceServerId/targetServerId are kept as optional aliases for older callers.
+  sourceId: number;
+  targetId: number;
+  sourceServerId?: number;
+  targetServerId?: number;
   status: string;
   categories: string[];
-  errorMessage: string;
+  error?: string;
+  errorMessage?: string;
   createdAt: string;
-  completedAt: string;
-  rolledBackAt: string;
+  completedAt?: string;
+  rolledBackAt?: string;
 }
 
 export interface MigrationStep {

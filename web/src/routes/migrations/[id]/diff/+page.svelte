@@ -156,7 +156,7 @@
 
     try {
       migration = await migrationApi.get(Number(migrationId));
-      diffData = await migrationApi.diff(migration.sourceServerId, migration.targetServerId);
+      diffData = await migrationApi.diff(migration.sourceId ?? migration.sourceServerId ?? 0, migration.targetId ?? migration.targetServerId ?? 0);
     } catch (err) {
       error = err instanceof Error ? err.message : 'Failed to load diff';
       toast.error(error);
@@ -207,7 +207,7 @@
         <div>
           <h1 class="text-2xl font-semibold text-fg">Server Diff</h1>
           <p class="mt-1 text-sm text-fg-subtle">
-            {migration ? `${migration.sourceServerId} → ${migration.targetServerId}` : `Migration ${migrationId}`}
+            {migration ? `${migration.sourceId ?? migration.sourceServerId} → ${migration.targetId ?? migration.targetServerId}` : `Migration ${migrationId}`}
           </p>
         </div>
 
