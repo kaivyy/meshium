@@ -120,7 +120,11 @@
     try {
       session = await pipelineApi.getSession(migrationId);
       if (session?.config) {
-        config = session.config;
+        // Merge over the defaults — the create wizard (/ws/plan) never writes a
+        // MigrationConfig, so the stored row is `{}` and assigning it raw leaves
+        // config.categories undefined, which crashes later .length reads. Defaults
+        // fill any missing fields.
+        config = { ...defaultMigrationConfig(), ...session.config };
         if (session.config.observationDuration) observationDuration = session.config.observationDuration;
       }
       // The create wizard (/ws/plan) never writes a MigrationConfig, so config

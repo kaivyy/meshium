@@ -1481,6 +1481,34 @@ func (h *PipelineHandler) buildSession(ctx context.Context, migrationID int) (*M
 		}
 	}
 
+	// Surface an unusable plan: a migration in StatusPlanned whose collected
+	// categories don't cover every requested category has nothing complete to
+	// migrate. This happens when the plan WebSocket disconnected mid-collection
+	// before the interrupted-marking fix existed, leaving a stale row with zero
+	// or partial collect steps. Set an in-memory error (not persisted) so the
+	// frontend's incompletePlan guard shows "Recreate Migration Plan" instead of
+	// dead-ending the wizard on empty Dry Run / Provision / Execute steps.
+	if migration.Status == StatusPlanned && migration.Error == "" {
+		if steps, err := h.baseRepo.GetSteps(migrationID); err == nil {
+			collected := make(map[string]bool, len(steps))
+			for _, s := range steps {
+				if s.Action == "collect" && s.Status == StepStatusCompleted {
+					collected[s.Category] = true
+				}
+			}
+			missing := false
+			for _, c := range migration.Categories {
+				if !collected[c] {
+					missing = true
+					break
+				}
+			}
+			if missing {
+				migration.Error = "category data collection was incomplete for this plan"
+			}
+		}
+	}
+
 	return session, nil
 }
 

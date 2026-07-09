@@ -97,8 +97,13 @@ func (p *Planner) Plan(ctx context.Context, req PlanRequest, onProgress StepCall
 	var wg sync.WaitGroup
 
 	for i, catName := range req.Categories {
+		// If the caller (e.g. the plan WebSocket) disconnected, stop launching
+		// new collection goroutines — but do NOT return early: already-launched
+		// goroutines write into results[] and must be joined by wg.Wait() below,
+		// and the migration row must be marked honestly (interrupted) rather than
+		// left as StatusPlanned with zero steps, which dead-ends the wizard.
 		if ctx.Err() != nil {
-			return nil, ctx.Err()
+			break
 		}
 
 		mod, ok := p.registry.Get(catName)
@@ -139,6 +144,16 @@ func (p *Planner) Plan(ctx context.Context, req PlanRequest, onProgress StepCall
 	}
 
 	wg.Wait()
+
+	// If the caller disconnected mid-collection, mark the migration honestly.
+	// Leaving it as StatusPlanned (set by CreateMigration above) with no collect
+	// steps dead-ends the pipeline wizard: recovery finds nothing completed and
+	// the user can never proceed. Interrupted lets recovery resync on next load.
+	if ctx.Err() != nil {
+		p.repo.UpdateMigrationStatus(planID, StatusInterrupted, "collection interrupted: client disconnected")
+		onProgress(WSMessage{Step: "plan", Status: "error", Error: "collection interrupted"})
+		return plan, ctx.Err()
+	}
 
 	// Process results
 	collectionErrors := 0
