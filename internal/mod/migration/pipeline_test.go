@@ -761,6 +761,9 @@ func (m *mockPipelineRepo) GetStageByName(migrationID int, stageName string) (*P
 func (m *mockPipelineRepo) GetCompletedStages(migrationID int) ([]PipelineStage, error) {
 	return nil, nil
 }
+func (m *mockPipelineRepo) GetLatestStep(migrationID int, action string) (*MigrationStepRecord, error) {
+	return nil, nil
+}
 func (m *mockPipelineRepo) CreateReplicationStatus(ctx context.Context, rs ReplicationStatus) (int64, error) {
 	return 1, nil
 }

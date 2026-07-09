@@ -105,6 +105,66 @@ func TestDryRunConfigsToleratesSha256ExitOneOnMissingFile(t *testing.T) {
 		t.Fatalf("exit 1 routed to per-file Download fallback; downloadCalls=%d (N+1 regression)", ssh.downloadCalls)
 	}
 }
+
+// Stage B regression: the dry-run preview must round-trip through
+// migration_steps (action='dryrun') so a page refresh can restore it via
+// GetLatestStep. Executor.DryRun persists with exactly this CreateStep call,
+// and buildSession restores with the matching GetLatestStep — so this test
+// pins the storage contract both sides rely on. (Exercising the full DryRun
+// would require a live SSH pool; the persistence layer is the part that
+// changed and the part that can break silently.)
+func TestDryRunPersistsResultForRefresh(t *testing.T) {
+	repo := &mockRepo{migrations: []Migration{{ID: 1}}}
+
+	original := &DryRunResult{
+		MigrationID: 1,
+		Categories: []DryRunCategory{{
+			Category: "configs",
+			Changes: []DryRunChange{{Type: "add", Resource: "file:/etc/x", Detail: "created"}},
+			Summary:  "1 changes",
+		}},
+		Summary: DryRunSummary{TotalChanges: 1, AddCount: 1},
+	}
+
+	// Mirror what Executor.DryRun writes after computing the result.
+	if _, err := repo.CreateStep(1, "all", "dryrun", mustJSON(original)); err != nil {
+		t.Fatalf("CreateStep failed: %v", err)
+	}
+
+	// Mirror what buildSession reads to restore the preview on refresh.
+	step, err := repo.GetLatestStep(1, "dryrun")
+	if err != nil {
+		t.Fatalf("GetLatestStep failed: %v", err)
+	}
+	if step == nil {
+		t.Fatalf("expected a persisted 'dryrun' step, got none")
+	}
+	var restored DryRunResult
+	if err := json.Unmarshal([]byte(step.Data), &restored); err != nil {
+		t.Fatalf("persisted dry run not valid JSON: %v", err)
+	}
+	if restored.Summary.TotalChanges != original.Summary.TotalChanges {
+		t.Fatalf("restored total %d != original %d", restored.Summary.TotalChanges, original.Summary.TotalChanges)
+	}
+	if len(restored.Categories) != 1 || restored.Categories[0].Category != "configs" {
+		t.Fatalf("restored categories mismatch: %+v", restored.Categories)
+	}
+
+	// A second persist must become the "latest" — refresh always shows the
+	// most recent preview, not a stale one.
+	if _, err := repo.CreateStep(1, "all", "dryrun", mustJSON(&DryRunResult{Summary: DryRunSummary{TotalChanges: 2}})); err != nil {
+		t.Fatalf("second CreateStep failed: %v", err)
+	}
+	step2, _ := repo.GetLatestStep(1, "dryrun")
+	var restored2 DryRunResult
+	if err := json.Unmarshal([]byte(step2.Data), &restored2); err != nil {
+		t.Fatalf("second restore failed: %v", err)
+	}
+	if restored2.Summary.TotalChanges != 2 {
+		t.Fatalf("expected latest dry run (total=2), got %d", restored2.Summary.TotalChanges)
+	}
+}
+
 func mustJSON(v interface{}) string {
 	b, err := json.Marshal(v)
 	if err != nil {

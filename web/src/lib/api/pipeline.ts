@@ -1,4 +1,5 @@
 import { api } from '$lib/api/client';
+import type { DryRunResult } from '$lib/api/migrations';
 
 // --- Pipeline Stage Types ---
 
@@ -295,6 +296,9 @@ export interface MigrationSession {
   provisionStates?: ProvisionState[];
   auditTrail?: AuditEntry[];
   events?: MigrationEvent[];
+  // Latest persisted dry-run preview (action='dryrun' step). Restored on
+  // page refresh so step 4 keeps its change list.
+  dryRun?: DryRunResult;
 }
 
 // --- Extended WebSocket Message ---

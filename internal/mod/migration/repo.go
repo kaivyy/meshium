@@ -33,6 +33,10 @@ type Repo interface {
 	CreateStep(migrationID int, category, action, data string) (int, error)
 	UpdateStepStatus(id int, status, errMsg string) error
 	GetSteps(migrationID int) ([]MigrationStepRecord, error)
+	// GetLatestStep returns the most recently completed step for a migration
+	// matching the given action, or nil if none exists. Used to restore
+	// persisted previews (e.g. dry-run results) across page refreshes.
+	GetLatestStep(migrationID int, action string) (*MigrationStepRecord, error)
 	GetAppliedCategories(migrationID int) ([]string, error) // categories with StepStatusApplied
 
 	CreateBackup(migrationID, serverID int, category, data string) (int, error)
@@ -252,6 +256,40 @@ func (r *sqliteRepo) GetSteps(migrationID int) ([]MigrationStepRecord, error) {
 		steps = append(steps, s)
 	}
 	return steps, nil
+}
+
+// GetLatestStep returns the most recently completed step for a migration
+// matching the given action, or nil if none exists. Used to restore
+// persisted previews (e.g. dry-run results) across page refreshes.
+func (r *sqliteRepo) GetLatestStep(migrationID int, action string) (*MigrationStepRecord, error) {
+	var s MigrationStepRecord
+	var data, errMsg, startedAt, completedAt sql.NullString
+	row := r.db.QueryRow(
+		`SELECT id, migration_id, category, action, status, data, error, started_at, completed_at
+		 FROM migration_steps
+		 WHERE migration_id = ? AND action = ? AND status = 'completed'
+		 ORDER BY id DESC LIMIT 1`,
+		migrationID, action,
+	)
+	if err := row.Scan(&s.ID, &s.MigrationID, &s.Category, &s.Action, &s.Status, &data, &errMsg, &startedAt, &completedAt); err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return nil, nil
+		}
+		return nil, err
+	}
+	if data.Valid {
+		s.Data = data.String
+	}
+	if errMsg.Valid {
+		s.Error = errMsg.String
+	}
+	if startedAt.Valid {
+		s.StartedAt = startedAt.String
+	}
+	if completedAt.Valid {
+		s.CompletedAt = completedAt.String
+	}
+	return &s, nil
 }
 
 func (r *sqliteRepo) CreateBackup(migrationID, serverID int, category, data string) (int, error) {

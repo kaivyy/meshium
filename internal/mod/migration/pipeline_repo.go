@@ -21,6 +21,10 @@ type PipelineRepo interface {
 	GetStages(migrationID int) ([]PipelineStage, error)
 	GetStageByName(migrationID int, stageName string) (*PipelineStage, error)
 	GetCompletedStages(migrationID int) ([]PipelineStage, error)
+	// GetLatestStep returns the most recently completed step for a migration
+	// matching the given action, or nil if none exists. Used to restore
+	// persisted previews (e.g. dry-run results) across page refreshes.
+	GetLatestStep(migrationID int, action string) (*MigrationStepRecord, error)
 
 	// --- Replication status ---
 	CreateReplicationStatus(ctx context.Context, rs ReplicationStatus) (int64, error)

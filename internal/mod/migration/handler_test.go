@@ -100,6 +100,17 @@ func (m *mockRepo) GetSteps(migrationID int) ([]MigrationStepRecord, error) {
 	return result, nil
 }
 
+func (m *mockRepo) GetLatestStep(migrationID int, action string) (*MigrationStepRecord, error) {
+	var latest *MigrationStepRecord
+	for i := range m.steps {
+		s := &m.steps[i]
+		if s.MigrationID == migrationID && s.Action == action && s.Status == StepStatusCompleted {
+			latest = s
+		}
+	}
+	return latest, nil
+}
+
 func (m *mockRepo) CreateBackup(migrationID, serverID int, category, data string) (int, error) {
 	id := len(m.backups) + 1
 	m.backups = append(m.backups, MigrationBackup{

@@ -123,6 +123,10 @@
       if (session?.provisionStates) provisionStates = session.provisionStates;
       if (session?.auditTrail) auditTrail = session.auditTrail;
       if (session?.events) migrationEvents = session.events;
+      // Restore the dry-run preview across a page refresh: the result is
+      // persisted server-side (action='dryrun' step), so the change list and
+      // step 4 completion survive a reload instead of resetting to memory-only.
+      if (session?.dryRun) dryRunResult = session.dryRun;
       currentState = session?.state || '';
       recoverStepFromState();
       recoverStepFromRecords();

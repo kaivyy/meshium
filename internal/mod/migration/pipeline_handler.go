@@ -1411,6 +1411,16 @@ func (h *PipelineHandler) buildSession(ctx context.Context, migrationID int) (*M
 	session.AuditTrail, _ = h.repo.GetAuditTrail(migrationID, 200)
 	session.Events, _ = h.repo.GetEvents(ctx, migrationID, 0, 200)
 
+	// Restore the latest dry-run preview so step 4 keeps its change list
+	// across a page refresh (the value is only held in frontend memory
+	// otherwise).
+	if step, _ := h.repo.GetLatestStep(migrationID, "dryrun"); step != nil && step.Data != "" {
+		var dr DryRunResult
+		if json.Unmarshal([]byte(step.Data), &dr) == nil {
+			session.DryRun = &dr
+		}
+	}
+
 	return session, nil
 }
 

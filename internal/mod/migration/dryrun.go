@@ -133,6 +133,16 @@ func (e *Executor) DryRun(ctx context.Context, migrationID int, onProgress StepC
 		return result.Categories[i].Category < result.Categories[j].Category
 	})
 
+	// Persist the preview so step 4 keeps its change list across a page
+	// refresh (otherwise dryRunResult only lives in frontend memory and is
+	// lost on reload). Reuses migration_steps with action='dryrun'.
+	if data, err := json.Marshal(result); err == nil {
+		if _, serr := e.repo.CreateStep(migrationID, "all", "dryrun", string(data)); serr != nil {
+			// Non-fatal: the live result is still returned to the caller.
+			onProgress(WSMessage{Step: "dryrun", Status: "warning", Value: "could not persist dry run preview"})
+		}
+	}
+
 	onProgress(WSMessage{Step: "dryrun", Status: "complete", Value: fmt.Sprintf("Dry run complete: %d total changes", result.Summary.TotalChanges)})
 
 	return result, nil

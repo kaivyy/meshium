@@ -489,4 +489,8 @@ type MigrationSession struct {
 	ProvisionStates      []ProvisionState           `json:"provisionStates,omitempty"`
 	AuditTrail           []AuditEntry               `json:"auditTrail,omitempty"`
 	Events               []MigrationEvent           `json:"events,omitempty"`
+	// DryRun is the latest persisted dry-run preview (action='dryrun' step).
+	// Persisted server-side so step 4 keeps its change list across a page
+	// refresh, which otherwise only lives in frontend memory.
+	DryRun               *DryRunResult             `json:"dryRun,omitempty"`
 }
