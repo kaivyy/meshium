@@ -12,7 +12,7 @@
     type StrategySelection
   } from '$lib/api/pipeline';
   import { APIError } from '$lib/api/client';
-  import { migrationApi, type DryRunResult } from '$lib/api/migrations';
+  import { migrationApi, type DryRunResult, wsDryRun, type WSMessage } from '$lib/api/migrations';
   import { toast } from '$lib/stores/toast';
   import PlannerView from '$lib/components/PlannerView.svelte';
   import LiveMonitor from '$lib/components/LiveMonitor.svelte';
@@ -44,6 +44,10 @@
   let containerHealth: ContainerHealthInfo[] = [];
   let auditTrail: AuditEntry[] = [];
   let dryRunResult: DryRunResult | null = null;
+  // Live dry-run progress: one row per category as the backend analyzes it.
+  let dryRunProgress: { category: string; label: string; status: 'pending' | 'running' | 'done' | 'error' }[] = [];
+  let dryRunCaption = '';
+  let dryRunWs: WebSocket | null = null;
   let plannerResult: PlannerResult | null = null;
   let plannerLoading = false;
   let migrationEvents: MigrationEvent[] = [];
@@ -93,6 +97,7 @@
 
   onDestroy(() => {
     wsControl?.close();
+    dryRunWs?.close();
     if (observationTimer) clearInterval(observationTimer);
   });
 
@@ -188,6 +193,7 @@
     const st = currentState.toLowerCase();
     if (['completed', 'committed', 'archived', 'rolled_back', 'cancelled'].includes(st)) {
       stopObservationTimer();
+      clearStep(); // terminal: drop saved position so a fresh migration doesn't inherit it
       setStep(10);
       stepStatuses[9] = 'completed';
       stepStatuses[10] = 'completed';
@@ -259,6 +265,15 @@
       return;
     }
     if (lastCompleted >= currentStep && currentStep < 10) {
+      // Honor the user's last position if it's still reachable (not ahead of
+      // what's actually completed). Keeps e.g. Dry Run from auto-advancing to
+      // Provision on refresh; user clicks Next to move on.
+      const saved = restoreStep();
+      if (saved !== null && saved >= 0 && saved <= lastCompleted + 1) {
+        currentStep = saved;
+        if (stepStatuses[currentStep] === 'pending') stepStatuses[currentStep] = 'running';
+        return;
+      }
       currentStep = Math.min(lastCompleted + 1, 10);
       if (stepStatuses[currentStep] === 'pending') stepStatuses[currentStep] = 'running';
     }
@@ -290,6 +305,26 @@
     }
     if (stepStatuses[step] === 'pending') stepStatuses[step] = 'running';
   }
+
+  // Persist the user's active wizard step per migration so a page refresh
+  // keeps them where they were (e.g. on Dry Run reviewing changes) instead of
+  // auto-advancing past it. localStorage only — per-browser, not multi-device.
+  // ponytail: promote to a server current_step column if multi-device resume matters.
+  const stepKey = `meshium:pipeline:${migrationId}:step`;
+  function persistStep() {
+    try { localStorage.setItem(stepKey, String(currentStep)); } catch { /* private mode */ }
+  }
+  function restoreStep(): number | null {
+    try {
+      const v = localStorage.getItem(stepKey);
+      return v == null ? null : Number(v);
+    } catch { return null; }
+  }
+  function clearStep() {
+    try { localStorage.removeItem(stepKey); } catch { /* noop */ }
+  }
+  // Reactive persist: any time currentStep moves, remember it.
+  $: currentStep, persistStep();
 
   // ══════════════════════════════════════════════════════
   //  NAVIGATION & VALIDATION
@@ -414,17 +449,83 @@
     } finally { actionLoading = false; }
   }
 
+  // Pretty label for a category key: "docker" -> "Docker", "configs" -> "Configs".
+  function categoryLabel(cat: string): string {
+    return cat.charAt(0).toUpperCase() + cat.slice(1);
+  }
+
+  // Upsert a category row in the live dry-run progress checklist.
+  function setDryRunCategory(cat: string, status: 'pending' | 'running' | 'done' | 'error') {
+    const label = categoryLabel(cat);
+    const existing = dryRunProgress.find(r => r.category === cat);
+    if (existing) {
+      existing.status = status;
+      dryRunProgress = [...dryRunProgress];
+    } else {
+      dryRunProgress = [...dryRunProgress, { category: cat, label, status }];
+    }
+  }
+
   async function runDryRun() {
     actionLoading = true;
     stepStatuses[4] = 'running';
-    try {
-      dryRunResult = await migrationApi.dryRun(migrationId);
-      stepStatuses[4] = 'completed';
-      toast.success('Dry run completed');
-    } catch {
-      stepStatuses[4] = 'failed';
-      toast.error('Dry run failed');
-    } finally { actionLoading = false; }
+    dryRunResult = null;
+    dryRunProgress = [];
+    dryRunCaption = 'Starting…';
+    let errored = false;
+
+    await new Promise<void>((resolve) => {
+      dryRunWs = wsDryRun(
+        migrationId,
+        (msg: WSMessage) => {
+          // Umbrella "dryrun" step: general progress / completion / error.
+          if (msg.step === 'dryrun') {
+            if (msg.value) dryRunCaption = msg.value;
+            if (msg.status === 'error') {
+              errored = true;
+              toast.error(msg.error || 'Dry run failed');
+            }
+            if (msg.status === 'complete') {
+              dryRunCaption = 'Completed';
+            }
+            return;
+          }
+          // Per-category progress: "dryrun:configs", "dryrun:docker", ...
+          if (msg.step.startsWith('dryrun:')) {
+            const cat = msg.step.slice('dryrun:'.length);
+            if (msg.value) dryRunCaption = msg.value;
+            if (msg.status === 'progress') setDryRunCategory(cat, 'running');
+            else if (msg.status === 'success') setDryRunCategory(cat, 'done');
+            else if (msg.status === 'error') setDryRunCategory(cat, 'error');
+          }
+        },
+        async () => {
+          // WS closed. The executor persisted the result (migration_steps
+          // action='dryrun'); reload the session to surface it rather than
+          // carrying it in a WS frame.
+          if (!errored) {
+            try {
+              await loadSession();
+              stepStatuses[4] = 'completed';
+              toast.success('Dry run completed');
+            } catch {
+              stepStatuses[4] = 'failed';
+              toast.error('Dry run result could not be loaded');
+            }
+          }
+          actionLoading = false;
+          resolve();
+        },
+        () => {
+          errored = true;
+          stepStatuses[4] = 'failed';
+          toast.error('Dry run connection failed');
+          actionLoading = false;
+          resolve();
+        },
+      );
+    });
+    dryRunWs = null;
   }
 
   async function runProvision() {
@@ -1091,6 +1192,29 @@
                 </details>
               {/each}
             </div>
+          {:else if actionLoading || dryRunProgress.length}
+            <!-- LIVE PROGRESS: per-category checklist built from the WS stream -->
+            <div class="space-y-2 mb-3">
+              {#each dryRunProgress as row (row.category)}
+                <div class="flex items-center gap-3 text-sm">
+                  {#if row.status === 'running'}
+                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" class="text-info animate-spin"><path d="M21 12a9 9 0 1 1-6.219-8.56"/></svg>
+                  {:else if row.status === 'done'}
+                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" class="text-success"><path d="M20 6 9 17l-5-5"/></svg>
+                  {:else if row.status === 'error'}
+                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" class="text-error"><circle cx="12" cy="12" r="10"/><line x1="15" y1="9" x2="9" y2="15"/><line x1="9" y1="9" x2="15" y2="15"/></svg>
+                  {:else}
+                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" class="text-fg-subtle"><circle cx="12" cy="12" r="10"/></svg>
+                  {/if}
+                  <span class={row.status === 'running' ? 'text-fg' : row.status === 'done' ? 'text-fg-muted' : row.status === 'error' ? 'text-error' : 'text-fg-subtle'}>
+                    {row.label}
+                  </span>
+                </div>
+              {/each}
+            </div>
+            {#if dryRunCaption}
+              <div class="text-xs text-fg-subtle text-center pb-2">{dryRunCaption}</div>
+            {/if}
           {:else}
             <div class="text-center py-8 text-fg-subtle"><p>Run a dry run to preview what will change during migration.</p></div>
           {/if}
