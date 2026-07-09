@@ -83,6 +83,11 @@
   // ── Cutover State ──
   let cutoverConfirmed = false;
 
+  // metricsStale is true after a page refresh until the first live WS frame
+  // arrives — prevents the step-7 replication badge from flashing a misleading
+  // "Ready" off a stale/zero lag snapshot.
+  let metricsStale = false;
+
   // ── Observation State ──
   let observationStart: number | null = null;
   let observationDuration = 300;
@@ -140,6 +145,9 @@
       currentState = session?.state || '';
       recoverStepFromState();
       recoverStepFromRecords();
+      // Restore the last live-metrics snapshot so refresh doesn't flash zeros
+      // before the WS reconnects. metricsStale flags it until a fresh frame.
+      restoreMetrics();
       // Load planner data in background
       loadPlannerResult().catch(() => {});
     } catch {
@@ -199,6 +207,8 @@
     if (['completed', 'committed', 'archived', 'rolled_back', 'cancelled'].includes(st)) {
       stopObservationTimer();
       clearStep(); // terminal: drop saved position so a fresh migration doesn't inherit it
+      clearMetrics(); // terminal: live metrics no longer relevant
+      metricsStale = false;
       setStep(10);
       stepStatuses[9] = 'completed';
       stepStatuses[10] = 'completed';
@@ -330,6 +340,51 @@
   }
   // Reactive persist: any time currentStep moves, remember it.
   $: currentStep, persistStep();
+
+  // Persist live pipeline metrics so a page refresh/close-reopen doesn't
+  // flash zeros (progress, bytes, lag, cutoverConfirmed) before the WS
+  // reconnects. Snapshot only — the next live frame is always truth.
+  // ponytail: promote to a server metrics snapshot if multi-device matters.
+  const metricsKey = `meshium:pipeline:${migrationId}:metrics`;
+  function persistMetrics() {
+    try {
+      localStorage.setItem(metricsKey, JSON.stringify({
+        progress, bytesDone, bytesTotal, speedBytes, eta,
+        replicationLag, healthScore, cpuUsagePercent,
+        ramUsedBytes, ramTotalBytes, diskUsedPercent,
+        networkRxBytesSec, networkTxBytesSec,
+        cutoverConfirmed, containerHealth, queueStates,
+      }));
+    } catch { /* private mode / quota */ }
+  }
+  function restoreMetrics() {
+    try {
+      const raw = localStorage.getItem(metricsKey);
+      if (!raw) return;
+      const m = JSON.parse(raw);
+      if (typeof m.progress === 'number') progress = m.progress;
+      if (typeof m.bytesDone === 'number') bytesDone = m.bytesDone;
+      if (typeof m.bytesTotal === 'number') bytesTotal = m.bytesTotal;
+      if (typeof m.speedBytes === 'number') speedBytes = m.speedBytes;
+      if (typeof m.eta === 'string') eta = m.eta;
+      if (typeof m.replicationLag === 'number') replicationLag = m.replicationLag;
+      if (typeof m.healthScore === 'number') healthScore = m.healthScore;
+      if (typeof m.cpuUsagePercent === 'number') cpuUsagePercent = m.cpuUsagePercent;
+      if (typeof m.ramUsedBytes === 'number') ramUsedBytes = m.ramUsedBytes;
+      if (typeof m.ramTotalBytes === 'number') ramTotalBytes = m.ramTotalBytes;
+      if (typeof m.diskUsedPercent === 'number') diskUsedPercent = m.diskUsedPercent;
+      if (typeof m.networkRxBytesSec === 'number') networkRxBytesSec = m.networkRxBytesSec;
+      if (typeof m.networkTxBytesSec === 'number') networkTxBytesSec = m.networkTxBytesSec;
+      if (typeof m.cutoverConfirmed === 'boolean') cutoverConfirmed = m.cutoverConfirmed;
+      if (Array.isArray(m.containerHealth)) containerHealth = m.containerHealth;
+      if (Array.isArray(m.queueStates)) queueStates = m.queueStates;
+      // Snapshot is stale until a fresh WS frame arrives.
+      metricsStale = true;
+    } catch { /* corrupt snapshot — ignore */ }
+  }
+  function clearMetrics() {
+    try { localStorage.removeItem(metricsKey); } catch { /* noop */ }
+  }
 
   // ══════════════════════════════════════════════════════
   //  NAVIGATION & VALIDATION
@@ -673,6 +728,10 @@
     if (msg.networkTxBytesSec !== undefined) networkTxBytesSec = msg.networkTxBytesSec;
     if (msg.containerHealth) containerHealth = msg.containerHealth;
     if (msg.queueInfo) queueStates = msg.queueInfo;
+    // A live frame arrived — the snapshot is no longer stale, and persist the
+    // refreshed values so a later refresh/close-reopen restores them.
+    metricsStale = false;
+    persistMetrics();
   }
 
   function actionErrorMessage(err: unknown, fallback: string): string {
@@ -840,6 +899,23 @@
     const sizes = ['B', 'KB', 'MB', 'GB', 'TB'];
     const i = Math.floor(Math.log(bytes) / Math.log(k));
     return parseFloat((bytes / Math.pow(k, i)).toFixed(1)) + ' ' + sizes[i];
+  }
+
+  // formatSpeed: bytes/sec -> "1.2 MB/s".
+  function formatSpeed(bytesPerSec: number): string {
+    return formatBytes(bytesPerSec) + '/s';
+  }
+
+  // formatLag: replication lag seconds -> plain-language health.
+  function formatLag(sec: number, stale = false): string {
+    if (stale) return 'menyambung ulang…';
+    if (sec <= 5) return `sehat (${sec}s)`;
+    return `${sec}s`;
+  }
+
+  // formatPercent: 0-100 -> integer string.
+  function formatPercent(n: number): string {
+    return Math.round(n) + '%';
   }
 
   function riskColor(cls: string): string {
@@ -1347,17 +1423,17 @@
             <div class="mt-1 h-1 bg-surface-muted rounded-full overflow-hidden"><div class="h-full bg-accent rounded-full" style="width: {progress}%"></div></div>
           </div>
           <div class="bg-surface rounded-lg p-2.5 border border-border">
-            <div class="text-xs text-fg-subtle mb-1">Transfer</div>
+            <div class="text-xs text-fg-subtle mb-1">Data Terkirim</div>
             <div class="text-xs font-mono">{formatBytes(bytesDone)} / {formatBytes(bytesTotal)}</div>
           </div>
           <div class="bg-surface rounded-lg p-2.5 border border-border">
-            <div class="text-xs text-fg-subtle mb-1">Speed</div>
-            <div class="text-xs font-mono">{formatBytes(speedBytes)}/s</div>
+            <div class="text-xs text-fg-subtle mb-1">Kecepatan</div>
+            <div class="text-xs font-mono">{formatSpeed(speedBytes)}</div>
             <div class="text-xs text-fg-subtle">&uarr;{formatBytes(networkTxBytesSec)}/s &darr;{formatBytes(networkRxBytesSec)}/s</div>
           </div>
           <div class="bg-surface rounded-lg p-2.5 border border-border">
-            <div class="text-xs text-fg-subtle mb-1">Repl. Lag</div>
-            <div class="text-base font-mono {replicationLag > 5 ? 'text-warning' : 'text-success'}">{replicationLag}s</div>
+            <div class="text-xs text-fg-subtle mb-1">Keterlambatan Replikasi</div>
+            <div class="text-base font-mono {metricsStale ? 'text-fg-subtle' : replicationLag > 5 ? 'text-warning' : 'text-success'}">{formatLag(replicationLag, metricsStale)}</div>
           </div>
           <div class="bg-surface rounded-lg p-2.5 border border-border">
             <div class="text-xs text-fg-subtle mb-1">Health</div>
@@ -1402,8 +1478,11 @@
               </div>
             {:else}
               <div class="text-center py-4">
-                <p class="text-success font-medium">Pipeline is running...</p>
-                <p class="text-sm text-fg-subtle mt-1">Initial sync and replication setup in progress. Will auto-advance to Live Monitoring when replication is established.</p>
+                <p class="text-success font-medium">Pipeline berjalan… {progress > 0 ? formatPercent(progress) + ' selesai' : ''}</p>
+                <p class="text-sm text-fg-subtle mt-1">Sinkronisasi awal dan penyiapan replikasi sedang berlangsung. Akan lanjut otomatis ke Live Monitoring saat replikasi terbentuk.</p>
+                {#if eta}
+                  <p class="text-xs text-fg-subtle mt-1">Estimasi selesai: {eta}</p>
+                {/if}
               </div>
             {/if}
           </div>
@@ -1418,10 +1497,12 @@
                 <div><h2 class="text-lg font-semibold">Live Monitoring</h2><p class="text-sm text-fg-subtle">Monitor sync progress and replication lag</p></div>
               </div>
               <div>
-                {#if replicationLag <= 5}
-                  <div class="px-4 py-2 bg-success/10 border border-success/30 rounded-lg text-success text-sm font-medium">Replication caught up ({replicationLag}s lag) &mdash; Ready for cutover</div>
+                {#if metricsStale}
+                  <div class="px-4 py-2 bg-info/10 border border-info/30 rounded-lg text-info text-sm font-medium">Menyambung ulang ke server… metrik akan segera kembali.</div>
+                {:else if replicationLag <= 5}
+                  <div class="px-4 py-2 bg-success/10 border border-success/30 rounded-lg text-success text-sm font-medium">Replikasi tertinggal {replicationLag}s (sehat) &mdash; siap untuk cutover</div>
                 {:else}
-                  <div class="px-4 py-2 bg-warning/10 border border-warning/30 rounded-lg text-warning text-sm font-medium">Waiting for replication... ({replicationLag}s lag, need &le;5s)</div>
+                  <div class="px-4 py-2 bg-warning/10 border border-warning/30 rounded-lg text-warning text-sm font-medium">Menunggu replikasi… {replicationLag}s tertinggal (perlu &le;5s)</div>
                 {/if}
               </div>
             </div>
