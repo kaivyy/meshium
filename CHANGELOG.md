@@ -5,6 +5,87 @@ All notable changes to Meshium are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.5.0-beta.6] — 2026-07-09
+
+Dry-run speed + pipeline-wizard UX. This release makes the Dry Run step fast,
+keeps progress and previews across a page refresh / browser close, and adds
+live progress to the Compatibility and Dry Run steps so a long scan no longer
+shows a bare spinner. It is still a **pre-release / beta** — not
+production-ready or enterprise-grade, and no such claim is made.
+
+### Fixed — Dry Run was slow (N+1 SSH round-trips)
+- **Config scan collapsed to one `sha256sum` command.** `dryRunConfigs`
+  issued one SFTP Download per planned config file (N+1 round-trips), the
+  dominant cost of Dry Run on targets with many files. It now asks the target
+  for the sha256 of every planned path in a single command and compares hashes
+  in memory, downloading nothing (`internal/mod/migration/dryrun.go`).
+- **Self-defeating exit-code guard repaired.** `sha256sum` exits 1 when any
+  listed path is missing — the normal "add" case — so the prior `exitCode != 0`
+  guard routed every add-containing plan back into the per-file fallback; the
+  optimization never fired in production. Only exit 127/126 (binary absent)
+  falls back now. The mock models nonzero exit codes; a regression test pins
+  exit-1-must-not-fallback.
+- **Docker probe fused into one SSH round-trip.** `dryRunDocker` ran three
+  sequential SSH commands (`which docker`, `docker images`, `docker ps -a`);
+  the two daemon calls each stall up to the command timeout on a slow daemon.
+  All three are now a single shell command emitting a `NO_DOCKER` marker and
+  `---IMAGES---`/`---CONTAINERS---` sections.
+
+### Fixed — progress lost on refresh / browser close
+- **Dry-run preview survives refresh.** The dry-run result lived only in
+  frontend memory, so a refresh reset step 4 to incomplete and cleared the
+  change list. The computed result is now persisted as a `migration_steps` row
+  (`action='dryrun'`) and restored onto the session via the new
+  `Repo.GetLatestStep` (`internal/mod/migration/repo.go`,
+  `pipeline_handler.go`). No schema migration.
+- **Wizard step position persists.** `currentStep` was recomputed as
+  `lastCompleted + 1` on every load, auto-advancing past Dry Run on refresh.
+  The active step is now persisted per-migration in `localStorage` and honored
+  on recovery, so refresh keeps the user where they were until they click Next.
+  Cleared on terminal states.
+- **Live metrics survive refresh (steps 6–8).** Pipeline metrics (progress,
+  bytes, speed, lag, ETA, CPU/RAM/disk, cutover-confirmed, container health,
+  queue state) were in-memory only and reset to zero on refresh/close-reopen
+  until the WS reconnected — flashing a misleading "Ready for cutover" off a
+  stale/zero lag snapshot. The snapshot is now persisted to `localStorage` and
+  restored on load; a `metricsStale` flag shows "menyambung ulang…" (reconnecting)
+  instead of a false "Ready" until a fresh frame arrives. Cleared on terminal
+  states.
+- **Interrupted-in-collection plans marked honestly** (carried from the prior
+  commit on `main`): plans interrupted mid-collection are marked honestly and
+  block downstream steps.
+
+### Added — live progress for long-running steps
+- **Compatibility (step 1) live checklist.** The 11 serial SSH checks ran
+  behind a bare "Checking…" spinner. `CheckCompatibility` and
+  `runCompatibilityPreflight` now take a `StepCallback` emitting
+  `compat:<label>` progress/success per check, a new
+  `ws://host/ws/compatibility/{id}` WS endpoint streams them, and the frontend
+  renders a live per-check checklist (architecture, ram, disk, …). Result still
+  delivered via `loadSession` (`internal/mod/migration/compatibility.go`,
+  `pipeline_handler.go`, `web/src/lib/api/migrations.ts`).
+- **Dry Run (step 4) live checklist.** `runDryRun` switched from the REST
+  endpoint (which passes `nil` onProgress — no progress) to the existing
+  `wsDryRun` WebSocket (previously defined but unused) and renders a
+  per-category checklist built from the `dryrun:<category>` messages the
+  executor already emits.
+
+### Changed — friendlier dashboards
+- **Steps 6–8 metric labels in plain language.** Raw bytes/lag/CPU replaced
+  with `formatBytes`/`formatSpeed`/`formatLag`/`formatPercent` helpers and
+  Indonesian labels ("Data Terkirim", "Kecepatan", "Keterlambatan Replikasi"),
+  plain-language lag ("sehat (2s)"), and a running progress line
+  ("…45% selesai, estimasi selesai: 5m").
+
+### Not done (deliberate, YAGNI)
+- **Step 2 Risk** is pure in-memory computation (sub-second) — backend progress
+  is not warranted; a client timer suffices.
+- **Step 5 Provision** REST handler only returns stored states;
+  `ProvisionEngine.Provision` is currently dead code, so progress streaming for
+  a no-op was skipped. It will be wired when provision actually runs.
+- **Step 7 replication lag** is inherently live and not persisted as truth; the
+  snapshot is a refresh convenience, with an honest "reconnecting" stale state.
+
 ## [1.5.0-beta.5] — 2026-07-08
 
 Host-key trust fix. This release repairs first-connection trust, which was

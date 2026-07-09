@@ -1045,7 +1045,7 @@ Rollback a migration with live progress streaming.
 
 Dry run a migration with live progress streaming.
 
-**Auth required:** Yes (session cookie)
+**Auth required:** Yes — session token carried as the `meshium-auth.<token>` WebSocket subprotocol (token must be RawURLEncoding-safe). Each client presents its own token.
 
 **Path parameters:**
 
@@ -1065,6 +1065,40 @@ Dry run a migration with live progress streaming.
 → {"step":"dryrun:configs","status":"success","value":"Found 5 changes for configs"}
 → {"step":"dryrun","status":"complete","value":"Dry run complete: 7 total changes"}
 ```
+
+---
+
+### Compatibility (WebSocket)
+
+#### `ws://host/ws/compatibility/{id}`
+
+Run the source/target compatibility preflight with live per-check progress streaming. Streams each of the 11 checks as it runs; the final result set is persisted to `verification_result` and surfaced via the session/`loadSession` on close.
+
+**Auth required:** Yes — session token carried as the `meshium-auth.<token>` WebSocket subprotocol (token must be RawURLEncoding-safe). Each client presents its own token.
+
+**Path parameters:**
+
+| Parameter | Type | Description |
+|-----------|------|-------------|
+| `id` | int | Migration ID to check |
+
+**Messages sent (server → client):** Migration WSMessage objects. Step names use the `compat:<label>` convention so the frontend can render a per-check checklist.
+
+**Example flow:**
+```
+→ {"step":"compat","status":"progress","value":"Collecting source server info..."}
+→ {"step":"compat","status":"progress","value":"Collecting target server info..."}
+→ {"step":"compat:architecture","status":"progress","value":"Checking architecture (1/11)..."}
+→ {"step":"compat:architecture","status":"success","value":"architecture: Both servers use x86_64 architecture"}
+→ {"step":"compat:ram","status":"progress","value":"Checking ram (2/11)..."}
+→ {"step":"compat:ram","status":"success","value":"ram: Target has sufficient RAM: 8192MB >= 4096MB"}
+→ {"step":"compat:disk","status":"progress","value":"Checking disk (3/11)..."}
+→ {"step":"compat:disk","status":"success","value":"disk: Target has sufficient disk: 80GB available >= 42GB used on source"}
+...
+→ {"step":"compat","status":"complete"}
+```
+
+On close, the client calls the session endpoint to load the persisted `verification_result` rows.
 
 ---
 

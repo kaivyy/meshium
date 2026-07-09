@@ -76,9 +76,10 @@ This is the primary migration interface — a guided 11-step wizard with validat
 | Element | Description |
 |---------|-------------|
 | Action | Click **Run Compatibility Check** |
-| Shows | Check results with severity badges (info / warning / high / critical) |
+| Shows | A **live per-check checklist** fills as each of the 11 serial checks runs (streamed over `/ws/compatibility/{id}`, e.g. "architecture 1/11… ✓"), then the final results with severity badges (info / warning / high / critical) |
 | Gate | **No critical failures** allowed to proceed |
 | Checks | Architecture, RAM, disk, Docker, kernel, OS, package manager, OpenSSL, storage driver, SELinux, ports, timezone |
+| Persistence | Results are written to the DB (`verification_result`) and restored on refresh / browser close — the checklist does not reset |
 
 ### Step 3: Risk Assessment
 
@@ -125,8 +126,10 @@ This is the primary migration interface — a guided 11-step wizard with validat
 | Element | Description |
 |---------|-------------|
 | Action | Click **Run Dry Run** |
-| Shows | Additions, modifications, removals per category |
+| Shows | A **live per-category checklist** (packages, configs, …) fills as each category is analyzed over `/ws/dryrun/{id}`; on completion the full add/modify/remove change list per category |
 | Gate | Dry run must complete to proceed |
+| Persistence | The computed result is written to the DB (`migration_steps`, `action='dryrun'`) and restored on refresh / browser close, so the change preview survives a page reload |
+| Speed | The config scan now hashes all planned paths in a single `sha256sum` round-trip (no per-file downloads); the Docker probe runs as one fused SSH command |
 
 ### Step 6: Provision
 
@@ -214,10 +217,10 @@ During steps 7–10, a real-time metrics dashboard is displayed:
 
 | Metric | Description |
 |--------|-------------|
-| **Progress** | Overall pipeline progress percentage |
-| **Transfer** | Bytes transferred / total |
-| **Speed / Bandwidth** | Current transfer speed + network RX/TX |
-| **Replication Lag** | Seconds behind source (target: ≤ 5s) |
+| **Progress** | Overall pipeline progress percentage, with a plain-language running line ("…45% selesai, estimasi selesai: 5m") |
+| **Transfer** | Bytes transferred / total, shown human-readable ("1.2 GB / 4.0 GB") |
+| **Speed / Bandwidth** | Current transfer speed + network RX/TX, human-readable ("340 MB/s") |
+| **Replication Lag** | Seconds behind source (target: ≤ 5s); shown as "Keterlambatan Replikasi: sehat (2s)" green, or the raw seconds when elevated |
 | **Health Score** | Aggregated health score (0–100) |
 | **ETA** | Estimated time to completion |
 | **CPU Usage** | Target server CPU percentage with bar |
@@ -227,6 +230,8 @@ During steps 7–10, a real-time metrics dashboard is displayed:
 | **Container Health** | Running containers: name, status, healthy/unhealthy |
 | **Timeline** | Audit trail of state transitions |
 | **Live Logs** | Real-time WebSocket message log |
+
+**Refresh / browser-close behavior.** The live metric snapshot (progress, bytes, speed, lag, ETA, CPU/RAM/disk, cutover-confirmed, container health, queue state) is persisted per-migration to `localStorage` and restored on load, so a page refresh does not flash zeros or a misleading "Ready for Cutover". Replication lag is inherently live and not persisted as truth: after a refresh the lag badge shows **"menyambung ulang…"** (reconnecting) until a fresh frame arrives, then the real value. The snapshot is cleared on terminal states. Raw values remain available via element tooltips for advanced users.
 
 ---
 
