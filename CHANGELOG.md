@@ -5,6 +5,51 @@ All notable changes to Meshium are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.5.0-beta.9] — 2026-07-10
+
+Real database migration — the `database` category now moves actual DB data
+(dump → restore), not just server metadata. Supports PostgreSQL, MySQL/MariaDB,
+MongoDB, and Redis via a pluggable per-engine adapter. It is still a
+**pre-release / beta** — not production-ready or enterprise-grade, and no such
+claim is made. Downtime equals transfer time (dump/restore only; live
+replication + cutover is Phase 2, infra already present, deferred).
+
+### Added
+- **`database` migration category — real dump/restore.** Previously the
+  pipeline migrated only metadata (packages/configs/services/users/docker) and
+  moved none of a server's DB data. A new `database` category dumps the source
+  DB and restores it on the target for **PostgreSQL, MySQL/MariaDB, MongoDB, and
+  Redis** (`internal/mod/migration/database.go`, `database_adapter.go`).
+- **Pluggable per-engine adapter (`DatabaseMigrator`).** Dispatched by engine
+  string (mirrors `ReplicationEngine`). Each engine declares its dump/restore/
+  list/drop commands with idempotent restore flags so a half-restored DB retried
+  cleanly: PG `--clean --if-exists`, MySQL `--add-drop-database`, Mongo `--drop`,
+  Redis full RDB replace.
+- **Streamed transfer, no temp file on meshium.** MySQL and Mongo stream
+  `dump | restore` over an `io.Pipe` end-to-end (no disk on the meshium host, no
+  buffering that would OOM on a multi-GB dump). PG (custom-format `pg_restore`
+  can't read from stdin) and Redis (RDB restore needs a file + restart) use the
+  SFTP file path honestly. The adapter declares which via a `Streaming()` method.
+- **Optional streaming SSH interfaces.** `StreamExecuter`/`WriteExecuter` are
+  narrow optional interfaces on `*ssh.Client` (`ExecPipe`/`ExecWithStdin`), kept
+  off the core `SSHExecuter` interface so the ~9 test mocks don't have to
+  implement streaming. `DatabaseApplier` falls back to the file path when the
+  client doesn't satisfy them (`internal/mod/migration/stream.go`,
+  `internal/mod/ssh/client.go`).
+- **Database config in the wizard.** Step 3 now offers a 6th category and, when
+  selected, an engine/host/port/username/password/db-name block. Leave DB name
+  empty to migrate all user databases (`web/src/routes/migrations/new/+page.svelte`).
+- **Design doc.** `docs/database-migration.md` covers the transfer mechanism,
+  adapter interface, credential handling, retry/idempotency, Phase 1 vs Phase 2.
+
+### Security
+- **DB credentials encrypted at rest** (same scheme as server SSH passwords).
+  The planner encrypts the password before persisting it to `MigrationConfig`;
+  `Pipeline.Execute` decrypts it for Apply; the API redacts it on read. Credentials
+  are never written to `migration_steps` data and never logged.
+- **Injection-safe commands.** All shell args go through `shared.ShellQuote`; SQL
+  identifiers use `pqIdent`/`backtickIdent`; SQL values use `sqlEscapeSingleQuotes`.
+
 ## [1.5.0-beta.7] — 2026-07-10
 
 DB bloat + plan-recovery robustness. This release stops the database from
