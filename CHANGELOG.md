@@ -70,6 +70,14 @@ claim is made.
   (`rollbackAvailable`), so it only appears once the pipeline has reached the
   apply phase.
 
+### Added
+- **Elapsed timer on the wizard Plan step.** Step 4 (Review & Create Plan)
+  showed only a bare "Planning..." spinner while the source-server collection
+  ran, so a long scan looked like a hang. It now shows a `mm:ss` elapsed timer
+  alongside the spinner, started on "Create Plan" and stopped on
+  complete/close/error. Not persisted — the create wizard resets on refresh, so
+  cross-reload doesn't apply (`web/src/routes/migrations/new/+page.svelte`).
+
 ## [1.5.0-beta.6] — 2026-07-09
 
 Dry-run speed + pipeline-wizard UX. This release makes the Dry Run step fast,
