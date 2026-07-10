@@ -70,6 +70,11 @@ claim is made.
   (`rollbackAvailable`), so it only appears once the pipeline has reached the
   apply phase.
 
+## [1.5.0-beta.8] — 2026-07-10
+
+UX polish on the create-migration wizard. It is still a **pre-release / beta**
+— not production-ready or enterprise-grade, and no such claim is made.
+
 ### Added
 - **Elapsed timer on the wizard Plan step.** Step 4 (Review & Create Plan)
   showed only a bare "Planning..." spinner while the source-server collection
