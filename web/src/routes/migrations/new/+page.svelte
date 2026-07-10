@@ -17,6 +17,12 @@
   let planning = false;
   let planMessages: WSMessage[] = [];
   let ws: WebSocket | null = null;
+  // Elapsed timer for the Plan step so "Planning..." shows how long collection
+  // has been running instead of a bare spinner. Not persisted: this wizard
+  // doesn't survive a refresh (it resets to step 1), so cross-reload doesn't
+  // apply.
+  let planElapsed = 0;
+  let planTimer: ReturnType<typeof setInterval> | null = null;
   // Derived plan outcome, computed from the messages we've received so far.
   // A message stream can contain progress lines long before it ends in either
   // success or failure, so the button label must reflect the actual outcome —
@@ -74,7 +80,18 @@
 
   onDestroy(() => {
     ws?.close();
+    if (planTimer) clearInterval(planTimer);
   });
+
+  function startPlanTimer() {
+    if (planTimer) clearInterval(planTimer);
+    planElapsed = 0;
+    planTimer = setInterval(() => { planElapsed += 1; }, 1000);
+  }
+
+  function stopPlanTimer() {
+    if (planTimer) { clearInterval(planTimer); planTimer = null; }
+  }
 
   function nextStep() {
     if (step < 4) step++;
@@ -95,6 +112,7 @@
   function startPlanning() {
     planning = true;
     planMessages = [];
+    startPlanTimer();
     toast.info('Planning migration...');
 
     const req: PlanRequest = {
@@ -110,6 +128,7 @@
         planMessages = [...planMessages, msg];
         if (msg.step === 'plan' && msg.status === 'complete') {
           planning = false;
+          stopPlanTimer();
           toast.success('Migration plan created');
           // Extract migration ID from the message value (format: "migration_id:123")
           const match = msg.value?.match(/migration_id:(\d+)/);
@@ -129,12 +148,14 @@
         // silent reset to "Create" would hide it and risk a duplicate. Tell the
         // user to check the list instead of pretending nothing happened.
         planning = false;
+        stopPlanTimer();
         if (!planMessages.some(m => m.step === 'plan' && m.status === 'complete')) {
           toast.warning('Connection closed mid-plan. Check the migration list — the plan may already exist.');
         }
       },
       () => {
         planning = false;
+        stopPlanTimer();
         toast.error('Migration planning failed');
       }
     );
@@ -344,7 +365,7 @@
       {:else if planning}
         <div class="flex items-center justify-center gap-2 text-sm text-fg-subtle">
           <Loader size={16} class="animate-spin" />
-          Planning...
+          Planning… {Math.floor(planElapsed / 60)}:{String(planElapsed % 60).padStart(2, '0')}
         </div>
       {/if}
     </div>
