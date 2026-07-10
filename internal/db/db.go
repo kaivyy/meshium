@@ -2,25 +2,43 @@ package db
 
 import (
 	"database/sql"
-	"fmt"
+	"net/url"
+	"strings"
 
 	_ "modernc.org/sqlite"
 )
 
-// Open opens a SQLite database at the given path with WAL mode enabled
-// for concurrent read/write support. It configures:
-//   - WAL journal mode: allows readers to proceed while a write is in progress
-//   - busy_timeout: wait up to 5s for a lock instead of failing immediately
-//   - synchronous=NORMAL: safe with WAL, better performance than FULL
-//   - foreign_keys=ON: enforce referential integrity
+// pragmaQuery is the set of pragmas applied to every new connection in the pool.
+// These MUST live in the DSN, not a post-Open db.Exec: pragmas are per-connection
+// state, and database/sql may open additional conns that never inherit an Exec'd
+// pragma. Exec-ing "PRAGMA foreign_keys = ON" only set it on one pool conn, so
+// DELETE FROM migrations (which relies on ON DELETE CASCADE) hit conns with FKs
+// OFF and silently left orphaned migration_steps rows bloating the DB. The
+// _pragma query param runs on every conn the driver opens.
 //
-// For file-based databases, it allows multiple connections for concurrent
-// reads. For in-memory databases (used in tests), it uses a single connection
-// with shared cache.
+// journal_mode=WAL and synchronous=NORMAL are persistent (stored in the DB file
+// header), so they only need setting once — but including them in the DSN is
+// harmless and keeps all config in one place.
+const pragmaQuery = "_pragma=busy_timeout(5000)&_pragma=foreign_keys(1)&_pragma=journal_mode(WAL)&_pragma=synchronous(NORMAL)"
+
+// Open opens a SQLite database at the given path with WAL mode enabled
+// for concurrent read/write support. Pragmas are set per-connection via the
+// DSN (see pragmaQuery) so every conn in the pool enforces foreign keys.
 func Open(path string) (*sql.DB, error) {
-	dsn := path
+	var dsn string
 	if path == ":memory:" {
-		dsn = "file:meshium?mode=memory&cache=shared"
+		dsn = "file:meshium?mode=memory&cache=shared&" + pragmaQuery
+	} else {
+		// For a file path, embed it as a file:// URI so the _pragma query
+		// params attach cleanly (modernc/sqlite accepts query params only on
+		// URI-form DSNs). Percent-encode the path.
+		u := &url.URL{Scheme: "file", Path: path}
+		dsn = u.String()
+		if strings.Contains(dsn, "?") {
+			dsn += "&" + pragmaQuery
+		} else {
+			dsn += "?" + pragmaQuery
+		}
 	}
 
 	db, err := sql.Open("sqlite", dsn)
@@ -37,21 +55,6 @@ func Open(path string) (*sql.DB, error) {
 		// Allow multiple readers but limit to a reasonable number.
 		// SQLite WAL mode supports concurrent readers with a single writer.
 		db.SetMaxOpenConns(10)
-	}
-
-	// Configure pragmas
-	pragmas := []string{
-		"PRAGMA foreign_keys = ON",
-		"PRAGMA busy_timeout = 5000", // 5 seconds
-		"PRAGMA journal_mode = WAL",
-		"PRAGMA synchronous = NORMAL",
-	}
-
-	for _, pragma := range pragmas {
-		if _, err := db.Exec(pragma); err != nil {
-			_ = db.Close()
-			return nil, fmt.Errorf("failed to set %s: %w", pragma, err)
-		}
 	}
 
 	return db, nil
