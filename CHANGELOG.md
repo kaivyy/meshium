@@ -5,6 +5,71 @@ All notable changes to Meshium are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.5.0-beta.7] — 2026-07-10
+
+DB bloat + plan-recovery robustness. This release stops the database from
+ballooning ~100MB per plan, fixes the root cause that left orphaned rows after
+a migration was deleted, and makes interrupted/stale plans surface honestly
+instead of stalling or silently dropping the user back. It is still a
+**pre-release / beta** — not production-ready or enterprise-grade, and no such
+claim is made.
+
+### Fixed — 535MB database bloat
+- **Config file size capped per file.** `ConfigsCollector` tarred the whole
+  `/etc` with no per-file limit, so logs, caches, and state DBs in `/etc`
+  wrote ~105MB into a single `migration_steps` row per plan — 535MB across
+  five plans. The `find` now caps at `-size -2M` and `parseTarArchive` skips
+  any file over 1MiB (`maxConfigFileSize`), discarding the body so the tar
+  reader stays aligned. Real config files are well under 1MiB
+  (`internal/mod/migration/configs.go`).
+- **Foreign-key cascade now fires on every pool connection (root cause of
+  orphaned rows).** `DeleteMigration` relies on `ON DELETE CASCADE` to clean
+  up `migration_steps`, but `PRAGMA foreign_keys = ON` was set via a post-`Open`
+  `db.Exec` — which only configures one connection in the pool, since pragmas
+  are per-connection, not per-database. Deletes that landed on a FK-off
+  connection silently skipped the cascade and left orphaned `migration_steps`
+  rows behind (the actual source of the bloat recurring). All pragmas now live
+  in the DSN via `_pragma=…` query params, so every connection the driver opens
+  inherits them. A regression test (`TestCascadeDeleteAcrossPool`) pins
+  cascade across multiple pool connections (`internal/db/db.go`).
+
+### Fixed — interrupted / stale / partial plans
+- **Plan step no longer stalls on root-FS docker-compose scan.** The plan step
+  could hang scanning the root filesystem for `docker-compose` files. The scan
+  is now bounded so it can't stall the step.
+- **Interrupted plans marked honestly + partial/stale surfaced.** Plans
+  interrupted mid-run are marked with their real state instead of being left
+  in a misleading in-between state, and partial/stale plans are surfaced to
+  the user rather than hidden. `buildSession` detects when collected
+  categories don't cover every requested category and sets an honest error
+  that drives an incomplete-plan banner.
+- **Unbound SFTP downloads bounded.** SFTP downloads had no timeout and could
+  hang indefinitely. Each download now runs under a FileTransfer timeout in a
+  goroutine that closes the SFTP file on expiry (`ssh/client.go`).
+
+### Fixed — plan progress + planned-state recovery
+- **Plan progress streamed per category.** Plan collection progress is now
+  streamed per category over the WebSocket and the collected steps are
+  persisted, instead of a bare spinner with no indication of how far along
+  collection is (`internal/mod/migration/planner.go`).
+- **Compatibility preflight survives a mid-check refresh.** The preflight's
+  context was derived from `r.Context()`, so a page refresh mid-check closed
+  the WebSocket, cancelled the context, and dropped the in-flight work —
+  landing the user back at Discovery on reload. The preflight now runs under a
+  background context bounded only by a 5-minute timeout; the WebSocket write
+  becomes a no-op once the connection is gone, and the results still persist
+  for the next `loadSession` (`pipeline_handler.go`).
+- **Planned migration recovers to the right step.** `recoverStepFromState` had
+  no case for `created` (the state-machine name for a `planned` migration,
+  `StatusPlanned ↔ StateCreated`), so a freshly planned migration fell through
+  with no step set and the Next button stayed disabled until the user clicked
+  rollback. `created` now recovers to step 0 alongside `discovery`/`planning`.
+- **Rollback button gated to post-apply states.** The rollback button showed
+  for every non-terminal state including `created`, producing an invalid
+  `created → rollback` transition. It now requires `currentStep >= 6`
+  (`rollbackAvailable`), so it only appears once the pipeline has reached the
+  apply phase.
+
 ## [1.5.0-beta.6] — 2026-07-09
 
 Dry-run speed + pipeline-wizard UX. This release makes the Dry Run step fast,
