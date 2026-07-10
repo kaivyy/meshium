@@ -136,10 +136,11 @@ type MigrationBackup struct {
 // --- DTOs ---
 
 type PlanRequest struct {
-	SourceServerID int      `json:"sourceServerId"`
-	TargetServerID int      `json:"targetServerId"`
-	Categories     []string `json:"categories"`
-	ConfigPaths    []string `json:"configPaths,omitempty"`
+	SourceServerID  int             `json:"sourceServerId"`
+	TargetServerID  int             `json:"targetServerId"`
+	Categories      []string        `json:"categories"`
+	ConfigPaths     []string        `json:"configPaths,omitempty"`
+	DatabaseConfig  *DatabaseConfig `json:"databaseConfig,omitempty"`
 }
 
 type MigrationResponse struct {

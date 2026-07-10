@@ -50,6 +50,7 @@ func NewCategoryRegistry() *CategoryRegistry {
 	r.Register("services", &ServicesCollector{}, &ServicesApplier{})
 	r.Register("users", &UsersCollector{}, &UsersApplier{})
 	r.Register("docker", &DockerCollector{}, &DockerApplier{})
+	r.Register("database", &DatabaseCollector{}, &DatabaseApplier{})
 	return r
 }
 

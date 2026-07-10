@@ -7,6 +7,7 @@ import (
 	"sync"
 
 	"meshium/internal/mod/server"
+	"meshium/internal/shared"
 
 	xssh "golang.org/x/crypto/ssh"
 )
@@ -78,6 +79,15 @@ func (p *Planner) Plan(ctx context.Context, req PlanRequest, onProgress StepCall
 		return nil, fmt.Errorf("create migration: %w", err)
 	}
 
+	// Persist the DB credentials to MigrationConfig so the execute-time Apply
+	// can dump/restore. ConfigPaths isn't persisted (configs is stateless at
+	// apply), but the database category needs creds at execute — without this
+	// the pipeline loads an empty DatabaseConfig and Apply fails. The password
+	// is encrypted at rest (same scheme as server SSH passwords).
+	if req.DatabaseConfig != nil {
+		persistDBConfig(p, planID, req.DatabaseConfig)
+	}
+
 	plan := &MigrationPlan{
 		ID:             planID,
 		SourceServerID: req.SourceServerID,
@@ -138,6 +148,18 @@ func (p *Planner) Plan(ctx context.Context, req PlanRequest, onProgress StepCall
 					paths = req.ConfigPaths
 				}
 				collector = &ConfigsCollector{Paths: paths}
+			}
+		}
+
+		// For database, substitute a configured collector carrying the user's
+		// DB credentials + optional single-DB name (empty = all user DBs).
+		// Same stateful-collector pattern as configs.
+		if catName == "database" {
+			if req.DatabaseConfig != nil {
+				collector = &DatabaseCollector{
+					Creds:        req.DatabaseConfig,
+					DatabaseName: req.DatabaseConfig.DatabaseName,
+				}
 			}
 		}
 
@@ -220,3 +242,28 @@ func sendError(onStep StepCallback, step, message string) {
 
 // Ensure xssh import is used (for type compatibility)
 var _ xssh.HostKeyCallback
+
+// persistDBConfig stores the user's DB credentials on the migration's
+// MigrationConfig so the execute-time Apply can dump/restore. The password is
+// encrypted at rest (same scheme as server SSH passwords). repo is the base
+// Repo interface (no SetMigrationConfig), so type-assert to PipelineRepo.
+func persistDBConfig(p *Planner, planID int, cfg *DatabaseConfig) {
+	key := p.authSvc.GetAESKey()
+	db := *cfg // shallow copy; mutate the password only
+	if db.Password != "" {
+		enc, err := shared.Encrypt(key, []byte(db.Password))
+		if err != nil {
+			// Non-fatal: collect still ran in-memory; execute-time Apply will
+			// report the missing creds explicitly. Don't fail the whole plan.
+			return
+		}
+		db.Password = string(enc)
+	}
+	mc := &MigrationConfig{
+		Categories:     nil, // categories already on the migration row
+		DatabaseConfig: &db,
+	}
+	if r, ok := p.repo.(interface{ SetMigrationConfig(int, *MigrationConfig) error }); ok {
+		_ = r.SetMigrationConfig(planID, mc)
+	}
+}

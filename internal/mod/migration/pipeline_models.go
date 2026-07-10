@@ -366,6 +366,10 @@ type MigrationConfig struct {
 	// ConfigPaths for the configs category.
 	ConfigPaths []string `json:"configPaths,omitempty"`
 
+	// DatabaseConfig for the database category (dump/restore). Password is
+	// encrypted at rest (see pipeline_handler.go) and decrypted in Execute.
+	DatabaseConfig *DatabaseConfig `json:"databaseConfig,omitempty"`
+
 	// TrafficSwitch configuration.
 	TrafficProvider TrafficProvider `json:"trafficProvider,omitempty"`
 	TrafficConfig   string          `json:"trafficConfig,omitempty"`

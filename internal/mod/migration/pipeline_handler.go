@@ -59,6 +59,61 @@ func NewPipelineHandler(pipeline *Pipeline, repo PipelineRepo, baseRepo Repo) *P
 	}
 }
 
+// encryptDBConfig encrypts the DatabaseConfig password in place so it is stored
+// encrypted at rest (mirrors server.Service.encryptCredential). No-op when no
+// password or no database config is set.
+func (h *PipelineHandler) encryptDBConfig(cfg *MigrationConfig) error {
+	if cfg == nil || cfg.DatabaseConfig == nil || cfg.DatabaseConfig.Password == "" {
+		return nil
+	}
+	if h.pipeline == nil || h.pipeline.authSvc == nil {
+		return fmt.Errorf("app is locked")
+	}
+	key := h.pipeline.authSvc.GetAESKey()
+	if key == nil {
+		return fmt.Errorf("app is locked")
+	}
+	enc, err := shared.Encrypt(key, []byte(cfg.DatabaseConfig.Password))
+	if err != nil {
+		return fmt.Errorf("encrypt db password: %w", err)
+	}
+	cfg.DatabaseConfig.Password = string(enc)
+	return nil
+}
+
+// decryptDBConfig decrypts the DatabaseConfig password in place. Used in
+// Pipeline.Execute (via the Pipeline's authSvc) and when returning config is
+// NOT the path — config returned to the UI is redacted, never decrypted.
+func (h *PipelineHandler) decryptDBConfig(cfg *MigrationConfig) error {
+	if cfg == nil || cfg.DatabaseConfig == nil || cfg.DatabaseConfig.Password == "" {
+		return nil
+	}
+	if h.pipeline == nil || h.pipeline.authSvc == nil {
+		return fmt.Errorf("app is locked")
+	}
+	key := h.pipeline.authSvc.GetAESKey()
+	if key == nil {
+		return fmt.Errorf("app is locked")
+	}
+	dec, err := shared.Decrypt(key, []byte(cfg.DatabaseConfig.Password))
+	if err != nil {
+		return fmt.Errorf("decrypt db password: %w", err)
+	}
+	cfg.DatabaseConfig.Password = string(dec)
+	return nil
+}
+
+// redactDBConfig clears the password before returning config to the UI
+// (mirrors server.Service.redactServer). Leaves a "set" indicator.
+func (h *PipelineHandler) redactDBConfig(cfg *MigrationConfig) {
+	if cfg == nil || cfg.DatabaseConfig == nil {
+		return
+	}
+	if cfg.DatabaseConfig.Password != "" {
+		cfg.DatabaseConfig.Password = "set"
+	}
+}
+
 // RegisterRoutes registers all pipeline routes on the mux.
 func (h *PipelineHandler) RegisterRoutes(mux *http.ServeMux) {
 	// REST endpoints
@@ -110,6 +165,10 @@ func (h *PipelineHandler) handleCreatePipelineMigration(w http.ResponseWriter, r
 		req.Config = DefaultMigrationConfig()
 	}
 	normalizeMigrationConfig(req.Config, req.Categories)
+	if err := h.encryptDBConfig(req.Config); err != nil {
+		shared.WriteError(w, http.StatusInternalServerError, fmt.Sprintf("failed to secure db credentials: %v", err), "INTERNAL")
+		return
+	}
 
 	// Create migration record directly via base repo
 	migrationID, err := h.baseRepo.CreateMigration(req.SourceID, req.TargetID, req.Categories)
@@ -479,6 +538,7 @@ func (h *PipelineHandler) handleConfigByID(w http.ResponseWriter, r *http.Reques
 			shared.WriteError(w, http.StatusNotFound, "migration config not found", "NOT_FOUND")
 			return
 		}
+		h.redactDBConfig(cfg)
 		shared.WriteJSON(w, http.StatusOK, cfg)
 	case http.MethodPut:
 		shared.LimitRequestBody(r)
@@ -490,6 +550,19 @@ func (h *PipelineHandler) handleConfigByID(w http.ResponseWriter, r *http.Reques
 		normalizeMigrationConfig(&cfg, cfg.Categories)
 		if len(cfg.Categories) == 0 {
 			shared.WriteError(w, http.StatusBadRequest, "at least one category is required", "VALIDATION_ERROR")
+			return
+		}
+		// If the UI sent the redacted "set" placeholder (or no password), keep
+		// the existing encrypted password rather than overwriting it with empty.
+		if cfg.DatabaseConfig != nil && (cfg.DatabaseConfig.Password == "" || cfg.DatabaseConfig.Password == "set") {
+			if existing, err := h.repo.GetMigrationConfig(id); err == nil && existing.DatabaseConfig != nil {
+				cfg.DatabaseConfig.Password = existing.DatabaseConfig.Password
+			} else {
+				cfg.DatabaseConfig.Password = ""
+			}
+		}
+		if err := h.encryptDBConfig(&cfg); err != nil {
+			shared.WriteError(w, http.StatusInternalServerError, fmt.Sprintf("failed to secure db credentials: %v", err), "INTERNAL")
 			return
 		}
 		if err := h.repo.SetMigrationConfig(id, &cfg); err != nil {

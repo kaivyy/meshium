@@ -6,7 +6,7 @@
   import { toast } from '$lib/stores/toast';
   import { wsPlan, type WSMessage, type PlanRequest } from '$lib/api/migrations';
   import type { Server } from '$lib/stores/servers';
-  import { ArrowLeft, ArrowRight, Check, Package, FileCode, Settings, Users, Loader, Container } from 'lucide-svelte';
+  import { ArrowLeft, ArrowRight, Check, Package, FileCode, Settings, Users, Loader, Container, Database } from 'lucide-svelte';
 
   let step = 1;
   let servers: Server[] = [];
@@ -14,6 +14,20 @@
   let targetServerId = 0;
   let selectedCategories: string[] = [];
   let configPaths = '';
+  // Database category config. Defaults assume the DB runs ON the source host
+  // (localhost from the source server's perspective); port flips per engine.
+  let dbEngine = 'postgres';
+  let dbHost = 'localhost';
+  let dbPort = 5432;
+  let dbUsername = '';
+  let dbPassword = '';
+  let dbName = '';
+  const DB_DEFAULT_PORTS: Record<string, number> = {
+    postgres: 5432,
+    mysql: 3306,
+    mongodb: 27017,
+    redis: 6379,
+  };
   let planning = false;
   let planMessages: WSMessage[] = [];
   let ws: WebSocket | null = null;
@@ -52,6 +66,7 @@
     { id: 'services', label: 'Services', icon: Settings, desc: 'Systemd enabled services' },
     { id: 'users', label: 'Users & Security', icon: Users, desc: 'Users, groups, cron jobs, firewall rules' },
     { id: 'docker', label: 'Docker', icon: Container, desc: 'Running containers, compose files, volumes, images' },
+    { id: 'database', label: 'Databases', icon: Database, desc: 'PostgreSQL / MySQL / MongoDB / Redis dump & restore' },
   ];
 
   onMount(async () => {
@@ -109,6 +124,13 @@
     }
   }
 
+  function selectDbEngine(e: Event) {
+    dbEngine = (e.currentTarget as HTMLSelectElement).value;
+    // Reset to the engine's default port when switching — only if the user
+    // hasn't deliberately overridden (we can't tell, so just reset; cheap).
+    dbPort = DB_DEFAULT_PORTS[dbEngine] ?? 5432;
+  }
+
   function startPlanning() {
     planning = true;
     planMessages = [];
@@ -120,6 +142,9 @@
       targetServerId,
       categories: selectedCategories,
       configPaths: configPaths ? configPaths.split('\n').map(p => p.trim()).filter(p => p) : undefined,
+      databaseConfig: selectedCategories.includes('database')
+        ? { engine: dbEngine, databaseName: dbName.trim(), username: dbUsername, password: dbPassword, host: dbHost, port: dbPort }
+        : undefined,
     };
 
     ws = wsPlan(
@@ -284,6 +309,52 @@
           ></textarea>
         </div>
       {/if}
+
+      {#if selectedCategories.includes('database')}
+        <div class="mt-4 p-4 rounded-lg border border-border space-y-3">
+          <div>
+            <p class="text-sm font-medium text-fg">Database Migration</p>
+            <p class="text-xs text-fg-subtle mt-1">
+              Dumps the source DB and restores it on the target. Downtime = transfer time.
+              Leave DB name empty to migrate all user databases.
+            </p>
+          </div>
+          <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
+            <div>
+              <label for="dbEngine" class="text-xs font-medium text-fg block mb-1">Engine</label>
+              <select id="dbEngine" value={dbEngine} on:change={selectDbEngine} class="w-full p-2 border border-border rounded text-sm bg-surface">
+                <option value="postgres">PostgreSQL</option>
+                <option value="mysql">MySQL / MariaDB</option>
+                <option value="mongodb">MongoDB</option>
+                <option value="redis">Redis</option>
+              </select>
+            </div>
+            <div>
+              <label for="dbName" class="text-xs font-medium text-fg block mb-1">Database name (optional)</label>
+              <input id="dbName" bind:value={dbName} placeholder="empty = all user DBs" class="w-full p-2 border border-border rounded text-sm font-mono bg-surface" />
+            </div>
+            <div>
+              <label for="dbHost" class="text-xs font-medium text-fg block mb-1">Host</label>
+              <input id="dbHost" bind:value={dbHost} class="w-full p-2 border border-border rounded text-sm font-mono bg-surface" />
+            </div>
+            <div>
+              <label for="dbPort" class="text-xs font-medium text-fg block mb-1">Port</label>
+              <input id="dbPort" type="number" bind:value={dbPort} class="w-full p-2 border border-border rounded text-sm font-mono bg-surface" />
+            </div>
+            <div>
+              <label for="dbUsername" class="text-xs font-medium text-fg block mb-1">Username</label>
+              <input id="dbUsername" bind:value={dbUsername} class="w-full p-2 border border-border rounded text-sm font-mono bg-surface" />
+            </div>
+            <div>
+              <label for="dbPassword" class="text-xs font-medium text-fg block mb-1">Password</label>
+              <input id="dbPassword" type="password" bind:value={dbPassword} class="w-full p-2 border border-border rounded text-sm font-mono bg-surface" />
+            </div>
+          </div>
+          {#if dbEngine === 'redis'}
+            <p class="text-xs text-fg-subtle">Redis uses an RDB snapshot (no per-DB name/username); name/username are ignored.</p>
+          {/if}
+        </div>
+      {/if}
     </div>
 
   <!-- Step 4: Review & Plan -->
@@ -311,6 +382,14 @@
           <div>
             <p class="text-sm text-fg-subtle">Config Paths</p>
             <p class="font-mono text-xs text-fg-muted break-all">{configPaths}</p>
+          </div>
+        {/if}
+        {#if selectedCategories.includes('database')}
+          <div>
+            <p class="text-sm text-fg-subtle">Database</p>
+            <p class="font-mono text-xs text-fg-muted">
+              {dbEngine}://{dbUsername ? '***' : '(no auth)'}@{dbHost}:{dbPort}{dbName ? '/' + dbName : ' (all user DBs)'}
+            </p>
           </div>
         {/if}
       </div>

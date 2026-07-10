@@ -8,6 +8,7 @@ import (
 	"io"
 	"net"
 	"os"
+	"strings"
 	"sync"
 	"time"
 
@@ -543,6 +544,153 @@ func (c *Client) ExecStreamLinesContextWithTimeout(ctx context.Context, cmd stri
 	}
 
 	return session.Wait()
+}
+
+// ExecPipe runs cmd on the remote host and returns a live reader for its
+// stdout. This is the streaming counterpart to ExecContext: ExecContext buffers
+// all stdout in memory (and so OOMs on a multi-GB dump), whereas ExecPipe hands
+// back the raw pipe so a large dump can stream directly into a target restore.
+//
+// The caller MUST Close the reader. Close waits for the session to finish and
+// turns a non-zero exit into an error (so callers do not have to inspect exit
+// codes the way they do for ExecContext). The session is closed on context
+// cancellation.
+func (c *Client) ExecPipe(ctx context.Context, cmd string) (io.ReadCloser, error) {
+	c.touch()
+
+	session, err := c.conn.NewSession()
+	if err != nil {
+		return nil, err
+	}
+
+	stdout, err := session.StdoutPipe()
+	if err != nil {
+		_ = session.Close()
+		return nil, err
+	}
+	// Capture stderr so a failure isn't lost to /dev/null; surfaced on Close.
+	stderr, err := session.StderrPipe()
+	if err != nil {
+		_ = session.Close()
+		return nil, err
+	}
+
+	if err := session.Start(cmd); err != nil {
+		if ctx.Err() != nil {
+			_ = session.Close()
+			return nil, ctx.Err()
+		}
+		_ = session.Close()
+		return nil, err
+	}
+
+	pr := &pipeReader{
+		session: session,
+		stdout:  stdout,
+		stderr:  stderr,
+		ctx:     ctx,
+	}
+	// Cancel the session if the context expires before Close.
+	go func() {
+		select {
+		case <-ctx.Done():
+			_ = session.Close()
+		case <-pr.done:
+		}
+	}()
+	return pr, nil
+}
+
+// pipeReader wraps a streamed SSH session's stdout. Close waits for the session
+// to exit and reports a non-zero exit (with captured stderr) as an error.
+type pipeReader struct {
+	session *ssh.Session
+	stdout  io.Reader
+	stderr  io.Reader
+	ctx     context.Context
+	done    chan struct{}
+	once    sync.Once
+}
+
+func (p *pipeReader) Read(b []byte) (int, error) {
+	return p.stdout.Read(b)
+}
+
+func (p *pipeReader) Close() error {
+	var closeErr error
+	p.once.Do(func() {
+		close(p.done)
+		// Wait for the command to finish; session.Close is needed to release
+		// resources whether or not Wait succeeds.
+		werr := p.session.Wait()
+		_ = p.session.Close()
+		closeErr = werr
+	})
+	if closeErr != nil {
+		// A non-zero exit surfaces here so callers see the failure on Close
+		// without having to inspect an exit code (unlike ExecContext).
+		stderrBytes, _ := io.ReadAll(p.stderr)
+		return fmt.Errorf("remote command failed: %w; stderr: %s", closeErr, strings.TrimSpace(string(stderrBytes)))
+	}
+	return nil
+}
+
+// ExecWithStdin runs cmd on the remote host, feeding it from stdin. This is the
+// restore-side counterpart to ExecPipe: a dump streamed from the source
+// (ExecPipe) pipes straight into the target restore with no local temp file.
+// Returns stderr and the exit code; a non-zero exit is reported as an error.
+func (c *Client) ExecWithStdin(ctx context.Context, cmd string, stdin io.Reader) (string, int, error) {
+	c.touch()
+
+	var execCtx context.Context
+	var cancel context.CancelFunc
+	if t := c.timeouts.Command; t > 0 {
+		execCtx, cancel = context.WithTimeout(ctx, t)
+	} else {
+		execCtx, cancel = context.WithCancel(ctx)
+	}
+	defer cancel()
+
+	session, err := c.conn.NewSession()
+	if err != nil {
+		return "", -1, err
+	}
+	defer session.Close()
+
+	session.Stdin = stdin
+	var stderr bytes.Buffer
+	session.Stderr = &stderr
+
+	var closeOnce sync.Once
+	done := make(chan struct{})
+	defer close(done)
+	go func() {
+		select {
+		case <-execCtx.Done():
+			closeOnce.Do(func() { _ = session.Close() })
+		case <-done:
+		}
+	}()
+
+	if err := session.Start(cmd); err != nil {
+		if execCtx.Err() != nil {
+			return stderr.String(), -1, execCtx.Err()
+		}
+		return stderr.String(), -1, err
+	}
+
+	if err := session.Wait(); err != nil {
+		if execCtx.Err() != nil {
+			return stderr.String(), -1, execCtx.Err()
+		}
+		// Surface the exit code alongside the error so callers can distinguish
+		// a restore failure from a transport failure.
+		if exitErr, ok := err.(*ssh.ExitError); ok {
+			return stderr.String(), exitErr.ExitStatus(), err
+		}
+		return stderr.String(), -1, err
+	}
+	return stderr.String(), 0, nil
 }
 
 // Upload uploads a file via SFTP.

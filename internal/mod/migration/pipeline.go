@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"meshium/internal/mod/server"
+	"meshium/internal/shared"
 )
 
 // PipelineStageHandler is the interface that each pipeline stage must implement.
@@ -182,6 +183,18 @@ func (p *Pipeline) Execute(ctx context.Context, migrationID int, onProgress Step
 	config, err := p.repo.GetMigrationConfig(migrationID)
 	if err != nil {
 		config = DefaultMigrationConfig()
+	}
+	// Decrypt the DB credentials for the database category's Apply step.
+	// Stored encrypted (pipeline_handler encryptDBConfig); plaintext only in
+	// memory for the lifetime of this execution.
+	if config.DatabaseConfig != nil && config.DatabaseConfig.Password != "" && config.DatabaseConfig.Password != "set" {
+		if p.authSvc != nil {
+			if key := p.authSvc.GetAESKey(); key != nil {
+				if dec, derr := shared.Decrypt(key, []byte(config.DatabaseConfig.Password)); derr == nil {
+					config.DatabaseConfig.Password = string(dec)
+				}
+			}
+		}
 	}
 
 	// Initialize state machine from current state
@@ -1252,6 +1265,11 @@ func (s *initialSyncStage) Execute(ctx context.Context, pc *PipelineContext) err
 		if ctx.Err() != nil {
 			return ctx.Err()
 		}
+		// Only apply freshly-collected steps. Applied steps have their status
+		// flipped to "applied" (UpdateStepStatus below), so this also skips
+		// already-applied categories on a stage retry/resume — which for the
+		// database category would mean re-dumping/re-restoring. Idempotent
+		// restore flags (--clean/--drop) are defense-in-depth.
 		if step.Action != "collect" || step.Status != StepStatusCompleted {
 			continue
 		}
@@ -1270,6 +1288,18 @@ func (s *initialSyncStage) Execute(ctx context.Context, pc *PipelineContext) err
 			skippedSet[step.Category] = struct{}{}
 			pc.OnProgress(WSMessage{Step: "initial_sync", Status: "warning", Value: fmt.Sprintf("Skipping %s: invalid step data: %v", step.Category, err)})
 			continue
+		}
+
+		// The database applier needs the source SSH (for the dump half) and the
+		// decrypted DB config, neither of which the Apply signature carries.
+		// Inject them here, mirroring the planner's configs/database
+		// special-case (type-assert + configure). ponytail: interface stays
+		// stable at the cost of a type-assertion in this stage.
+		if dba, ok := mod.Applier.(*DatabaseApplier); ok {
+			dba.SetSourceSSH(pc.SourceSSH)
+			if pc.Config != nil {
+				dba.SetConfig(pc.Config.DatabaseConfig)
+			}
 		}
 
 		pc.OnProgress(WSMessage{Step: "initial_sync", Status: "progress", Value: fmt.Sprintf("Applying %s...", step.Category)})

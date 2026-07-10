@@ -29,11 +29,21 @@ export interface MigrationStep {
   completedAt: string;
 }
 
+export interface DatabaseConfig {
+  engine: string; // postgres | mysql | mongodb | redis
+  databaseName: string; // empty = all user databases
+  username: string;
+  password: string;
+  host: string;
+  port: number;
+}
+
 export interface PlanRequest {
   sourceServerId: number;
   targetServerId: number;
   categories: string[];
   configPaths?: string[];
+  databaseConfig?: DatabaseConfig;
 }
 
 export interface WSMessage {
