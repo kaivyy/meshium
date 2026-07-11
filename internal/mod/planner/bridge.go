@@ -9,7 +9,25 @@ import (
 	"meshium/internal/mod/migration"
 	"meshium/internal/mod/transfer"
 	"meshium/internal/mod/transport"
+	"meshium/internal/shared"
 )
+
+// validateVolName rejects volume/container names containing characters outside
+// a safe shell-and-path set. It is a loud failure layer on top of ShellQuote
+// (which already neutralizes injection). Empty names are rejected. This makes
+// a hostile name a hard error rather than relying on quoting alone.
+func validateVolName(name string) error {
+	if name == "" {
+		return fmt.Errorf("empty volume name")
+	}
+	const allowed = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789_.:/-"
+	for _, r := range name {
+		if !strings.ContainsRune(allowed, r) {
+			return fmt.Errorf("invalid character %q in volume name", r)
+		}
+	}
+	return nil
+}
 
 // BuildSteps converts a MigrationPlan into a slice of migration.MigrationStep
 // instances that can be directly executed by the Phase 2 Engine.
@@ -249,10 +267,16 @@ func (s *DockerVolumeMigrationStep) Apply(sctx migration.StepContext) (string, e
 			Value:  fmt.Sprintf("Stopping container %s on source...", s.ContainerName),
 		})
 	}
-	s.SourceSSH.ExecContext(ctx, fmt.Sprintf("docker stop %s", s.ContainerName))
+	if err := validateVolName(s.ContainerName); err != nil {
+		return "", fmt.Errorf("container name: %w", err)
+	}
+	s.SourceSSH.ExecContext(ctx, fmt.Sprintf("docker stop %s", shared.ShellQuote(s.ContainerName)))
 
 	// Transfer each volume
 	for _, vol := range s.Volumes {
+		if err := validateVolName(vol); err != nil {
+			return "", fmt.Errorf("volume name: %w", err)
+		}
 		if sctx.Progress != nil {
 			sctx.Progress(migration.WSMessage{
 				Step:   s.StepName,
@@ -263,7 +287,7 @@ func (s *DockerVolumeMigrationStep) Apply(sctx migration.StepContext) (string, e
 
 		// Create a tar archive on the source and download it
 		sourcePath := fmt.Sprintf("/tmp/meshium-vol-%s.tar", s.ContainerName)
-		s.SourceSSH.ExecContext(ctx, fmt.Sprintf("tar cf %s -C %s .", sourcePath, vol))
+		s.SourceSSH.ExecContext(ctx, fmt.Sprintf("tar cf %s -C %s .", shared.ShellQuote(sourcePath), shared.ShellQuote(vol)))
 
 		// Download from source, upload to target
 		// This is a simplified version — in production, we'd use the transfer engine
@@ -276,11 +300,11 @@ func (s *DockerVolumeMigrationStep) Apply(sctx migration.StepContext) (string, e
 		s.TargetSSH.Upload(pipeReader, destPath)
 
 		// Extract on target
-		s.TargetSSH.ExecContext(ctx, fmt.Sprintf("mkdir -p %s && tar xf %s -C %s", vol, destPath, vol))
+		s.TargetSSH.ExecContext(ctx, fmt.Sprintf("mkdir -p %s && tar xf %s -C %s", shared.ShellQuote(vol), shared.ShellQuote(destPath), shared.ShellQuote(vol)))
 
 		// Cleanup temp files
-		s.SourceSSH.ExecContext(ctx, fmt.Sprintf("rm -f %s", sourcePath))
-		s.TargetSSH.ExecContext(ctx, fmt.Sprintf("rm -f %s", destPath))
+		s.SourceSSH.ExecContext(ctx, fmt.Sprintf("rm -f %s", shared.ShellQuote(sourcePath)))
+		s.TargetSSH.ExecContext(ctx, fmt.Sprintf("rm -f %s", shared.ShellQuote(destPath)))
 	}
 
 	data := map[string]interface{}{
@@ -307,7 +331,10 @@ func (s *DockerVolumeMigrationStep) Verify(sctx migration.StepContext) (string, 
 
 	// Verify that volumes exist on the target
 	for _, vol := range s.Volumes {
-		_, stderr, exitCode, err := s.TargetSSH.ExecContext(ctx, fmt.Sprintf("test -d %s", vol))
+		if err := validateVolName(vol); err != nil {
+			return "", fmt.Errorf("volume name: %w", err)
+		}
+		_, stderr, exitCode, err := s.TargetSSH.ExecContext(ctx, fmt.Sprintf("test -d %s", shared.ShellQuote(vol)))
 		if err != nil || exitCode != 0 {
 			return "", fmt.Errorf("volume %s not found on target: %s", vol, stderr)
 		}

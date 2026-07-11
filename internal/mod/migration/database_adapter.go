@@ -235,9 +235,10 @@ type mysqlMigrator struct{}
 func (mysqlMigrator) Engine() string { return "mysql" }
 
 func (mysqlMigrator) Detect(ctx context.Context, ssh SSHExecuter) bool {
-	out, _, _, _ := ssh.ExecContext(ctx, "pgrep -x mysqld >/dev/null 2>&1 || pgrep -x mariadbd >/dev/null 2>&1; echo yes")
-	// pgrep returns non-zero if nothing matched; the trailing echo confirms exec ran.
-	return strings.Contains(out, "yes")
+	// pgrep returns non-zero if nothing matched; gate echo on the OR result so an
+	// absent mysqld+ mariadbd prints nothing (not "yes"). Matches postgresMigrator.
+	out, _, _, _ := ssh.ExecContext(ctx, "(pgrep -x mysqld >/dev/null 2>&1 || pgrep -x mariadbd >/dev/null 2>&1) && echo yes")
+	return strings.TrimSpace(out) == "yes"
 }
 
 func (mysqlMigrator) Streaming() bool { return true }
@@ -305,13 +306,26 @@ func (mongoMigrator) Streaming() bool { return true }
 func (mongoMigrator) ListDatabases(ctx context.Context, ssh SSHExecuter, c DBCredentials) ([]DBCatalogEntry, error) {
 	// listDatabases via the mongo shell; parseMongoCatalog pulls name +
 	// sizeOnDisk (bytes→MiB) and excludes admin/config/local.
-	shell := "db.adminCommand({listDatabases:1})"
-	listCmd := fmt.Sprintf("mongo %s --quiet --eval %s 2>/dev/null", mongoConnArgs(c), shared.ShellQuote(shell))
+	shell, _ := mongoShell(ctx, ssh)
+	eval := "db.adminCommand({listDatabases:1})"
+	listCmd := fmt.Sprintf("%s %s --quiet --eval %s 2>/dev/null", shell, mongoConnArgs(c), shared.ShellQuote(eval))
 	out, _, exit, err := ssh.ExecContext(ctx, listCmd)
 	if err != nil || exit != 0 {
 		return nil, fmt.Errorf("mongo list databases: %v", err)
 	}
 	return parseMongoCatalog(out)
+}
+
+// mongoShell resolves the MongoDB shell binary, preferring mongosh (MongoDB 5+)
+// and falling back to the legacy mongo shell with a redacted warning. mongosh is
+// the modern default (replication.go:531,539 already assume it); the fallback
+// keeps MongoDB 4.x hosts working without silently downgrading.
+func mongoShell(ctx context.Context, ssh SSHExecuter) (shell string, warning string) {
+	out, _, _, _ := ssh.ExecContext(ctx, "command -v mongosh 2>/dev/null")
+	if strings.TrimSpace(out) != "" {
+		return "mongosh", ""
+	}
+	return "mongo", "mongosh not found; falling back to legacy 'mongo' shell (MongoDB 4.x compat). Install mongosh when possible."
 }
 
 func (mongoMigrator) StreamDumpCommand(c DBCredentials, db string) string {
@@ -336,9 +350,11 @@ func (mongoMigrator) RestoreCommand(c DBCredentials, db, path string) string {
 }
 
 func (mongoMigrator) DropDatabaseCommand(c DBCredentials, db string) string {
-	// Drop via the shell; db name is the eval target.
+	// Drop via the shell; db name is the eval target. Command builders are pure
+	// (no ctx/ssh), so mongosh is used unconditionally — replication.go already
+	// assumes mongosh. The legacy fallback only applies to ListDatabases.
 	drop := fmt.Sprintf("db.getSiblingDB(%s).dropDatabase()", shared.ShellQuote(db))
-	return fmt.Sprintf("mongo %s --quiet --eval %s 2>/dev/null", mongoConnArgs(c), shared.ShellQuote(drop))
+	return fmt.Sprintf("mongosh %s --quiet --eval %s 2>/dev/null", mongoConnArgs(c), shared.ShellQuote(drop))
 }
 
 // --- Redis -----------------------------------------------------------------
@@ -357,8 +373,8 @@ func (redisMigrator) Streaming() bool { return false }
 func (redisMigrator) ListDatabases(ctx context.Context, ssh SSHExecuter, c DBCredentials) ([]DBCatalogEntry, error) {
 	// Redis has one logical DB namespace; report DBSIZE as a rough "size" (key
 	// count, not MiB — Redis exposes no per-DB size without SCAN+DEBUG).
-	cmd := fmt.Sprintf("redis-cli -h %s -p %d %s DBSIZE 2>/dev/null",
-		shared.ShellQuote(c.Host), c.Port, redisAuth(c))
+	cmd := fmt.Sprintf("%s redis-cli -h %s -p %d DBSIZE 2>/dev/null",
+		redisEnv(c), shared.ShellQuote(c.Host), c.Port)
 	out, _, exit, err := ssh.ExecContext(ctx, cmd)
 	if err != nil || exit != 0 {
 		return nil, fmt.Errorf("redis dbsize: %v", err)
@@ -379,37 +395,45 @@ func (redisMigrator) StreamRestoreCommand(c DBCredentials, db string) string {
 
 func (redisMigrator) DumpCommand(c DBCredentials, db, path string) string {
 	// redis-cli --rdb streams the RDB to stdout; redirect to the remote file.
-	return fmt.Sprintf("redis-cli -h %s -p %d %s --rdb %s 2>/dev/null",
-		shared.ShellQuote(c.Host), c.Port, redisAuth(c), shared.ShellQuote(path))
+	// Password rides REDISCLI_AUTH (never -a on argv).
+	return fmt.Sprintf("%s redis-cli -h %s -p %d --rdb %s 2>/dev/null",
+		redisEnv(c), shared.ShellQuote(c.Host), c.Port, shared.ShellQuote(path))
 }
 
 func (redisMigrator) RestoreCommand(c DBCredentials, db, path string) string {
-	// Restore = copy the RDB into the Redis data dir and restart so it loads.
-	// This is the standard Redis RDB restore path; there is no online restore.
+	// Restore = copy the RDB into the Redis data dir, restart, and require a PONG
+	// health check. A failed restart must surface as an error — no || true masking
+	// the chain. set -e makes any step abort before the PING gate; the SHUTDOWN's
+	// expected non-zero is the only allowed non-zero (redis closes the conn).
 	return fmt.Sprintf(
-		"rdir=$(redis-cli -h %s -p %d %s CONFIG GET dir 2>/dev/null | tail -1); "+
+		"set -e; "+
+			"rdir=$(redis-cli -h %s -p %d %s CONFIG GET dir 2>/dev/null | tail -1); "+
 			"[ -n \"$rdir\" ] || rdir=/var/lib/redis; "+
-			"cp %s \"$rdir/dump.rdb\" && "+
-			"redis-cli -h %s -p %d %s SHUTDOWN NOSAVE 2>/dev/null; "+
-			"systemctl restart redis redis-server 2>/dev/null || service redis-server restart 2>/dev/null || true",
-		shared.ShellQuote(c.Host), c.Port, redisAuth(c),
+			"cp %s \"$rdir/dump.rdb\"; "+
+			"redis-cli -h %s -p %d %s SHUTDOWN NOSAVE 2>/dev/null || true; "+
+			"(systemctl restart redis redis-server 2>/dev/null || service redis-server restart 2>/dev/null || /etc/init.d/redis-server restart 2>/dev/null); "+
+			"pong=$(redis-cli -h %s -p %d %s PING 2>/dev/null); "+
+			"[ \"$pong\" = \"PONG\" ]",
+		shared.ShellQuote(c.Host), c.Port, redisEnv(c),
 		shared.ShellQuote(path),
-		shared.ShellQuote(c.Host), c.Port, redisAuth(c))
+		shared.ShellQuote(c.Host), c.Port, redisEnv(c),
+		shared.ShellQuote(c.Host), c.Port, redisEnv(c))
 }
 
 func (redisMigrator) DropDatabaseCommand(c DBCredentials, db string) string {
 	// FLUSHALL empties the dataset (rollback = undo the restore).
-	return fmt.Sprintf("redis-cli -h %s -p %d %s FLUSHALL 2>/dev/null",
-		shared.ShellQuote(c.Host), c.Port, redisAuth(c))
+	return fmt.Sprintf("%s redis-cli -h %s -p %d FLUSHALL 2>/dev/null",
+		redisEnv(c), shared.ShellQuote(c.Host), c.Port)
 }
 
-// redisAuth returns the -a flag with the password, or empty if none. The
-// password is shell-quoted.
-func redisAuth(c DBCredentials) string {
+// redisEnv returns the REDISCLI_AUTH env prefix so the password never appears on
+// the command line (process list / ps audit). Empty if no password. Mirrors the
+// pgEnv / mysqlEnv convention. Redis rejects -a as of 7.2 in any case.
+func redisEnv(c DBCredentials) string {
 	if c.Password == "" {
 		return ""
 	}
-	return fmt.Sprintf("-a %s --no-auth-warning", shared.ShellQuote(c.Password))
+	return fmt.Sprintf("REDISCLI_AUTH=%s", shared.ShellQuote(c.Password))
 }
 
 // --- shared helpers --------------------------------------------------------
