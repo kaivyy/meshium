@@ -434,9 +434,17 @@ func (p *Pipeline) Execute(ctx context.Context, migrationID int, onProgress Step
 		}
 	}
 
-	// All stages completed — commit
+	// All stages completed — commit. P0-2: never ForceTransition(Committed).
+	// The trafficSwitchStage returns ErrAwaitingCutover for a manual cutover,
+	// stopping the loop at StateAwaitingCutover before reaching here, so this
+	// path is only reached when cutover was confirmed. If the validated
+	// Transition fails, the from-state was unexpected — fail closed to
+	// NeedsManualIntervention rather than forcing Committed past the rules.
 	if err := sm.Transition(StateCommitted); err != nil {
-		sm.ForceTransition(StateCommitted)
+		if stateErr := p.jobRepo.SetMigrationStateContext(ctx, migrationID, StateNeedsManualIntervention); stateErr != nil {
+			log.Printf("error: commit transition failed (%v) and could not fail-closed: %v", err, stateErr)
+		}
+		return fmt.Errorf("commit transition failed: %w", err)
 	}
 	if err := p.jobRepo.SetMigrationStateContext(ctx, migrationID, StateCommitted); err != nil {
 		log.Printf("warning: failed to persist committed state for migration %d: %v", migrationID, err)
@@ -967,6 +975,9 @@ func (p *Pipeline) release(migrationID int) {
 
 func (p *Pipeline) failPipeline(ctx context.Context, sm *StateMachine, migrationID int, errMsg string, onProgress StepCallback) {
 	onProgress(WSMessage{Step: "pipeline", Status: "error", Error: errMsg})
+	// P0-2 ForceTransition audit: StateFailed is failure-marking only — it can
+	// never reach Committed, so it cannot bypass cutover rules. Force is the
+	// acceptable fallback when the from-state was unexpected.
 	if err := sm.Transition(StateFailed); err != nil {
 		sm.ForceTransition(StateFailed)
 	}
@@ -980,6 +991,8 @@ func (p *Pipeline) failPipeline(ctx context.Context, sm *StateMachine, migration
 
 func (p *Pipeline) interruptPipeline(ctx context.Context, sm *StateMachine, migrationID int, onProgress StepCallback) {
 	onProgress(WSMessage{Step: "pipeline", Status: "warning", Value: "Migration interrupted"})
+	// P0-2 ForceTransition audit: recovery-only (context cancellation); never
+	// reaches Committed, cannot bypass cutover rules.
 	if err := sm.Transition(StateInterrupted); err != nil {
 		sm.ForceTransition(StateInterrupted)
 	}
@@ -994,7 +1007,8 @@ func (p *Pipeline) interruptPipeline(ctx context.Context, sm *StateMachine, migr
 func (p *Pipeline) rollbackPipeline(ctx context.Context, sm *StateMachine, migrationID int, failedStageIndex int, onProgress StepCallback) {
 	onProgress(WSMessage{Step: "pipeline", Status: "progress", Value: "Starting automatic rollback..."})
 
-	// Transition to Failed then Rollback
+	// Transition to Failed then Rollback. P0-2 ForceTransition audit: entering
+	// Failed/Rollback only — never reaches Committed, cannot bypass cutover.
 	if err := sm.Transition(StateFailed); err != nil {
 		sm.ForceTransition(StateFailed)
 	}
@@ -1002,6 +1016,9 @@ func (p *Pipeline) rollbackPipeline(ctx context.Context, sm *StateMachine, migra
 		log.Printf("warning: failed to persist failed state for migration %d: %v", migrationID, err)
 	}
 
+	// P0-2 ForceTransition audit: this only ENTERS rollback — it never reaches
+	// Committed, so it cannot bypass cutover rules. The terminal state is
+	// decided honestly by rollbackTerminalState below, never forced to RolledBack.
 	if err := sm.Transition(StateRollback); err != nil {
 		sm.ForceTransition(StateRollback)
 	}
@@ -1053,7 +1070,10 @@ func (p *Pipeline) rollbackPipeline(ctx context.Context, sm *StateMachine, migra
 	copy(stages, p.stages)
 	p.mu.Unlock()
 
-	// Roll back in reverse order
+	// Roll back in reverse order. P0-2: aggregate any step failure so the
+	// terminal state is honest — any failed step ⇒ RollbackDegraded (or
+	// NeedsManualIntervention for an unsafe topology), never a clean RolledBack.
+	var rollbackErr error
 	for i := len(completedStages) - 1; i >= 0; i-- {
 		stage := completedStages[i]
 		for _, handler := range stages {
@@ -1064,6 +1084,7 @@ func (p *Pipeline) rollbackPipeline(ctx context.Context, sm *StateMachine, migra
 					Value:  fmt.Sprintf("Rolling back: %s", stage.StageName),
 				})
 				if err := handler.Rollback(ctx, pc); err != nil {
+					rollbackErr = errors.Join(rollbackErr, err)
 					onProgress(WSMessage{
 						Step:   stage.StageName,
 						Status: "warning",
@@ -1075,17 +1096,31 @@ func (p *Pipeline) rollbackPipeline(ctx context.Context, sm *StateMachine, migra
 		}
 	}
 
-	// Transition to RolledBack
-	if err := sm.Transition(StateRolledBack); err != nil {
-		sm.ForceTransition(StateRolledBack)
+	// P0-2: decide the terminal state from the aggregate rollback error — never
+	// ForceTransition(RolledBack). nil ⇒ RolledBack; ErrUnsafeTopology ⇒
+	// NeedsManualIntervention; anything else ⇒ RollbackDegraded. If the validated
+	// Transition to the chosen state fails, fail closed to NeedsManualIntervention.
+	terminal := rollbackTerminalState(rollbackErr)
+	if err := sm.Transition(terminal); err != nil {
+		terminal = StateNeedsManualIntervention
+		if stateErr := p.jobRepo.SetMigrationStateContext(ctx, migrationID, StateNeedsManualIntervention); stateErr != nil {
+			log.Printf("error: rollback terminal transition failed (%v) and could not fail-closed: %v", err, stateErr)
+		}
+	} else {
+		if err := p.jobRepo.SetMigrationStateContext(ctx, migrationID, terminal); err != nil {
+			log.Printf("warning: failed to persist %s state for migration %d: %v", terminal, migrationID, err)
+		}
 	}
-	if err := p.jobRepo.SetMigrationStateContext(ctx, migrationID, StateRolledBack); err != nil {
-		log.Printf("warning: failed to persist rolled back state for migration %d: %v", migrationID, err)
+	if terminal == StateRolledBack {
+		if err := p.jobRepo.SetMigrationRolledBackAt(migrationID, time.Now().Format(time.RFC3339)); err != nil {
+			log.Printf("warning: failed to persist rolled back timestamp for migration %d: %v", migrationID, err)
+		}
 	}
-	if err := p.jobRepo.SetMigrationRolledBackAt(migrationID, time.Now().Format(time.RFC3339)); err != nil {
-		log.Printf("warning: failed to persist rolled back timestamp for migration %d: %v", migrationID, err)
+	if terminal == StateRollbackDegraded || terminal == StateNeedsManualIntervention {
+		onProgress(WSMessage{Step: "pipeline", Status: "warning", Value: fmt.Sprintf("Rollback finished in degraded state: %s", terminal)})
+	} else {
+		onProgress(WSMessage{Step: "pipeline", Status: "complete", Value: "Rollback complete"})
 	}
-	onProgress(WSMessage{Step: "pipeline", Status: "complete", Value: "Rollback complete"})
 }
 
 // --- Stage Implementations ---

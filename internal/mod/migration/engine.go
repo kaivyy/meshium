@@ -3,6 +3,7 @@ package migration
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"log"
 	"sync"
@@ -557,6 +558,9 @@ func (e *Engine) failMigration(ctx context.Context, sm *StateMachine, migrationI
 	// the event's stage reflects where the migration actually broke.
 	e.obsStageFailed(migrationID, stageOf(sm.State()), errMsg)
 	onProgress(WSMessage{Step: "engine", Status: "error", Error: errMsg})
+	// P0-2 ForceTransition audit: StateFailed is failure-marking only — it can
+	// never reach Committed, so it cannot bypass cutover rules. Force is the
+	// acceptable fallback when the from-state was unexpected.
 	if err := sm.Transition(StateFailed); err != nil {
 		sm.ForceTransition(StateFailed)
 	}
@@ -574,7 +578,9 @@ func (e *Engine) failAndRollback(ctx context.Context, sm *StateMachine, migratio
 		return
 	}
 
-	// Transition to Rollback
+	// Transition to Rollback. P0-2 ForceTransition audit: this only ENTERS
+	// rollback — it never reaches Committed, so it cannot bypass cutover rules.
+	// Force is the acceptable fallback when the from-state was unexpected.
 	if err := sm.Transition(StateRollback); err != nil {
 		sm.ForceTransition(StateRollback)
 	}
@@ -582,6 +588,10 @@ func (e *Engine) failAndRollback(ctx context.Context, sm *StateMachine, migratio
 		log.Printf("warning: failed to persist rollback state for migration %d: %v", migrationID, err)
 	}
 	onProgress(WSMessage{Step: "engine", Status: "progress", Value: "Rolling back applied steps (LIFO)..."})
+
+	// Rollback in LIFO order. P0-2: aggregate failures so the terminal state
+	// is honest (rollbackTerminalState consults this below).
+	var rollbackErr error
 
 	// Rollback in LIFO order
 	for i := len(appliedSteps) - 1; i >= 0; i-- {
@@ -609,6 +619,7 @@ func (e *Engine) failAndRollback(ctx context.Context, sm *StateMachine, migratio
 		}
 
 		if err := step.Rollback(sctx); err != nil {
+			rollbackErr = errors.Join(rollbackErr, err)
 			onProgress(WSMessage{
 				Step:   step.Name(),
 				Status: "warning",
@@ -622,14 +633,27 @@ func (e *Engine) failAndRollback(ctx context.Context, sm *StateMachine, migratio
 		}
 	}
 
-	// Transition to Restored
-	if err := sm.Transition(StateRolledBack); err != nil {
-		sm.ForceTransition(StateRolledBack)
+	// Transition to the honest terminal state. P0-2: never
+	// ForceTransition(RolledBack). Any step failure ⇒ RollbackDegraded (or
+	// NeedsManualIntervention for an unsafe topology); only a fully clean
+	// rollback ⇒ RolledBack. If the validated Transition fails, fail closed to
+	// NeedsManualIntervention.
+	terminal := rollbackTerminalState(rollbackErr)
+	if err := sm.Transition(terminal); err != nil {
+		terminal = StateNeedsManualIntervention
+		if stateErr := e.repo.SetMigrationStateContext(ctx, migrationID, StateNeedsManualIntervention); stateErr != nil {
+			log.Printf("error: rollback terminal transition failed (%v) and could not fail-closed: %v", err, stateErr)
+		}
+	} else {
+		if err := e.repo.SetMigrationStateContext(ctx, migrationID, terminal); err != nil {
+			log.Printf("warning: failed to persist %s state for migration %d: %v", terminal, migrationID, err)
+		}
 	}
-	if err := e.repo.SetMigrationStateContext(ctx, migrationID, StateRolledBack); err != nil {
-		log.Printf("warning: failed to persist rolled back state for migration %d: %v", migrationID, err)
+	if terminal == StateRolledBack {
+		onProgress(WSMessage{Step: "engine", Status: "complete", Value: "Rollback complete — target restored"})
+	} else {
+		onProgress(WSMessage{Step: "engine", Status: "warning", Value: fmt.Sprintf("Rollback finished in degraded state: %s", terminal)})
 	}
-	onProgress(WSMessage{Step: "engine", Status: "complete", Value: "Rollback complete — target restored"})
 }
 
 // interruptMigration handles context cancellation by marking the migration as interrupted.
@@ -639,7 +663,8 @@ func (e *Engine) interruptMigration(ctx context.Context, sm *StateMachine, migra
 	e.obsMigrationInterrupted(migrationID, stageOf(sm.State()), "context cancelled")
 	onProgress(WSMessage{Step: "engine", Status: "warning", Value: "Migration interrupted by context cancellation"})
 
-	// Transition to Interrupted
+	// Transition to Interrupted. P0-2 ForceTransition audit: recovery-only
+	// (context cancellation); never reaches Committed, cannot bypass cutover.
 	if err := sm.Transition(StateInterrupted); err != nil {
 		sm.ForceTransition(StateInterrupted)
 	}

@@ -290,6 +290,10 @@ var transitionTable = map[MigrationState][]MigrationState{
 		StateInitialSync, StateLiveReplication, StateVerification,
 		StatePreCutover, StateTrafficSwitch, StatePostVerification,
 		StateObservation, StateFailed, StateInterrupted,
+		// P0-2: a resumed migration whose remaining stages all complete may commit
+		// via the validated Transition (Execute's commit path). This replaces the
+		// removed ForceTransition(Committed) — the edge is now explicit and audited.
+		StateCommitted,
 	},
 	StateCancelled: {}, // terminal
 	// StateAwaitingCutover: only explicit operator commit (→ Committed), or
