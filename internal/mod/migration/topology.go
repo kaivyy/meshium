@@ -13,6 +13,20 @@ import (
 // no destructive rollback command may be issued.
 var ErrUnsafeTopology = errors.New("unsafe replication topology for rollback")
 
+// ErrAwaitingCutover is a sentinel returned by trafficSwitchStage when a
+// manual_required cutover checkpoint has been recorded. The pipeline execute
+// loop treats it as a clean stop: it transitions the migration to
+// StateAwaitingCutover (persisted) and returns — it does NOT advance to
+// Observing/Committed/Completed. Only an explicit operator commit may leave
+// AwaitingCutover.
+var ErrAwaitingCutover = errors.New("awaiting manual cutover")
+
+// ErrCutoverNotConfirmed is returned by the commit endpoint when a migration in
+// StateAwaitingCutover is committed before the operator has confirmed traffic
+// moved to the target (switch_state still manual_required). No transition
+// occurs; the caller surfaces a structured 409.
+var ErrCutoverNotConfirmed = errors.New("cutover_not_confirmed")
+
 // rollbackTerminalState decides the terminal state for a rollback run from its
 // aggregate error. Any step failure → RollbackDegraded, never RolledBack. A
 // failure that wraps ErrUnsafeTopology (ambiguous/unreachable topology) →

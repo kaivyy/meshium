@@ -1,6 +1,7 @@
 package migration
 
 import (
+	"errors"
 	"context"
 	"testing"
 )
@@ -69,7 +70,7 @@ func TestTrafficSwitchStageFirstRunCreatesRecords(t *testing.T) {
 	stage := &trafficSwitchStage{repo: repo}
 
 	if err := stage.Execute(context.Background(), pc); err != nil {
-		t.Fatalf("Execute failed on first run: %v", err)
+		if !errors.Is(err, ErrAwaitingCutover) { t.Fatalf("Execute must stop with ErrAwaitingCutover on first run; got %v", err) }
 	}
 	if repo.trafficCreates != 1 {
 		t.Errorf("traffic switch config creates = %d, want 1", repo.trafficCreates)
@@ -92,12 +93,12 @@ func TestTrafficSwitchStageResumeCreatesNoDuplicates(t *testing.T) {
 
 	// First run: side effects land (this is the pre-crash state).
 	if err := stage.Execute(context.Background(), pc); err != nil {
-		t.Fatalf("Execute failed on first run: %v", err)
+		if !errors.Is(err, ErrAwaitingCutover) { t.Fatalf("Execute must stop with ErrAwaitingCutover on first run; got %v", err) }
 	}
 
 	// Resume: the stage runs again because its checkpoint was never written.
 	if err := stage.Execute(context.Background(), pc); err != nil {
-		t.Fatalf("Execute failed on resume: %v", err)
+		if !errors.Is(err, ErrAwaitingCutover) { t.Fatalf("Execute must stop with ErrAwaitingCutover on resume; got %v", err) }
 	}
 
 	if repo.trafficCreates != 1 {
@@ -134,7 +135,7 @@ func TestTrafficSwitchStageResumeAfterPartialCreate(t *testing.T) {
 	})
 
 	if err := stage.Execute(context.Background(), pc); err != nil {
-		t.Fatalf("Execute failed on resume: %v", err)
+		if !errors.Is(err, ErrAwaitingCutover) { t.Fatalf("Execute must stop with ErrAwaitingCutover on resume; got %v", err) }
 	}
 
 	if repo.trafficCreates != 0 {

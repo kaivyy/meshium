@@ -2,15 +2,19 @@ package migration
 
 import (
 	"context"
+	"errors"
 	"strings"
 	"testing"
 )
 
-// These tests lock in the B1 fix: the live pipeline's trafficSwitchStage must
-// NOT claim an automatic traffic switch succeeded, because it never moves any
-// traffic (the real TrafficSwitchEngine in traffic.go is not wired into the
-// pipeline). They assert the stage records an honest manual-cutover checkpoint
-// and tells the operator a manual cutover is required.
+// These tests lock in the P0-2 cutover contract: the live pipeline's
+// trafficSwitchStage must NOT claim an automatic traffic switch succeeded,
+// because it never moves any traffic (the real TrafficSwitchEngine in
+// traffic.go is not wired into the pipeline). It records an honest
+// manual-cutover checkpoint and returns ErrAwaitingCutover so the pipeline
+// loop stops cleanly at StateAwaitingCutover — it does NOT advance to
+// observation/finalization/committed. Only an operator commit may leave that
+// state.
 
 // captureProgress collects every WSMessage the stage emits so a test can assert
 // on the operator-facing status/value stream.
@@ -35,7 +39,9 @@ func TestTrafficSwitchStageDoesNotClaimAutomaticSuccess(t *testing.T) {
 	stage := &trafficSwitchStage{repo: repo}
 
 	if err := stage.Execute(context.Background(), pc); err != nil {
-		t.Fatalf("Execute failed: %v", err)
+		if !errors.Is(err, ErrAwaitingCutover) {
+			t.Fatalf("Execute failed: %v", err)
+		}
 	}
 
 	for _, m := range *msgs {
@@ -67,7 +73,9 @@ func TestTrafficSwitchStageEmitsManualCutoverWarning(t *testing.T) {
 	stage := &trafficSwitchStage{repo: repo}
 
 	if err := stage.Execute(context.Background(), pc); err != nil {
-		t.Fatalf("Execute failed: %v", err)
+		if !errors.Is(err, ErrAwaitingCutover) {
+			t.Fatalf("Execute failed: %v", err)
+		}
 	}
 
 	var warned bool
@@ -102,7 +110,9 @@ func TestTrafficSwitchStageDoesNotCreateSuccessfulCutoverRecord(t *testing.T) {
 	stage := &trafficSwitchStage{repo: repo}
 
 	if err := stage.Execute(context.Background(), pc); err != nil {
-		t.Fatalf("Execute failed: %v", err)
+		if !errors.Is(err, ErrAwaitingCutover) {
+			t.Fatalf("Execute failed: %v", err)
+		}
 	}
 
 	if len(repo.cutovers) != 1 {
@@ -130,11 +140,12 @@ func TestTrafficSwitchStageDoesNotCreateSuccessfulCutoverRecord(t *testing.T) {
 	}
 }
 
-// TestTrafficSwitchStageStillContinues proves the honest downgrade does not
-// break the pipeline: Execute returns nil so the remaining stages
-// (observation, finalization) still run. The stage records a checkpoint; it
-// does not fail the migration.
-func TestTrafficSwitchStageStillContinues(t *testing.T) {
+// TestTrafficSwitchStageStopsAtAwaitingCutover proves the stage signals a clean
+// stop: Execute returns ErrAwaitingCutover (not nil) so the pipeline loop
+// transitions to StateAwaitingCutover and does NOT advance to observation or
+// finalization. The stage records its checkpoint; it does not fail the
+// migration — the pipeline loop treats ErrAwaitingCutover as a clean stop.
+func TestTrafficSwitchStageStopsAtAwaitingCutover(t *testing.T) {
 	repo := &statefulTrafficRepo{}
 	_, onProgress := captureProgress()
 	pc := &PipelineContext{
@@ -145,7 +156,8 @@ func TestTrafficSwitchStageStillContinues(t *testing.T) {
 	}
 	stage := &trafficSwitchStage{repo: repo}
 
-	if err := stage.Execute(context.Background(), pc); err != nil {
-		t.Fatalf("Execute must return nil so the pipeline continues, got: %v", err)
+	err := stage.Execute(context.Background(), pc)
+	if !errors.Is(err, ErrAwaitingCutover) {
+		t.Fatalf("Execute must return ErrAwaitingCutover so the pipeline stops at AwaitingCutover; got %v", err)
 	}
 }

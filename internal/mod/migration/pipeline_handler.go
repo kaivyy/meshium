@@ -3,6 +3,7 @@ package migration
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"log"
 	"net/http"
@@ -462,7 +463,21 @@ func (h *PipelineHandler) handlePipelineAction(w http.ResponseWriter, r *http.Re
 			shared.WriteError(w, http.StatusMethodNotAllowed, "method not allowed", "METHOD_NOT_ALLOWED")
 			return
 		}
-		handlePipelineActionResult(w, func() error { return h.pipeline.Commit(r.Context(), id, nil) }, "committed")
+		err := h.pipeline.Commit(r.Context(), id, nil)
+		if err == nil {
+			shared.WriteJSON(w, http.StatusOK, map[string]string{"status": "committed"})
+			return
+		}
+		// P0-2: a commit while cutover is unconfirmed is a structured 409 — not a
+		// generic INVALID_STATE. The operator must confirm traffic moved first.
+		if errors.Is(err, ErrCutoverNotConfirmed) {
+			shared.WriteJSON(w, http.StatusConflict, map[string]string{
+				"error":  "cutover_not_confirmed",
+				"detail": "operator must confirm traffic moved to target before committing",
+			})
+			return
+		}
+		shared.WriteError(w, http.StatusConflict, err.Error(), "INVALID_STATE")
 	case "rollback":
 		if r.Method != http.MethodPost {
 			shared.WriteError(w, http.StatusMethodNotAllowed, "method not allowed", "METHOD_NOT_ALLOWED")

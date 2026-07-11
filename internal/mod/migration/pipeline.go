@@ -3,6 +3,7 @@ package migration
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"log"
 	"sort"
@@ -372,6 +373,21 @@ func (p *Pipeline) Execute(ctx context.Context, migrationID int, onProgress Step
 		}
 
 		if stageErr != nil {
+			// P0-2 cutover: ErrAwaitingCutover is a clean stop, not a failure.
+			// The trafficSwitchStage recorded manual_required; persist
+			// StateAwaitingCutover and return — do NOT advance to Observing /
+			// Committed / Completed, do NOT roll back. Survives restart.
+			if errors.Is(stageErr, ErrAwaitingCutover) {
+				if err := p.repo.UpdateStageState(ctx, stageID, StageStateCompleted, "awaiting_cutover"); err != nil {
+					log.Printf("warning: failed to mark stage %s awaiting_cutover: %v", stageName, err)
+				}
+				if err := p.jobRepo.SetMigrationStateContext(ctx, migrationID, StateAwaitingCutover); err != nil {
+					onProgress(WSMessage{Step: "pipeline", Status: "warning", Value: fmt.Sprintf("Failed to persist awaiting_cutover: %v", err)})
+				}
+				onProgress(WSMessage{Step: "traffic_switch", Status: "warning", Value: "Pipeline stopped: manual cutover required. Confirm traffic moved to target, then commit via the cutover endpoint."})
+				return nil
+			}
+
 			// Stage failed after all retries
 			if err := p.repo.UpdateStageState(ctx, stageID, StageStateFailed, stageErr.Error()); err != nil {
 				log.Printf("warning: failed to mark stage %s as failed: %v", stageName, err)
@@ -581,6 +597,45 @@ func (p *Pipeline) Commit(ctx context.Context, migrationID int, onProgress StepC
 	if currentState == StateCommitted {
 		return nil
 	}
+
+	// P0-2 cutover: an AwaitingCutover migration may commit only after the
+	// operator has confirmed traffic moved to the target (switch_state flipped
+	// off manual_required). While it remains manual_required, reject with a
+	// structured error and do NOT transition. Never ForceTransition(Committed).
+	if currentState == StateAwaitingCutover {
+		cfg, err := p.repo.GetTrafficSwitchConfig(migrationID)
+		if err != nil {
+			return fmt.Errorf("load traffic switch config: %w", err)
+		}
+		if cfg == nil || cfg.SwitchState == trafficSwitchManualState {
+			return ErrCutoverNotConfirmed
+		}
+		// switch_state confirmed by the operator — validated transition only.
+		sm := NewStateMachine(currentState)
+		if err := sm.Transition(StateCommitted); err != nil {
+			// Transition failed → fail closed to NeedsManualIntervention, never force.
+			if stateErr := p.jobRepo.SetMigrationStateContext(ctx, migrationID, StateNeedsManualIntervention); stateErr != nil {
+				return fmt.Errorf("transition to committed failed (%v) and could not fail-closed: %w", err, stateErr)
+			}
+			return fmt.Errorf("commit transition failed: %w", err)
+		}
+		if err := p.jobRepo.SetMigrationStateContext(ctx, migrationID, StateCommitted); err != nil {
+			return err
+		}
+		if err := p.jobRepo.SetMigrationCompletedAt(migrationID, time.Now().Format(time.RFC3339)); err != nil {
+			return err
+		}
+		_, _ = p.repo.CreateAuditEntry(ctx, AuditEntry{
+			MigrationID:   migrationID,
+			EventType:     "migration_committed",
+			PreviousState: currentState.String(),
+			NewState:      StateCommitted.String(),
+			Actor:         "user",
+		})
+		onProgress(WSMessage{Step: "pipeline", Status: "complete", Value: "Migration committed"})
+		return nil
+	}
+
 	if currentState != StateObservation {
 		return fmt.Errorf("migration cannot be committed from state %s", currentState)
 	}
@@ -1738,9 +1793,11 @@ func (s *trafficSwitchStage) Execute(ctx context.Context, pc *PipelineContext) e
 	}
 
 	// Warning, not success: the pipeline did not move traffic. The operator must
-	// complete the cutover manually.
+	// complete the cutover manually. Return the sentinel so the execute loop
+	// stops cleanly at StateAwaitingCutover — never advancing to Observing /
+	// Committed / Completed. Only an explicit operator commit may leave it.
 	pc.OnProgress(WSMessage{Step: "traffic_switch", Status: "warning", Value: trafficSwitchManualNote})
-	return nil
+	return ErrAwaitingCutover
 }
 
 func (s *trafficSwitchStage) Rollback(ctx context.Context, pc *PipelineContext) error {
