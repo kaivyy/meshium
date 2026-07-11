@@ -287,6 +287,17 @@
       currentStep = failedStep;
       return;
     }
+    // A freshly created plan (no pipeline stage has ever run) should land on
+    // Discovery (step 0), not auto-advance into Compatibility (step 1) — which
+    // would set step 1 to "running" and disable Next with no visible action.
+    // Discovery is a no-op reload that's already complete, but the user still
+    // needs to see it so they can proceed deliberately.
+    const isFreshPlan = !(session?.stages?.length);
+    if (isFreshPlan && currentStep <= 0) {
+      currentStep = 0;
+      if (stepStatuses[0] === 'pending') stepStatuses[0] = 'completed';
+      return;
+    }
     if (lastCompleted >= currentStep && currentStep < 10) {
       // Honor the user's last position if it's still reachable (not ahead of
       // what's actually completed). Keeps e.g. Dry Run from auto-advancing to

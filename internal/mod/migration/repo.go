@@ -199,6 +199,18 @@ func (r *sqliteRepo) DeleteMigration(id int) error {
 	if rows == 0 {
 		return ErrMigrationNotFound
 	}
+	// When the last migration row is deleted, reset the AUTOINCREMENT counter
+	// so the next plan starts from 1 again instead of monotonically climbing
+	// (e.g. deleting the only plan #24 then creating anew yields #1, not #25).
+	// sqlite_sequence only exists for AUTOINCREMENT tables; ignore "no such
+	// table" defensively. Resetting only when empty avoids stealing IDs mid-set.
+	var remaining int
+	if err := r.db.QueryRow("SELECT COUNT(*) FROM migrations").Scan(&remaining); err != nil {
+		return nil // count failure is non-fatal; the delete already succeeded
+	}
+	if remaining == 0 {
+		_, _ = r.db.Exec("DELETE FROM sqlite_sequence WHERE name = 'migrations'")
+	}
 	return nil
 }
 
