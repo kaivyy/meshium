@@ -156,6 +156,29 @@ func (r *sqliteRepo) UpdateStageCheckpoint(ctx context.Context, stageID int64, c
 	return err
 }
 
+// stageCheckpointJSON builds the per-stage checkpoint blob persisted after a
+// stage completes. Stage-boundary resume (P0-3) reads this to know how far the
+// pipeline got; byte-level / mid-transfer resume is Phase 2 (documented).
+type stageCheckpoint struct {
+	Stage      string `json:"stage"`
+	State      string `json:"state"`       // "completed"
+	Attempt    int    `json:"attempt"`
+	StageTotal int    `json:"stageTotal,omitempty"`
+}
+
+func stageCheckpointJSON(stageName string, attempt, stageTotal int) string {
+	b, err := json.Marshal(stageCheckpoint{
+		Stage:      stageName,
+		State:      "completed",
+		Attempt:    attempt,
+		StageTotal: stageTotal,
+	})
+	if err != nil {
+		return fmt.Sprintf(`{"stage":%q,"state":"completed","attempt":%d}`, stageName, attempt)
+	}
+	return string(b)
+}
+
 func (r *sqliteRepo) UpdateStageResult(ctx context.Context, stageID int64, resultData string) error {
 	if err := ctx.Err(); err != nil {
 		return err

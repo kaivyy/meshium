@@ -337,7 +337,9 @@ func (p *Pipeline) Execute(ctx context.Context, migrationID int, onProgress Step
 		}
 
 		var stageErr error
+		var attemptsUsed int
 		for attempt := 0; attempt <= maxRetries; attempt++ {
+			attemptsUsed = attempt + 1
 			if attempt > 0 {
 				if err := p.repo.IncrementStageAttempt(ctx, stageID); err != nil {
 					log.Printf("warning: failed to increment stage %s attempt: %v", stageName, err)
@@ -386,7 +388,14 @@ func (p *Pipeline) Execute(ctx context.Context, migrationID int, onProgress Step
 			return fmt.Errorf("stage %s failed: %w", stageName, stageErr)
 		}
 
-		// Stage succeeded
+		// Stage succeeded. P0-3: persist a stage checkpoint BEFORE marking the
+		// stage completed / emitting success. A checkpoint write failure fails
+		// closed — do not advance the stage to completed (which would let a
+		// resume skip work whose progress was never durably recorded).
+		checkpointJSON := stageCheckpointJSON(stageName, attemptsUsed, stageTotal)
+		if err := p.repo.UpdateStageCheckpoint(ctx, stageID, checkpointJSON); err != nil {
+			return fmt.Errorf("persist checkpoint for stage %s: %w", stageName, err)
+		}
 		if err := p.repo.UpdateStageState(ctx, stageID, StageStateCompleted, ""); err != nil {
 			log.Printf("warning: failed to mark stage %s completed: %v", stageName, err)
 			onProgress(WSMessage{Step: stageName, Status: "warning", Value: fmt.Sprintf("Failed to persist stage completion: %v", err)})
