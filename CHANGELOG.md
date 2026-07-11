@@ -5,6 +5,71 @@ All notable changes to Meshium are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.5.0-rc.1] — 2026-07-11
+
+Phase 1 P0 safety baseline. **Release candidate — NO-GO for ship** pending
+one remediation item (see `docs/release-readiness-rc1.md`).
+
+### P0 safety fixes (13 findings closed across 7 commits)
+
+| Commit | Findings | Summary |
+|---|---|---|
+| `013f96c` | P0-6,7,8,10,11 | DB adapter: MySQL Detect gated, mongosh-first, REDISCLI_AUTH (no `-a`/password on argv), volume-path shell injection blocked |
+| `0929528` | P0-4,5,9 | Long-command streaming under caller ctx; bounded stdout/stderr capture; inactivity (not wall-clock) timeout |
+| `175a3bd` | P0-1, P0-2 honest | Split-brain topology probe before every rollback mutation; rollback ends via `rollbackTerminalState` (partial⇒degraded, unsafe⇒manual-intervention, never false clean) |
+| `937569b` | P0-3 | Stage checkpoint persisted before state advance; write failure fails closed |
+| `d8a56eb` | P0-2 cutover | `manual_required` stops at `awaiting_cutover` (survives restart); commit rejected with `409 cutover_not_confirmed` while unconfirmed |
+| `c2dd87b` | P0-2 force | Removed `ForceTransition(Committed)` and `ForceTransition(RolledBack)`; 7 restricted callers documented; `resuming→committed` is now a validated edge |
+| `0f8512c` | — | Operator-facing wording: link `known-limitations.md`; remove "zero-downtime" UI claim; actionable guidance for the two new states |
+
+### Finding-to-test matrix
+
+See `docs/p0-matrix.md` for the full finding → test-file → acceptance-criterion
+matrix. Evidence re-run for this candidate:
+
+- `go build ./...` — PASS (exit 0)
+- `go vet ./...` — PASS (exit 0)
+- `go test ./...` — PASS (all packages)
+- `go test -race ./internal/mod/migration/ ./internal/mod/ssh/ ./internal/mod/planner/ ./internal/jobengine/` — PASS (race-clean)
+
+### Known limitations (authoritative: `docs/known-limitations.md`)
+
+- **No byte-level / mid-transfer resume.** Resume restarts at the last
+  fully-checkpointed stage boundary; an interrupted transfer re-runs from the
+  stage start (safe via idempotent restore flags + `StepStatusApplied`).
+- **No live replication / fencing / automatic traffic switching.** Zero
+  downtime is **not** claimed. Replication rollback re-points only confirmed
+  Redis replicas; MySQL/PG destructive rollback shortcuts remain prohibited.
+- **`FileTransfer` 30m** is an interim SFTP/relay bound, configurable, not
+  "large file solved."
+- **Mongo `mongo` fallback** retained for 4.x.
+- **`awaiting_cutover` commit** requires an operator-confirmed `switch_state`;
+  no automatic commit exists or is planned this pass.
+
+### Upgrade / rollback notes
+
+- No schema migration required for Phase 1 — new states
+  (`awaiting_cutover`, `needs_manual_intervention`, `rollback_degraded`) are
+  TEXT values in the existing `state` column. Existing rows are unaffected.
+- `MigrationConfig.DatabaseConfig.Password` is AES-encrypted at rest on write
+  and redacted to `"set"` in API `GET` responses. On upgrade, pre-existing
+  un-encrypted config rows are read as-is and re-encrypted on next save.
+- A migration stopped at `awaiting_cutover` before upgrade remains there after
+  restart; the operator must confirm traffic moved before committing.
+- Rollback now lands in `rolled_back` only on full success; partial failures
+  land in `rollback_degraded` or `needs_manual_intervention` — operators should
+  not assume `rolled_back` when any step failed.
+- **No** claims of zero-downtime, automatic cutover, automatic traffic
+  switching, automatic commit, or byte-level large-transfer resume are made
+  anywhere in product copy, API responses, or UI text.
+
+### Not shipped (Phase 2 — explicitly deferred)
+
+Live replication, fencing/lease ownership, automatic traffic switching,
+rsync/direct host-to-host transfer, checksum verification, and byte-level
+resume. Phase 2 begins only after the release-readiness report is reviewed and
+approved, starting with a separate design gate.
+
 ## [1.5.0-beta.9] — 2026-07-10
 
 Real database migration — the `database` category now moves actual DB data
