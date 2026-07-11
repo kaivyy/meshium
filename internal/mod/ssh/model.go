@@ -15,6 +15,12 @@ type TimeoutConfig struct {
 	Command time.Duration
 	// FileTransfer is the timeout for SFTP upload/download operations.
 	FileTransfer time.Duration
+	// Inactivity bounds how long ExecWithStdin may go without any stdin write,
+	// stdout/stderr activity, or remote progress marker before it aborts. Zero
+	// means disabled — only the parent context bounds lifetime. Long restores
+	// with steady flow never trip it. (P0-9: replaces the hard 30s Command wall
+	// clock that killed multi-GB restores.)
+	Inactivity time.Duration
 }
 
 // Predefined timeout profiles for different use cases.
@@ -26,7 +32,8 @@ type TimeoutConfig struct {
 var DefaultTimeouts = TimeoutConfig{
 	Connect:      10 * time.Second,
 	Command:      30 * time.Second,
-	FileTransfer: 5 * time.Minute,
+	FileTransfer: 30 * time.Minute, // interim SFTP/relay bound (P0-4); streaming (Phase 2) removes it
+	Inactivity:   0,                // disabled by default; opt-in per long restore
 }
 
 // DiscoveryTimeouts is for system discovery commands (hostname, uname, lscpu, etc.).

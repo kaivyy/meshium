@@ -362,19 +362,33 @@ func (c *Client) ExecContextWithTimeout(ctx context.Context, cmd string, timeout
 	session.Stdout = &stdout
 	session.Stderr = &stderr
 
+	// P0-5: bound the capture so a multi-GB dump misrouted through ExecContext
+	// cannot OOM. Metadata commands (the intended use) stay well under the caps.
+	bout := newBoundedWriter(stdoutCap, 0)
+	berr := newBoundedWriter(stderrCap, 0)
+	session.Stdout = bout
+	session.Stderr = berr
+
 	err = session.Run(cmd)
 	if execCtx.Err() != nil {
-		return stdout.String(), stderr.String(), -1, execCtx.Err()
+		return bout.String(), berr.String(), -1, execCtx.Err()
+	}
+	if bout.Overflowed() || berr.Overflowed() {
+		stream := "stdout"
+		if berr.Overflowed() && !bout.Overflowed() {
+			stream = "stderr"
+		}
+		return bout.String(), berr.String(), -1, &outputLimitError{stream: stream}
 	}
 	if err == nil {
-		return stdout.String(), stderr.String(), 0, nil
+		return bout.String(), berr.String(), 0, nil
 	}
 
 	if exitErr, ok := err.(*ssh.ExitError); ok {
-		return stdout.String(), stderr.String(), exitErr.ExitStatus(), nil
+		return bout.String(), berr.String(), exitErr.ExitStatus(), nil
 	}
 
-	return stdout.String(), stderr.String(), -1, err
+	return bout.String(), berr.String(), -1, err
 }
 
 // StreamSource indicates whether a streamed line came from stdout or stderr.
@@ -642,13 +656,11 @@ func (p *pipeReader) Close() error {
 func (c *Client) ExecWithStdin(ctx context.Context, cmd string, stdin io.Reader) (string, int, error) {
 	c.touch()
 
-	var execCtx context.Context
-	var cancel context.CancelFunc
-	if t := c.timeouts.Command; t > 0 {
-		execCtx, cancel = context.WithTimeout(ctx, t)
-	} else {
-		execCtx, cancel = context.WithCancel(ctx)
-	}
+	// P0-9: no hard Command wall-clock ceiling — a multi-GB restore legitimately
+	// outlasts 30s. Lifetime is bounded by the parent ctx; an optional
+	// configurable Inactivity timeout aborts only on a true stall, resetting on
+	// any stdin write or stdout/stderr activity.
+	execCtx, cancel := context.WithCancel(ctx)
 	defer cancel()
 
 	session, err := c.conn.NewSession()
@@ -657,13 +669,19 @@ func (c *Client) ExecWithStdin(ctx context.Context, cmd string, stdin io.Reader)
 	}
 	defer session.Close()
 
-	session.Stdin = stdin
 	var stderr bytes.Buffer
-	session.Stderr = &stderr
-
 	var closeOnce sync.Once
 	done := make(chan struct{})
 	defer close(done)
+
+	// activityCh receives a signal on every stdin read and every stderr byte;
+	// the inactivity watcher resets on each. stdout is not captured here (the
+	// stream feeds the target restore), so stderr + stdin reads are the
+	// liveness signals.
+	activityCh := make(chan struct{}, 1)
+	session.Stdin = &activityReader{src: stdin, ch: activityCh}
+	session.Stderr = &activityWriter{dst: &stderr, ch: activityCh}
+
 	go func() {
 		select {
 		case <-execCtx.Done():
@@ -671,6 +689,37 @@ func (c *Client) ExecWithStdin(ctx context.Context, cmd string, stdin io.Reader)
 		case <-done:
 		}
 	}()
+
+	// Inactivity watchdog (no-op when Inactivity == 0).
+	if inact := c.timeouts.Inactivity; inact > 0 {
+		go func() {
+			timer := time.NewTimer(inact)
+			defer timer.Stop()
+			for {
+				select {
+				case <-done:
+					return
+				case <-execCtx.Done():
+					return
+				case <-activityCh:
+					if !timer.Stop() {
+						select {
+						case <-timer.C:
+						default:
+						}
+					}
+					timer.Reset(inact)
+				case <-timer.C:
+					// Stall: abort the session and report a typed error.
+					closeOnce.Do(func() {
+						_ = session.Close()
+						cancel()
+					})
+					return
+				}
+			}
+		}()
+	}
 
 	if err := session.Start(cmd); err != nil {
 		if execCtx.Err() != nil {
@@ -681,6 +730,10 @@ func (c *Client) ExecWithStdin(ctx context.Context, cmd string, stdin io.Reader)
 
 	if err := session.Wait(); err != nil {
 		if execCtx.Err() != nil {
+			// Distinguish an inactivity stall from a plain ctx cancel.
+			if inact := c.timeouts.Inactivity; inact > 0 {
+				return stderr.String(), -1, ErrInactivityTimeout
+			}
 			return stderr.String(), -1, execCtx.Err()
 		}
 		// Surface the exit code alongside the error so callers can distinguish
@@ -691,6 +744,42 @@ func (c *Client) ExecWithStdin(ctx context.Context, cmd string, stdin io.Reader)
 		return stderr.String(), -1, err
 	}
 	return stderr.String(), 0, nil
+}
+
+// activityWriter wraps a real writer and pokes a channel on each Write so the
+// ExecWithStdin inactivity watcher can reset on stderr activity.
+type activityWriter struct {
+	dst *bytes.Buffer
+	ch  chan<- struct{}
+}
+
+func (a *activityWriter) Write(p []byte) (int, error) {
+	n, err := a.dst.Write(p)
+	if n > 0 {
+		select {
+		case a.ch <- struct{}{}:
+		default:
+		}
+	}
+	return n, err
+}
+
+// activityReader wraps the stdin source and pokes a channel on each Read so the
+// inactivity watcher resets on stdin flow (a steady dump = steady resets).
+type activityReader struct {
+	src io.Reader
+	ch  chan<- struct{}
+}
+
+func (a *activityReader) Read(p []byte) (int, error) {
+	n, err := a.src.Read(p)
+	if n > 0 {
+		select {
+		case a.ch <- struct{}{}:
+		default:
+		}
+	}
+	return n, err
 }
 
 // Upload uploads a file via SFTP.
@@ -731,7 +820,6 @@ func (c *Client) Upload(src io.Reader, remotePath string) error {
 		dst.Close()
 		return fmt.Errorf("sftp upload timed out after %s: %s", timeout, remotePath)
 	}
-	return err
 }
 
 // Download downloads a file via SFTP.
