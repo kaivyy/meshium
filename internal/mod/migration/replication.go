@@ -317,9 +317,16 @@ func (e *ReplicationEngine) promoteMySQL(ctx context.Context, config Replication
 }
 
 func (e *ReplicationEngine) rollbackMySQL(ctx context.Context, config ReplicationConfig) error {
-	// Stop replication on target
-	_, _, _, _ = e.targetSSH.ExecContext(ctx, "mysql -e 'STOP SLAVE; RESET SLAVE ALL;' 2>&1")
-	return nil
+	// P0-1: RESET SLAVE/REPLICA ALL is destructive and prohibited this pass.
+	// Probe topology first; any ambiguity → ErrUnsafeTopology (caller sets
+	// NeedsManualIntervention). No destructive command is ever issued blindly.
+	probe, err := e.probeTopology(ctx, config.DatabaseType)
+	if err != nil {
+		return fmt.Errorf("%w: %s", err, probe.reason())
+	}
+	// MySQL destructive rollback shortcuts are prohibited this pass regardless of
+	// topology (no automated RESET/STOP). A safe re-point needs fencing (Phase 2).
+	return fmt.Errorf("%w: mysql automated rollback not supported this pass — %s", ErrUnsafeTopology, probe.reason())
 }
 
 func parseMySQLMasterStatus(output string) (string, string) {
@@ -422,11 +429,13 @@ func (e *ReplicationEngine) promotePostgreSQL(ctx context.Context, config Replic
 }
 
 func (e *ReplicationEngine) rollbackPostgreSQL(ctx context.Context, config ReplicationConfig) error {
-	// Stop PostgreSQL on target and re-configure as standby
-	e.targetSSH.ExecContext(ctx, "sudo systemctl stop postgresql 2>&1")
-	// Remove promote marker
-	e.targetSSH.ExecContext(ctx, "rm -f /var/lib/postgresql/*/main/standby.signal 2>&1")
-	return nil
+	// P0-1: standby.signal removal and automatic demotion are prohibited this
+	// pass. Probe topology; fail closed on any ambiguity. No destructive command.
+	probe, err := e.probeTopology(ctx, config.DatabaseType)
+	if err != nil {
+		return fmt.Errorf("%w: %s", err, probe.reason())
+	}
+	return fmt.Errorf("%w: postgresql automated rollback not supported this pass — %s", ErrUnsafeTopology, probe.reason())
 }
 
 // --- Redis ---
@@ -493,6 +502,17 @@ func (e *ReplicationEngine) promoteRedis(ctx context.Context, config Replication
 }
 
 func (e *ReplicationEngine) rollbackRedis(ctx context.Context, config ReplicationConfig) error {
+	// P0-1: the only replication rollback mutation permitted this pass is
+	// re-pointing the target back to the source as a replica — and only after
+	// the topology probe confirms source=master/primary, target=replica.
+	// Any ambiguity → ErrUnsafeTopology (caller sets NeedsManualIntervention).
+	probe, err := e.probeTopology(ctx, config.DatabaseType)
+	if err != nil {
+		return fmt.Errorf("%w: %s", err, probe.reason())
+	}
+	if !probe.safeForRepoint() {
+		return fmt.Errorf("%w: %s", ErrUnsafeTopology, probe.reason())
+	}
 	sourceHost := config.SourceHost
 	if sourceHost == "" {
 		sourceHost = "source"
@@ -502,7 +522,7 @@ func (e *ReplicationEngine) rollbackRedis(ctx context.Context, config Replicatio
 		port = 6379
 	}
 	cmd := fmt.Sprintf("redis-cli REPLICAOF %s %d 2>&1", shared.ShellQuote(sourceHost), port)
-	_, _, _, err := e.targetSSH.ExecContext(ctx, cmd)
+	_, _, _, err = e.targetSSH.ExecContext(ctx, cmd)
 	return err
 }
 
@@ -541,18 +561,10 @@ func (e *ReplicationEngine) promoteMongoDB(ctx context.Context, config Replicati
 }
 
 func (e *ReplicationEngine) rollbackMongoDB(ctx context.Context, config ReplicationConfig) error {
-	targetHost := config.TargetHost
-	if targetHost == "" {
-		targetHost = "target"
-	}
-	port := config.SourcePort
-	if port == 0 {
-		port = 27017
-	}
-	cmd := fmt.Sprintf(
-		`mongosh --eval "rs.remove('%s:%d')" --quiet 2>&1`,
-		shared.ShellQuote(targetHost), port,
-	)
-	_, _, _, _ = e.sourceSSH.ExecContext(ctx, cmd)
-	return nil
+	// P0-1: rs.remove() reconfigures the live source replica set destructively.
+	// Prohibited this pass (no fencing). ProbeTopology already fails closed for
+	// mongodb; this explicit guard documents that even a "safe-looking" topology
+	// would not trigger an automated rs reconfigure here.
+	_ = config
+	return fmt.Errorf("%w: mongodb automated rollback not supported this pass", ErrUnsafeTopology)
 }

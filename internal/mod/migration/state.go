@@ -77,6 +77,15 @@ const (
 	StateResuming
 	// StateCancelled: migration was cancelled by the user.
 	StateCancelled
+	// StateAwaitingCutover: pipeline stopped after manual_required traffic switch.
+	// Only an explicit operator commit action may leave it. Survives restart.
+	// (Wired in commit 5.)
+	StateAwaitingCutover
+	// StateNeedsManualIntervention: fail-closed state for ambiguous topology,
+	// unsafe rollback, checkpoint-write failure, or commit rejection. Not
+	// IsTerminal() (an operator can still act), but no automatic forward/rollback
+	// transition is legal from it.
+	StateNeedsManualIntervention
 )
 
 // String returns the human-readable name of the state.
@@ -138,14 +147,21 @@ func (s MigrationState) String() string {
 		return "resuming"
 	case StateCancelled:
 		return "cancelled"
+	case StateAwaitingCutover:
+		return "awaiting_cutover"
+	case StateNeedsManualIntervention:
+		return "needs_manual_intervention"
 	default:
 		return fmt.Sprintf("unknown(%d)", int(s))
 	}
 }
 
-// IsTerminal returns true if the state is a terminal state (no further transitions).
+// IsTerminal returns true if the state is a terminal state (no further automatic
+// transitions). StateNeedsManualIntervention is terminal-ish: the run loop
+// must not keep going, though an operator may still act on it.
+// StateAwaitingCutover is NOT terminal — an explicit operator commit leaves it.
 func (s MigrationState) IsTerminal() bool {
-	return s == StateCommitted || s == StateRolledBack || s == StateRollbackDegraded || s == StateCancelled
+	return s == StateCommitted || s == StateRolledBack || s == StateRollbackDegraded || s == StateCancelled || s == StateNeedsManualIntervention
 }
 
 // IsRunning returns true if the migration is actively processing (not terminal, not failed).
@@ -200,6 +216,8 @@ var stateString = map[MigrationState]string{
 	StatePaused:             "paused",               // real pause (not cancel)
 	StateResuming:           "resuming",             // maps to existing StatusResuming
 	StateCancelled:          "cancelled",            // new
+	StateAwaitingCutover:        "awaiting_cutover",         // new — operator cutover pending
+	StateNeedsManualIntervention: "needs_manual_intervention", // new — fail-closed
 }
 
 // stringState is the reverse mapping, populated in init().
@@ -260,7 +278,7 @@ var transitionTable = map[MigrationState][]MigrationState{
 	StateObservation:         {StateCommitted, StateFailed, StateInterrupted, StatePaused, StateRollback},
 	StateCommitted:           {}, // terminal
 	StateFailed:              {StateRollback, StateInterrupted},
-	StateRollback:            {StateRolledBack, StateRollbackDegraded, StateFailed},
+	StateRollback:            {StateRolledBack, StateRollbackDegraded, StateNeedsManualIntervention, StateFailed},
 	StateRolledBack:          {}, // terminal
 	StateRollbackDegraded:    {}, // terminal
 	StateInterrupted:         {StateResuming, StateFailed, StateCancelled},
@@ -274,6 +292,10 @@ var transitionTable = map[MigrationState][]MigrationState{
 		StateObservation, StateFailed, StateInterrupted,
 	},
 	StateCancelled: {}, // terminal
+	// StateAwaitingCutover: only explicit operator commit (→ Committed), or
+	// operator abort (→ Rollback / NeedsManualIntervention / Failed). No auto path.
+	StateAwaitingCutover:        {StateCommitted, StateNeedsManualIntervention, StateRollback, StateFailed},
+	StateNeedsManualIntervention: {}, // no automatic transition out
 }
 
 // IsValidTransition returns true if transitioning from → to is allowed.

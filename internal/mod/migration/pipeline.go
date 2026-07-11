@@ -774,17 +774,27 @@ func (p *Pipeline) Rollback(ctx context.Context, migrationID int, onProgress Ste
 	}
 
 	if len(rollbackErrors) > 0 {
+		// P0-2 honest terminal state: any failed rollback step → RollbackDegraded
+		// (never RolledBack). If a rollback step reported ErrUnsafeTopology, the
+		// topology was ambiguous → NeedsManualIntervention instead.
 		err := fmt.Errorf("rollback failed: %s", strings.Join(rollbackErrors, "; "))
-		if stateErr := p.jobRepo.SetMigrationStateContext(ctx, migrationID, StateRollbackDegraded); stateErr != nil {
+		targetState := rollbackTerminalState(err)
+		if stateErr := p.jobRepo.SetMigrationStateContext(ctx, migrationID, targetState); stateErr != nil {
 			onProgress(WSMessage{Step: "rollback", Status: "warning", Value: fmt.Sprintf("Failed to persist rollback failed state: %v", stateErr)})
 		}
 		onProgress(WSMessage{Step: "rollback", Status: "error", Error: err.Error()})
 		return err
 	}
 
-	// Transition to RolledBack
+	// P0-2: honest terminal state. RolledBack is reached ONLY when every
+	// rollback step succeeded. If the validated transition fails (unexpected
+	// from-state), fail closed to NeedsManualIntervention — never ForceTransition.
 	if err := sm.Transition(StateRolledBack); err != nil {
-		sm.ForceTransition(StateRolledBack)
+		if stateErr := p.jobRepo.SetMigrationStateContext(ctx, migrationID, StateNeedsManualIntervention); stateErr != nil {
+			log.Printf("warning: failed to persist needs_manual_intervention for migration %d: %v", migrationID, stateErr)
+		}
+		onProgress(WSMessage{Step: "rollback", Status: "error", Error: fmt.Sprintf("rollback could not be finalized safely: %v", err)})
+		return fmt.Errorf("rollback could not be finalized safely: %w", err)
 	}
 	if err := p.jobRepo.SetMigrationStateContext(ctx, migrationID, StateRolledBack); err != nil {
 		log.Printf("warning: failed to persist rolled back state for migration %d: %v", migrationID, err)
