@@ -4,7 +4,7 @@
 
 Meshium provides a guided 11-step wizard for performing assisted server migrations. The wizard walks the user through discovery, risk assessment, planning, provisioning, execution, and post-cutover observation — with real-time monitoring and rollback of the changes the pipeline itself applied.
 
-> **Important — cutover is not automated.** The live pipeline transfers data and configuration and sets up database replication (when enabled), but it does **not** automatically switch production traffic from the source to the target. The traffic-switch stage records a **manual-cutover checkpoint** and instructs the operator to move traffic themselves (DNS / reverse proxy / load balancer) and then verify. Meshium does not advertise "zero-downtime"; see `docs/architecture.md` ("Cutover & Downtime Honesty").
+> **Important — cutover is not automated.** The Phase 1 pipeline transfers data and configuration via dump/restore, but it does **not** set up live replication and does **not** automatically switch production traffic from the source to the target. The traffic-switch stage records a **manual-cutover checkpoint** and stops at `awaiting_cutover` for an operator-confirmed commit; the operator moves traffic themselves (DNS / reverse proxy / load balancer) and then verifies. Meshium does not advertise "zero-downtime"; downtime equals transfer time. See [`docs/known-limitations.md`](known-limitations.md) for the authoritative capability list and `docs/architecture.md` ("Cutover & Downtime Honesty").
 
 ---
 

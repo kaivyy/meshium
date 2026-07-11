@@ -107,10 +107,13 @@ When set, the adapter wraps every command in `docker exec -i <container> …`
 works: `docker exec -i <c> pg_dump` pipes to `docker exec -i <c> pg_restore`.
 This keeps the same adapter surface — only the command prefix changes.
 
-## Replica / zero-downtime (Phase 2)
+## Replica / low-downtime cutover (Phase 2 — not shipped)
 
-Dump/restore (Phase 1) implies **downtime = transfer time**. For zero
-downtime, Phase 2 wires live replication so writes during the transfer are
+> **Phase 1 ships dump/restore only.** No live replication, no automatic
+> cutover, no zero-downtime claim. See [`docs/known-limitations.md`](known-limitations.md).
+
+Dump/restore (Phase 1) implies **downtime = transfer time**. For low downtime,
+Phase 2 would wire live replication so writes during the transfer are
 captured and replayed, then a short cutover flips traffic. The infra already
 exists (`ReplicationEngine`, `CutoverEngine`, `FreezeManager`) but is not yet
 connected to the pipeline's `liveReplicationStage` / `trafficSwitchStage`.

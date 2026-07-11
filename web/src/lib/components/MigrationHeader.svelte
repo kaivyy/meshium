@@ -45,7 +45,23 @@
   }
 
   function isTerminalState(state: string): boolean {
-    return ['completed', 'committed', 'archived', 'rolled_back', 'cancelled'].includes(state.toLowerCase());
+    const s = state.toLowerCase();
+    return ['completed', 'committed', 'archived', 'rolled_back', 'cancelled', 'needs_manual_intervention', 'rollback_degraded'].includes(s);
+  }
+
+  // operatorGuidance returns actionable copy for the two P0-2 states a raw
+  // status string cannot explain. Empty string = no special guidance.
+  function operatorGuidance(state: string): string {
+    switch (state.toLowerCase()) {
+      case 'awaiting_cutover':
+        return 'Manual cutover required: move traffic to the target (DNS / reverse proxy / load balancer), then confirm here to commit. No automatic cutover.';
+      case 'needs_manual_intervention':
+        return 'Rollback could not complete safely (unsafe or ambiguous replication topology). Review the target manually before any further action.';
+      case 'rollback_degraded':
+        return 'Rollback finished with one or more step failures — the target may be partially rolled back. Verify manually.';
+      default:
+        return '';
+    }
   }
 </script>
 
@@ -69,6 +85,9 @@
     <div class="flex items-center gap-1.5">
       <div class="w-2 h-2 rounded-full {pipelineRunning ? 'bg-accent animate-pulse' : isTerminalState(currentState) ? 'bg-success' : 'bg-fg-subtle'}"></div>
       <span class="text-xs font-medium text-fg-muted">{currentState || 'Ready'}</span>
+      {#if operatorGuidance(currentState)}
+        <span class="text-xs text-warning hidden lg:inline" title={operatorGuidance(currentState)}>⚠</span>
+      {/if}
     </div>
 
     <!-- Health -->

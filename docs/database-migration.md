@@ -3,6 +3,11 @@
 Status: **Phase 1 (in progress)** — dump/restore for PostgreSQL, MySQL/MariaDB, MongoDB, Redis.
 Phase 2 (replication + cutover) is designed-not-blocked, explicitly deferred.
 
+> **Operator-facing limitations:** see [`docs/known-limitations.md`](known-limitations.md)
+> for the authoritative list of what Phase 1 ships and what is deferred. No
+> zero-downtime, automatic cutover/commit, or byte-level transfer resume is
+> claimed.
+
 ## Problem
 
 Meshium migrates server *metadata* (packages, configs, services, users, docker) but
@@ -32,7 +37,7 @@ engines register and extend).
 ## Non-goals (Phase 2)
 
 - Replication (binlog/WAL/_change streams) and live lag monitoring.
-- Near-zero-downtime cutover (freeze → final sync → promote → traffic switch).
+- Low-downtime cutover via live replication (freeze → final sync → promote → traffic switch) — Phase 2 only; Phase 1 downtime equals transfer time and is **not** described as zero-downtime.
 - Cross-engine conversion (PG→MySQL etc.) — same engine only.
 
 Phase 2 infra already exists in the repo (`replication.go`, `cutover.go`, `freeze.go`)

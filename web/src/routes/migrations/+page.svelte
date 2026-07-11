@@ -103,7 +103,7 @@
 </script>
 
 <div class="p-4 sm:p-6 max-w-5xl mx-auto">
-  <PageHeader title="Migrations" subtitle="Prepare, run, and monitor zero-downtime server migrations.">
+  <PageHeader title="Migrations" subtitle="Prepare, run, and monitor assisted server migrations.">
     {#snippet actions()}
       {#if hasMultipleServers}
         <a href="/migrations/new" class="flex items-center gap-1 px-4 py-2 bg-accent text-accent-fg rounded-lg hover:bg-accent-hover text-sm font-medium transition-colors">
