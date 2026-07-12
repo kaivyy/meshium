@@ -1769,8 +1769,11 @@ const trafficSwitchManualNote = "automatic traffic switch is not enabled in this
 func (s *trafficSwitchStage) Name() PipelineStageName { return StageTrafficSwitch }
 
 func (s *trafficSwitchStage) Execute(ctx context.Context, pc *PipelineContext) error {
-	pc.OnProgress(WSMessage{Step: "traffic_switch", Status: "progress", Value: "Recording manual-cutover checkpoint (automatic traffic switch is not enabled in this pipeline)..."})
+	if pc.Config != nil && pc.Config.AutoCutover {
+		return s.runAutoCutover(ctx, pc)
+	}
 
+	pc.OnProgress(WSMessage{Step: "traffic_switch", Status: "progress", Value: "Recording manual-cutover checkpoint (automatic traffic switch is not enabled in this pipeline)..."})
 	// No automatic traffic switch is performed here. The real TrafficSwitchEngine
 	// (traffic.go) is not wired into the live pipeline, so this stage only records
 	// that a manual cutover is required. It must never claim traffic was switched.
@@ -1833,6 +1836,178 @@ func (s *trafficSwitchStage) Execute(ctx context.Context, pc *PipelineContext) e
 	// Committed / Completed. Only an explicit operator commit may leave it.
 	pc.OnProgress(WSMessage{Step: "traffic_switch", Status: "warning", Value: trafficSwitchManualNote})
 	return ErrAwaitingCutover
+}
+
+// runAutoCutover drives the Phase 2A fenced cutover orchestrator when
+// MigrationConfig.AutoCutover is true. It builds the orchestrator from the
+// pipeline context, runs the 12-step machine (fencing before every step,
+// switch-before-promote, fail-closed), and persists the outcome. Any error
+// fails closed: the cutover record records the sanitized failure and the
+// stage returns the error so the pipeline stops at NeedsManualIntervention.
+//
+// ponytail: Phase 2A scope is PostgreSQL + Nginx only. Other engines / traffic
+// providers fail closed here with an explicit "unsupported" error rather than
+// attempting an unsafe cutover. Add MongoDB/MySQL/multi-provider when their
+// preflight/promote primitives exist.
+func (s *trafficSwitchStage) runAutoCutover(ctx context.Context, pc *PipelineContext) error {
+	pc.OnProgress(WSMessage{Step: "traffic_switch", Status: "progress", Value: "Fenced cutover: acquiring lease and driving switch-before-promote..."})
+
+	// The orchestrator needs the fence-lease surface, which PipelineRepo does
+	// not expose. The concrete *sqliteRepo satisfies fenceLeaseRepo; assert it
+	// and fail closed if the repo is not fence-capable (never silently skip).
+	fenceRepo, ok := pc.Repo.(fenceLeaseRepo)
+	if !ok {
+		return s.failAutoCutover(ctx, pc, nil, fmt.Errorf("repo does not support fence leases (cannot run fenced cutover safely)"))
+	}
+
+	// Phase 2A: PostgreSQL only. Build the replication config from the user's
+	// DatabaseConfig (the replicator creds) + source/target hosts. No creds are
+	// persisted; they live only in the in-memory request for the preflight probe.
+	dc := pc.Config.DatabaseConfig
+	if dc == nil || !pgEngine(dc.Engine) {
+		return s.failAutoCutover(ctx, pc, nil, fmt.Errorf("autoCutover requires a postgres DatabaseConfig (Phase 2A: postgres + nginx only)"))
+	}
+	if pc.Config.TrafficConfig == "" {
+		return s.failAutoCutover(ctx, pc, nil, fmt.Errorf("autoCutover requires TrafficConfig (full target nginx.conf)"))
+	}
+
+	holder, err := GenerateHolder()
+	if err != nil {
+		return s.failAutoCutover(ctx, pc, nil, fmt.Errorf("generate holder: %w", err))
+	}
+
+	replConfig := ReplicationConfig{
+		DatabaseType:    "postgres",
+		DatabaseName:    dc.DatabaseName,
+		SourceHost:       pc.SourceServer.Host,
+		SourcePort:       pgPort(dc),
+		TargetHost:       pc.TargetServer.Host,
+		TargetPort:       pgPort(dc),
+		ReplicationUser:  dc.Username,
+		ReplicationPass:  dc.Password,
+		MigrationID:      pc.MigrationID,
+	}
+
+	nginxReq := NginxSwitchRequest{
+		IdempotencyKey: fmt.Sprintf("meshium-cutover-%d-%s", pc.MigrationID, holder),
+		NewConfig:      pc.Config.TrafficConfig,
+		VerifyURL:      pc.Config.HealthCheckURL,
+	}
+
+	auth := NewFencingAuthority(fenceRepo)
+	machine := newCutoverMachine(pc.Repo, auth, pc.MigrationID)
+	pg := NewReplicationEngine(pc.SourceSSH, pc.TargetSSH, pc.Repo)
+	traffic := NewNginxSwitcher(pc.TargetSSH, nil)
+	o := NewCutoverOrchestrator(machine, auth, pg, traffic)
+
+	out, runErr := o.Run(ctx, CutoverRequest{
+		MigrationID:   pc.MigrationID,
+		Holder:        holder,
+		Replication:   replConfig,
+		NginxRequest:  nginxReq,
+		MaxLagSeconds: PGCatchUpMaxLag,
+		ObserveFor:    pc.Config.ObservationDuration,
+	})
+
+	if runErr != nil {
+		return s.failAutoCutover(ctx, pc, out, runErr)
+	}
+	if out == nil || !out.Completed {
+		return s.failAutoCutover(ctx, pc, out, fmt.Errorf("cutover did not complete (finalState=%q)", outFinalState(out)))
+	}
+
+	// Success: traffic moved to the target. Persist the switch config + cutover
+	// record idempotently (guarded against a crash between the two writes).
+	if _, err := pc.Repo.GetTrafficSwitchConfig(pc.MigrationID); err == nil {
+		// already exists (re-entry after a completed cutover): leave as-is.
+	} else {
+		if _, err := pc.Repo.CreateTrafficSwitchConfig(ctx, TrafficSwitchConfig{
+			MigrationID:    pc.MigrationID,
+			Provider:       pc.Config.TrafficProvider,
+			SwitchState:    "switched",
+			HealthCheckURL: pc.Config.HealthCheckURL,
+		}); err != nil {
+			return fmt.Errorf("persist traffic switch config failed: %w", err)
+		}
+	}
+	if !cutoverTrafficRecordExists(pc, "traffic_switch") {
+		if _, err := pc.Repo.CreateCutoverRecord(ctx, CutoverRecord{
+			MigrationID:     pc.MigrationID,
+			CutoverType:     "traffic_switch",
+			PreviousState:   "source",
+			NewState:        "target",
+			TrafficSwitched: true,
+			StartedAt:       time.Now().Format(time.RFC3339),
+		}); err != nil {
+			return fmt.Errorf("persist cutover record failed: %w", err)
+		}
+	}
+
+	pc.OnProgress(WSMessage{Step: "traffic_switch", Status: "success", Value: "Fenced cutover completed: traffic switched to target and verified"})
+	return nil
+}
+
+// failAutoCutover records the sanitized failure on a cutover record (if the
+// orchestrator produced one) and returns the error so the pipeline fails closed
+// to NeedsManualIntervention. The failure blob is redacted (no secret leak).
+func (s *trafficSwitchStage) failAutoCutover(ctx context.Context, pc *PipelineContext, out *CutoverOutcome, cause error) error {
+	failure := trafficSwitchManualNote
+	if cause != nil {
+		failure = shared.SanitizeString(cause.Error())
+	}
+	if out != nil && out.Failure != "" {
+		failure = out.Failure
+	}
+	if !cutoverTrafficRecordExists(pc, "traffic_switch") {
+		_, _ = pc.Repo.CreateCutoverRecord(ctx, CutoverRecord{
+			MigrationID:     pc.MigrationID,
+			CutoverType:     "traffic_switch",
+			PreviousState:   "source",
+			NewState:        "source",
+			TrafficSwitched:  false,
+			Error:            failure,
+			StartedAt:        time.Now().Format(time.RFC3339),
+		})
+	}
+	pc.OnProgress(WSMessage{Step: "traffic_switch", Status: "error", Value: "Fenced cutover failed (fail-closed): " + failure})
+	return fmt.Errorf("auto cutover failed (fail-closed): %w", cause)
+}
+
+// cutoverTrafficRecordExists reports whether a cutover record of the given type
+// already exists for this migration (idempotency guard for re-entry).
+func cutoverTrafficRecordExists(pc *PipelineContext, cutoverType string) bool {
+	cutovers, err := pc.Repo.GetCutoverHistory(pc.MigrationID)
+	if err != nil {
+		return false
+	}
+	for _, cr := range cutovers {
+		if cr.CutoverType == cutoverType {
+			return true
+		}
+	}
+	return false
+}
+
+// pgEngine reports whether the engine string is PostgreSQL (Phase 2A scope).
+func pgEngine(engine string) bool {
+	e := strings.ToLower(strings.TrimSpace(engine))
+	return e == "postgres" || e == "postgresql"
+}
+
+// pgPort returns the DB config port, defaulting to 5432 for PG.
+func pgPort(dc *DatabaseConfig) int {
+	if dc.Port > 0 {
+		return dc.Port
+	}
+	return 5432
+}
+
+// outFinalState safely reads the outcome's final state for an error message.
+func outFinalState(out *CutoverOutcome) string {
+	if out == nil {
+		return ""
+	}
+	return string(out.FinalState)
 }
 
 func (s *trafficSwitchStage) Rollback(ctx context.Context, pc *PipelineContext) error {

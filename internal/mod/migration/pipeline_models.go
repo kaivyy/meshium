@@ -414,6 +414,13 @@ type MigrationConfig struct {
 	MaxErrorRate         float64       `json:"maxErrorRate,omitempty"`
 	MaxLatencyMs         int64         `json:"maxLatencyMs,omitempty"`
 
+	// AutoCutover opts into the fenced cutover orchestrator (Phase 2A-6) at the
+	// traffic_switch stage. Default false keeps Phase 1's manual_required
+	// cutover path untouched — no regression. When true, trafficSwitchStage
+	// invokes CutoverOrchestrator (fencing before every step, switch-before-
+	// promote, fail-closed to NeedsManualIntervention).
+	AutoCutover bool `json:"autoCutover,omitempty"`
+
 	// Retry configuration.
 	MaxRetries int           `json:"maxRetries,omitempty"`
 	RetryDelay time.Duration `json:"retryDelay,omitempty"`

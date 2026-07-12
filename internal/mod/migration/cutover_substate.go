@@ -132,6 +132,12 @@ func (m *cutoverMachine) Load(ctx context.Context) (*cutoverCheckpoint, error) {
 		// Pre-cutover (no lease yet). Legal — AwaitingCutover may have no lease.
 		return &cp, nil
 	}
+	// A completed cutover deliberately released its lease on finish; the
+	// checkpoint is terminal and needs no live lease. Asserting here would
+	// spuriously reject an operator's retry after a successful cutover.
+	if cp.SubState == SubCompleted {
+		return &cp, nil
+	}
 	if _, err := m.authority.AssertHolds(ctx, m.migrationID, cp.Holder, cp.Token, ""); err != nil {
 		return nil, err
 	}
