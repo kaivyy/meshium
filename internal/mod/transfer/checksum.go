@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
+	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -61,10 +62,83 @@ func (v *ChecksumVerifier) Verify(ctx context.Context, src, dst TransferTarget) 
 			return srcChecksum, nil
 		}
 
-		lastErr = fmt.Errorf("checksum mismatch: source=%s, destination=%s", srcChecksum, dstChecksum)
+		lastErr = fmt.Errorf("%w: source=%s, destination=%s", ErrTransferChecksumMismatch, srcChecksum, dstChecksum)
 	}
 
 	return "", fmt.Errorf("checksum verification failed after %d attempts: %w", v.MaxRetries, lastErr)
+}
+
+// VerifyInto is Verify plus durable outcome capture. On a successful match it
+// records the source/target checksums AND sets LastVerifiedPhase="verified" on
+// cp before returning — so a checkpoint is never persisted as complete without
+// a proven verification. On mismatch it records the checksums WITHOUT marking
+// verified, and returns ErrTransferChecksumMismatch (terminal). cp may be nil
+// (callers that do not persist a checkpoint); it is a no-op then.
+func (v *ChecksumVerifier) VerifyInto(ctx context.Context, src, dst TransferTarget, cp *TransferCheckpoint) (string, error) {
+	checksum, err := v.Verify(ctx, src, dst)
+	if cp != nil {
+		// Capture both checksums regardless of outcome; the partial is only
+		// ever safe to resume when LastVerifiedPhase=="verified".
+		if checksum != "" {
+			cp.ChecksumSource = checksum
+			cp.ChecksumTarget = checksum
+		}
+		// Never set "verified" on failure — that would let a later step
+		// report success off an unverified checkpoint.
+		if err == nil {
+			cp.LastVerifiedPhase = "verified"
+		}
+	}
+	return checksum, err
+}
+
+// TransferTerminalState is the honest terminal classification of a finished
+// (or failed) transfer, used by the pipeline to pick the migration state.
+type TransferTerminalState string
+
+const (
+	// TerminalOK means the transfer verified; no terminal state needed.
+	TerminalOK TransferTerminalState = "ok"
+	// TerminalFailed means the transfer failed and the data must NOT be
+	// treated as migrated. The target partial may be inconsistent.
+	TerminalFailed TransferTerminalState = "failed"
+	// TerminalDegraded means the transfer completed only via an explicit,
+	// operator-visible weaker path (e.g. tar-over-SSH/SFTP fallback).
+	TerminalDegraded TransferTerminalState = "degraded"
+	// TerminalManualIntervention means the outcome is ambiguous and an
+	// operator must decide. Fail closed — never auto-resume.
+	TerminalManualIntervention TransferTerminalState = "needs_manual_intervention"
+)
+
+// TerminalStateForError maps a transfer error to its honest terminal state.
+// A nil error is TerminalOK. Any typed transfer error maps to a non-OK
+// terminal state; checksum mismatch and reconcile failure are fail-closed
+// (manual intervention), not silently retried.
+func TerminalStateForError(err error) TransferTerminalState {
+	if err == nil {
+		return TerminalOK
+	}
+	if errors.Is(err, ErrTransferChecksumMismatch) || errors.Is(err, ErrTransferReconcileFailed) {
+		// Data integrity cannot be asserted → operator must decide.
+		return TerminalManualIntervention
+	}
+	if errors.Is(err, ErrTransferStrategyUnavailable) ||
+		errors.Is(err, ErrTransferSourceUnreachable) ||
+		errors.Is(err, ErrTransferTargetUnreachable) ||
+		errors.Is(err, ErrTransferTopologyUnsupported) {
+		return TerminalFailed
+	}
+	if errors.Is(err, ErrTransferAuth) ||
+		errors.Is(err, ErrTransferInactivity) ||
+		errors.Is(err, ErrTransferOutputCap) ||
+		errors.Is(err, ErrTransferProtocol) ||
+		errors.Is(err, ErrTransferPartialTransfer) ||
+		errors.Is(err, ErrTransferRemoteFailure) ||
+		errors.Is(err, ErrTransferInvalidPath) {
+		return TerminalFailed
+	}
+	// Unknown error: fail closed rather than risk declaring success.
+	return TerminalManualIntervention
 }
 
 // VerifyFile verifies a single file by computing its checksum at both ends.
