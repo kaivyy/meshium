@@ -468,6 +468,22 @@ func Migrate(db *sql.DB) error {
 			created_at      DATETIME DEFAULT CURRENT_TIMESTAMP,
 			updated_at      DATETIME DEFAULT CURRENT_TIMESTAMP
 		);`,
+		// migration_fence_leases is the durable fencing authority for the
+		// Phase 2A fenced cutover. One active lease per migration
+		// (UNIQUE(migration_id)) + monotonic fence_token. Fail-closed:
+		// missing/expired/conflicting/stale token → NeedsManualIntervention.
+		`CREATE TABLE IF NOT EXISTS migration_fence_leases (
+			id           INTEGER PRIMARY KEY AUTOINCREMENT,
+			migration_id INTEGER NOT NULL REFERENCES migrations(id) ON DELETE CASCADE,
+			holder       TEXT NOT NULL,
+			fence_token  INTEGER NOT NULL,
+			state        TEXT NOT NULL,
+			acquired_at  DATETIME NOT NULL,
+			expires_at   DATETIME NOT NULL,
+			renewed_at   DATETIME,
+			released_at  DATETIME,
+			UNIQUE(migration_id)
+		);`,
 	}
 
 	tx, err := db.Begin()

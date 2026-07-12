@@ -128,6 +128,28 @@ type TrafficSwitchConfig struct {
 	UpdatedAt      string          `json:"updatedAt"`
 }
 
+// --- Fence Lease (Phase 2A durable fencing authority) ---
+
+// FenceLease is the persisted durable fencing record. One active lease per
+// migration (UNIQUE(migration_id)). The fence_token is monotonic per
+// migration; every mutating cutover step must AssertHolds the token before
+// acting. Missing/expired/conflicting/stale token → NeedsManualIntervention.
+//
+// Times are RFC3339 strings (DB columns are DATETIME). ExpiresAt is the
+// authoritative liveness check — the lease is stale if ExpiresAt <= now and
+// ReleasedAt is empty.
+type FenceLease struct {
+	ID          int64  `json:"id"`
+	MigrationID int    `json:"migrationId"`
+	Holder      string `json:"holder"`
+	FenceToken  int    `json:"fenceToken"`
+	State       string `json:"state"`
+	AcquiredAt  string `json:"acquiredAt"`
+	ExpiresAt   string `json:"expiresAt"`
+	RenewedAt   string `json:"renewedAt,omitempty"`
+	ReleasedAt  string `json:"releasedAt,omitempty"`
+}
+
 // --- Health Check Models ---
 
 // HealthCheckType represents the type of health check.

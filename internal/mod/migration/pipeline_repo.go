@@ -468,6 +468,145 @@ func (r *sqliteRepo) GetTrafficSwitchConfig(migrationID int) (*TrafficSwitchConf
 	return &cfg, nil
 }
 
+// --- Fence lease repo methods (Phase 2A durable fencing authority) ---
+
+func (r *sqliteRepo) CreateFenceLease(ctx context.Context, l FenceLease) (int64, error) {
+	if err := ctx.Err(); err != nil {
+		return 0, err
+	}
+	res, err := r.db.Exec(
+		`INSERT INTO migration_fence_leases
+		   (migration_id, holder, fence_token, state, acquired_at, expires_at, renewed_at, released_at)
+		 VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+		l.MigrationID, l.Holder, l.FenceToken, l.State, l.AcquiredAt, l.ExpiresAt,
+		nullableTime(l.RenewedAt), nullableTime(l.ReleasedAt),
+	)
+	if err != nil {
+		return 0, err
+	}
+	return res.LastInsertId()
+}
+
+func (r *sqliteRepo) UpdateFenceLeaseState(ctx context.Context, id int64, state string) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	_, err := r.db.Exec(
+		`UPDATE migration_fence_leases SET state = ? WHERE id = ?`,
+		state, id,
+	)
+	return err
+}
+
+// RenewFenceLease extends the lease expiry only if the holder + token match.
+// Returns ErrFenceLeaseNotHeld on mismatch (fail-closed). The caller MUST
+// treat any renew error as NeedsManualIntervention.
+func (r *sqliteRepo) RenewFenceLease(ctx context.Context, id int64, holder string, token int, expiresAt time.Time) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	res, err := r.db.Exec(
+		`UPDATE migration_fence_leases
+		   SET expires_at = ?, renewed_at = CURRENT_TIMESTAMP
+		 WHERE id = ? AND holder = ? AND fence_token = ? AND released_at IS NULL`,
+		expiresAt.Format(time.RFC3339), id, holder, token,
+	)
+	if err != nil {
+		return err
+	}
+	n, err := res.RowsAffected()
+	if err != nil {
+		return err
+	}
+	if n == 0 {
+		return ErrFenceLeaseNotHeld
+	}
+	return nil
+}
+
+// ReleaseFenceLease marks the lease released (best-effort cleanup). Does NOT
+// auto-unfreeze the source; unfreeze is an explicit fenced step. Mismatched
+// holder/token → ErrFenceLeaseNotHeld (fail-closed).
+func (r *sqliteRepo) ReleaseFenceLease(ctx context.Context, id int64, holder string, token int) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	res, err := r.db.Exec(
+		`UPDATE migration_fence_leases SET released_at = CURRENT_TIMESTAMP
+		 WHERE id = ? AND holder = ? AND fence_token = ? AND released_at IS NULL`,
+		id, holder, token,
+	)
+	if err != nil {
+		return err
+	}
+	n, err := res.RowsAffected()
+	if err != nil {
+		return err
+	}
+	if n == 0 {
+		return ErrFenceLeaseNotHeld
+	}
+	return nil
+}
+
+func (r *sqliteRepo) GetFenceLease(migrationID int) (*FenceLease, error) {
+	var l FenceLease
+	var renewedAt, releasedAt sql.NullString
+	err := r.db.QueryRow(
+		`SELECT id, migration_id, holder, fence_token, state, acquired_at, expires_at, renewed_at, released_at
+		 FROM migration_fence_leases WHERE migration_id = ? ORDER BY id DESC LIMIT 1`,
+		migrationID,
+	).Scan(
+		&l.ID, &l.MigrationID, &l.Holder, &l.FenceToken, &l.State, &l.AcquiredAt, &l.ExpiresAt, &renewedAt, &releasedAt,
+	)
+	if errors.Is(err, sql.ErrNoRows) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	if renewedAt.Valid {
+		l.RenewedAt = renewedAt.String
+	}
+	if releasedAt.Valid {
+		l.ReleasedAt = releasedAt.String
+	}
+	return &l, nil
+}
+
+// nullableTime returns NULL for empty time strings (DATETIME columns).
+func nullableTime(s string) any {
+	if s == "" {
+		return nil
+	}
+	return s
+}
+
+// reactivateFenceLease recycles the single existing lease row (UNIQUE on
+// migration_id) for a new acquisition: overwrites holder/token/state and
+// timestamps, clears released_at. Used after a prior lease was released
+// cleanly. A stale (expired, unreleased) lease must NOT reach here — the
+// authority refuses to silently overwrite it.
+func (r *sqliteRepo) reactivateFenceLease(ctx context.Context, migrationID int, holder string, token int, state, acquiredAt, expiresAt string) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	res, err := r.db.Exec(
+		`UPDATE migration_fence_leases
+		   SET holder = ?, fence_token = ?, state = ?, acquired_at = ?, expires_at = ?, renewed_at = NULL, released_at = NULL
+		 WHERE migration_id = ?`,
+		holder, token, state, acquiredAt, expiresAt, migrationID,
+	)
+	if err != nil {
+		return err
+	}
+	n, _ := res.RowsAffected()
+	if n == 0 {
+		return ErrFenceLeaseConflict
+	}
+	return nil
+}
+
 // --- Health history ---
 
 func (r *sqliteRepo) CreateHealthCheckResult(ctx context.Context, hr HealthCheckResult) (int64, error) {
