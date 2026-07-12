@@ -115,6 +115,7 @@ func (s *RsyncStrategy) transferOnce(ctx context.Context, src, dst TransferTarge
 		"-avz",            // archive, verbose, compress
 		"--partial",       // keep partially transferred files
 		"--append-verify", // resume with checksum verification
+		"--mkpath",       // create the destination's parent dirs (rsync won't otherwise)
 	}
 
 	// Add progress if callback is set

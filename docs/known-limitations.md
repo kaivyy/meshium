@@ -64,28 +64,70 @@
 5. **Only PostgreSQL same-major.** MySQL/Mongo/Redis and cross-major PG
    cutover are **not** implemented in Phase 2A.
 
-## Residual limitations (still Phase 2, not yet started)
+## What Phase 2B adds (large-transfer correctness)
 
-1. **No byte-level / mid-transfer resume.** Resume restarts at the last
-   fully-checkpointed stage boundary; an interrupted transfer re-runs from
-   the stage start (safe via idempotent restore flags + `StepStatusApplied`
-   skip). Transfer-level resume (e.g. rsync `--partial`) is Phase 2. Do not
-   describe Phase 1 transfers as "resumable large transfers."
-2. **`FileTransfer` 30m is an interim SFTP/relay bound**, configurable, not
-   "large file solved." Streaming (Phase 2) removes it.
-3. **Mongo `mongo` fallback** retained for Mongo 4.x; dropped when 5.x is
+- **Direct rsync source→target over SSH.** `RsyncStrategy` pushes the
+  data stream straight from the source host to the target host (Meshium
+  only relays the rsync control channel, never the bytes). Selected only
+  when **all three** hold: rsync present on BOTH sides, and the source
+  can reach the target over SSH without a password prompt (BatchMode probe).
+- **Durable, fail-closed reconcile.** `TransferCheckpoint` persists
+  source snapshot + target partial fingerprint; after a restart
+  `Reconcile` returns `Resume` (partial matches + source unchanged),
+  `FreshStart` (nothing transferred), or `ManualIntervention`
+  (source changed / partial mismatched / missing / strategy invalid).
+  Any ambiguity → ManualIntervention. Never blind-resumes.
+- **Integrity verify-then-persist.** `ChecksumVerifier.VerifyInto`
+  records both checksums and sets `LastVerifiedPhase="verified"` ONLY
+  on a match. A checkpoint is never persisted as complete without a
+  proven verification. Mismatch → `ErrTransferChecksumMismatch`
+  (terminal, fail-closed).
+- **Typed transfer errors + honest terminal states.**
+  `TerminalStateForError` maps every typed error to
+  `ok` / `failed` / `degraded` / `needs_manual_intervention`.
+  Checksum mismatch and reconcile failure are fail-closed, never
+  silently retried or reported as success.
+- **No silent downgrade.** The tar-over-SSH/SFTP relay is reachable ONLY
+  as an explicit, operator-visible `degraded` fallback
+  (`AllowDegraded=true` + a `DEGRADED` warning). Without it,
+  `SelectWithFallback` returns `ErrTransferStrategyUnavailable`
+  (fail closed) rather than downgrading. An unverifiable volume path
+  routes to `manual_intervention`.
+- **Integration-tested.** `rsync_integration_test.go`
+  (`//go:build integration`) drives a real rsync source→target push
+  between two alpine+rsync containers: byte-identical checksum verify,
+  reconcile-trusts-partial, and missing-target-rsync-blocks-direct.
+
+## Residual limitations (Phase 2C — not yet started)
+
+1. **Topology is host-to-host only.** The Docker-volume step has no
+   target-host topology (host/user/port) to form a true remote→remote
+   rsync spec, so it uses the explicit tar-over-SSH relay (degraded,
+   operator-visible) — NOT direct rsync. Direct rsync source→target
+   is exercised for plain file/directory transfers, not the volume path.
+2. **No chunked parallel WAN resumability yet.** Resume is whole-file
+   (rsync `--partial --append-verify`). Many small files resume per-file
+   via size+checksum skip. Large single-file byte-range resume is Phase 2C.
+3. **`FileTransfer` 30m is an interim SFTP/relay bound**, configurable, not
+   "large file solved." Direct rsync removes it for the rsync path.
+4. **Mongo `mongo` fallback** retained for Mongo 4.x; dropped when 5.x is
    the floor.
+5. **No zero-downtime claim.** Phase 2B is about transfer
+   correctness/resumability, not liveness. Downtime still = transfer time.
 
 ## Wording rules
 
 API responses, UI text, and docs must use these exact terms and must **not**
 use: "zero-downtime", "automatic cutover", "automatic commit",
-"resumable large transfer", or any phrase implying replication-backed
-continuous sync in Phase 1.
+"resumable large transfer" (for Phase 1 only), or any phrase implying
+replication-backed continuous sync in Phase 1.
 
 | Concept | Allowed wording | Not allowed |
 |---|---|---|
 | Cutover | "manual cutover required" / "awaiting operator cutover" / "fenced PG cutover (opt-in)" | "automatic cutover", "zero-downtime cutover" |
-| Transfer resume | "resumes from the last completed stage" | "resumable large transfer", "mid-transfer resume" |
+| Transfer (Phase 2B) | "direct rsync source→target" / "resumable (rsync --partial)" / "verify-then-advance" / "degraded fallback (operator-visible)" | "zero-downtime transfer", "automatic resume" |
+| Transfer resume | "resumes from the last completed stage" OR (Phase 2B) "resumes the partial via rsync --partial" | "resumable large transfer" for Phase 1, "mid-transfer resume" (unspecified) |
+| Transfer failure | "failed" / "degraded" / "needs manual intervention" | silent downgrade, success on checksum mismatch |
 | Rollback result | "rolled back" / "rollback degraded" / "needs manual intervention" | "rolled back" when steps failed |
 | Commit | "operator-confirmed commit" | "automatic commit" |
+

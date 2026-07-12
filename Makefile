@@ -21,5 +21,9 @@ test:
 test-integration:
 	go test -tags integration ./internal/mod/migration/ -run 'PGCutoverPrimitivesLive|PGPreflightFailsWhenTargetNotStandby|FencedCutoverWithRealPG' -v -timeout 300s
 
+# Phase 2B transfer integration tests (alpine+rsync pulled on demand).
+test-transfer-integration:
+	go test -tags integration ./internal/mod/transfer/ -run 'LiveRsync' -v -timeout 300s
+
 clean:
 	rm -rf bin/ cmd/server/web/build/ web/.svelte-kit/
