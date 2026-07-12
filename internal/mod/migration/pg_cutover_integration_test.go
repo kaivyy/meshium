@@ -360,10 +360,10 @@ func TestFencedCutoverWithRealPG(t *testing.T) {
 	out, err := o.Run(context.Background(), CutoverRequest{
 		MigrationID:   1,
 		Holder:        "meshium-integration",
-		Replication:   pgReplConfig(),
-		NginxRequest:  nginxSwitchReq("http://verify/health"),
-		MaxLagSeconds: 1,
-		ObserveFor:    200 * time.Millisecond,
+		Replication:    pgReplConfig(),
+		TrafficRequest: nginxSwitchReq("http://verify/health"),
+		MaxLagSeconds:  1,
+		ObserveFor:     200 * time.Millisecond,
 	})
 	if err != nil {
 		t.Fatalf("orchestrator run: %v (out=%+v)", err, out)

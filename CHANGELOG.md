@@ -5,6 +5,56 @@ All notable changes to Meshium are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased] Phase 2C — additional cutover engines & traffic providers
+
+Extends the Phase 2A fenced PostgreSQL cutover to **MySQL (seeded)** and
+**Redis**, and adds the **HAProxy** traffic provider. MongoDB remains
+**deferred** (fails closed — no replica-set lag measurement). Immutable
+baselines (Phase 1, Phase 2A, Phase 2B) are preserved. Full report:
+`docs/phase2c-cutover-report.md`; contract: `docs/superpowers/specs/
+2026-07-13-phase2c-engine-providers.md`.
+
+### Added
+- **MySQL seeded-replication cutover.** `setupMySQL` now seeds (streamed
+  `mysqldump` → `mysql` restore) *before* `CHANGE REPLICATION SOURCE TO`
+  — fixes the Phase-1 unseeded silent-data-loss defect. Preflight gates
+  (same-major, `log_bin` ON, unique non-zero `server_id`, source
+  `read_only=OFF`, target `read_only=ON`, replicator connectivity) and a
+  fenced promote (freeze source → `STOP REPLICA` → target writable, with
+  post-promote verification).
+- **Redis fenced cutover.** `preflightRedis` (source `role:master`, target
+  `role:slave` of this source, link `up`) and `promoteRedisCutover`
+  (`REPLICAOF NO ONE` + role verify). Note: Redis has **no source freeze**,
+  so the dual-writer window is bounded by async repl lag (documented).
+- **HAProxy traffic provider.** `HAProxySwitcher` mirrors `NginxSwitcher`
+  (`haproxy -c` config test, `systemctl reload`, read-after-write verify,
+  sanitized persist). Second supported auto-switch provider.
+- **Engine/provider dispatch** in `runAutoCutover`: PostgreSQL / MySQL /
+  Redis are supported; nginx + haproxy are supported — everything else fails
+  closed with an explicit unsupported error.
+- **MongoDB runbook** (`docs/mongodb-cutover-runbook.md`) and a known-
+  limitations update covering Phase 2C.
+
+### Changed
+- `CutoverOrchestrator` generalized from a PG-only driver to an engine-
+  agnostic `cutoverDriver` (`CutoverPreflight` / `WaitForCatchUp` /
+  `CutoverPromote`) + a generic `trafficSwitchDriver`. Traffic request type
+  is now `TrafficSwitchRequest` (Nginx/HAProxy are aliases).
+
+### Safety / fail-closed
+- MongoDB cutover is refused at pipeline dispatch, in `CutoverPreflight`,
+  `CutoverPromote`, and every per-primitive `setupMongoDB`/`promoteMongoDB`/
+  `rollbackMongoDB` — all before any mutating command.
+- `promoteMySQLCutover` fails closed if the source cannot be frozen or the
+  target does not become a writable primary.
+- Unsupported traffic providers fail closed (no auto-switch).
+
+### Tests
+- 311 `migration` package tests pass, 0 failing. New: `mysql_cutover_test.go`
+  (10), `haproxy_switch_test.go` (7), `redis_cutover_test.go` (6),
+  `phase2c_dispatch_test.go` (4). Integration (build tag `integration`):
+  `mysql_cutover_integration_test.go` drives a live MySQL 8 seeded pair.
+
 ## [1.5.0-rc.1] — 2026-07-11
 
 Phase 1 P0 safety baseline. **Release candidate — NO-GO for ship** pending

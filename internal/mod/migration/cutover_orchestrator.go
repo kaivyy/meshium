@@ -17,8 +17,9 @@ import (
 //
 //   - Commit 2: FencingAuthority (durable lease, AssertHolds before every step)
 //   - Commit 3: cutoverMachine (persisted sub-state, idempotent re-entry)
-//   - Commit 4: ReplicationEngine PG preflight / WaitForCatchUpPG / PromotePG
-//   - Commit 5: NginxSwitcher (idempotent switch + read-after-write verify)
+//   - Commit 4: ReplicationEngine engine-agnostic preflight / WaitForCatchUp /
+//     CutoverPromote (PostgreSQL, MySQL-seeded, Redis fenced)
+//   - Commit 5: NginxSwitcher + HAProxySwitcher (idempotent switch + read-after-write verify)
 //
 // Contract (spec §5, §6, §7):
 //   - Every mutating step calls AssertHolds first. A missing/stale/conflicting
@@ -36,12 +37,13 @@ import (
 //     trafficSwitchStage path is untouched when OFF — no regression.
 //
 // Not in this slice (ponytails):
-//   - Multi-traffic-provider, multi-standby pinning, cross-major PG, byte-level
-//     resume, full-rsync, MongoDB/MySQL. ONE provider (Nginx), ONE target.
+//   - Multi-traffic-provider (Nginx + HAProxy are the supported two),
+//     multi-standby pinning, cross-major cutover, byte-level resume, full-rsync.
+//     MongoDB remains deferred (no replica-set lag). ONE target.
 //   - Source read-only GUC is defense-in-depth, not the hard fence (the lease is
-//     the hard fence; PG keeps the target read-only as a standby). Wiring
-//     FreezeManager is deferred — the legacy CutoverEngine uses it but has no
-//     live caller. Add when a failure-injection test demands it.
+//     the hard fence). Wiring FreezeManager is deferred — the legacy
+//     CutoverEngine uses it but has no live caller. Add when a failure-injection
+//     test demands it.
 
 // AutoCutoverDefault is false: Phase 1 manual cutover is the default. Opt-in.
 const AutoCutoverDefault = false
@@ -55,41 +57,50 @@ var CutoverTimeout = FenceTTL - 10*time.Second
 // CutoverRequest is the orchestrator input — built by trafficSwitchStage from
 // PipelineContext + MigrationConfig. Kept separate from the legacy
 // cutover.CutoverConfig to avoid coupling to the dead CutoverEngine.
+//
+// The request is engine-agnostic: Replication carries the engine type, and the
+// orchestrator drives whatever cutover primitive the engine supports (PostgreSQL
+// same-major, MySQL seeded, Redis fenced). TrafficRequest is satisfied by both
+// the Nginx and HAProxy switchers (both use the generic TrafficSwitchRequest).
 type CutoverRequest struct {
 	MigrationID    int
 	Holder         string          // lease holder identity (e.g. "meshium-<node>")
 	Replication    ReplicationConfig
-	NginxRequest   NginxSwitchRequest
-	MaxLagSeconds  int64 // PG catch-up threshold before promote
+	TrafficRequest TrafficSwitchRequest
+	MaxLagSeconds  int64 // catch-up threshold before promote (engine-specific meaning)
 	ObserveFor     time.Duration
 }
 
 // CutoverOutcome is the sanitized result the stage persists. No secret survives
 // (SanitizeJSONRawMessage on the marshaled blob).
 type CutoverOutcome struct {
-	Completed   bool             `json:"completed"`
-	FinalState  CutoverSubState  `json:"finalState"`
-	Holder      string           `json:"holder"`
-	Token       int              `json:"token"`
-	Steps       map[string]string `json:"steps"` // subState -> result
-	Preflight   PGPreflightResult `json:"preflight,omitempty"`
-	Switch      *NginxSwitchResult `json:"switch,omitempty"`
-	Failure     string           `json:"failure,omitempty"` // sanitized
+	Completed   bool                `json:"completed"`
+	FinalState  CutoverSubState     `json:"finalState"`
+	Holder      string              `json:"holder"`
+	Token       int                 `json:"token"`
+	Steps       map[string]string   `json:"steps"` // subState -> result
+	Preflight   CutoverPreflightResult `json:"preflight,omitempty"`
+	Switch      *TrafficSwitchResult   `json:"switch,omitempty"`
+	Failure     string              `json:"failure,omitempty"` // sanitized
 }
 
-// pgCutoverDriver is the narrow surface of ReplicationEngine the orchestrator
-// uses. Kept as an interface so tests inject a fake without building the full
-// engine. *ReplicationEngine satisfies it.
-type pgCutoverDriver interface {
-	Preflight(ctx context.Context, config ReplicationConfig) (PGPreflightResult, error)
-	WaitForCatchUpPG(ctx context.Context, config ReplicationConfig, maxLagSeconds int64) error
-	PromotePG(ctx context.Context, config ReplicationConfig) error
+// cutoverDriver is the narrow surface of ReplicationEngine the orchestrator
+// uses. It is engine-agnostic (Phase 2C): the same three primitives drive
+// PostgreSQL, MySQL, and Redis cutovers. Kept as an interface so tests inject a
+// fake without building the full engine. *ReplicationEngine satisfies it via
+// CutoverPreflight / WaitForCatchUp / CutoverPromote.
+type cutoverDriver interface {
+	CutoverPreflight(ctx context.Context, config ReplicationConfig) (CutoverPreflightResult, error)
+	WaitForCatchUp(ctx context.Context, config ReplicationConfig, maxLagSeconds int64) error
+	CutoverPromote(ctx context.Context, config ReplicationConfig) error
 }
 
-// trafficSwitchDriver is the narrow surface of NginxSwitcher the orchestrator
-// uses. *NginxSwitcher satisfies it.
+// trafficSwitchDriver is the narrow surface of NginxSwitcher / HAProxySwitcher
+// the orchestrator uses. Both switchers satisfy it via the generic
+// TrafficSwitchRequest / TrafficSwitchResult (NginxSwitchRequest and
+// HAProxySwitchRequest are aliases of TrafficSwitchRequest).
 type trafficSwitchDriver interface {
-	Switch(ctx context.Context, req NginxSwitchRequest) (*NginxSwitchResult, error)
+	Switch(ctx context.Context, req TrafficSwitchRequest) (*TrafficSwitchResult, error)
 }
 
 // CutoverOrchestrator runs the fenced cutover. It is constructed by
@@ -98,15 +109,17 @@ type trafficSwitchDriver interface {
 type CutoverOrchestrator struct {
 	machine  *cutoverMachine
 	auth     *FencingAuthority
-	pg       pgCutoverDriver
+	driver   cutoverDriver
 	traffic  trafficSwitchDriver
 }
 
-// NewCutoverOrchestrator wires the orchestrator. pg and traffic are injected
-// so tests pass fakes; production passes a *ReplicationEngine and
-// *NginxSwitcher.
-func NewCutoverOrchestrator(machine *cutoverMachine, auth *FencingAuthority, pg pgCutoverDriver, traffic trafficSwitchDriver) *CutoverOrchestrator {
-	return &CutoverOrchestrator{machine: machine, auth: auth, pg: pg, traffic: traffic}
+// NewCutoverOrchestrator wires the orchestrator. driver and traffic are injected
+// so tests pass fakes; production passes a *ReplicationEngine and a
+// *NginxSwitcher / *HAProxySwitcher. The driver is engine-agnostic (PostgreSQL,
+// MySQL, Redis all satisfy cutoverDriver via CutoverPreflight/WaitForCatchUp/
+// CutoverPromote).
+func NewCutoverOrchestrator(machine *cutoverMachine, auth *FencingAuthority, driver cutoverDriver, traffic trafficSwitchDriver) *CutoverOrchestrator {
+	return &CutoverOrchestrator{machine: machine, auth: auth, driver: driver, traffic: traffic}
 }
 
 // Run drives the cutover from the persisted sub-state to completion. It is
@@ -275,7 +288,7 @@ func (o *CutoverOrchestrator) acquireOrRecover(ctx context.Context, cfg CutoverR
 // replicator connectivity). No mutation. Records PGPreflightResult.
 func (o *CutoverOrchestrator) stepPreflight(cfg CutoverRequest, out *CutoverOutcome) stepAction {
 	return func(ctx context.Context, lease *FenceLease) (string, error) {
-		r, err := o.pg.Preflight(ctx, cfg.Replication)
+		r, err := o.driver.CutoverPreflight(ctx, cfg.Replication)
 		out.Preflight = r
 		if err != nil {
 			return "", err
@@ -284,15 +297,18 @@ func (o *CutoverOrchestrator) stepPreflight(cfg CutoverRequest, out *CutoverOutc
 	}
 }
 
-// stepSeed: for the minimal slice the seed already happened in the
-// initial_sync/live_replication stages (the target standby exists). This step
-// is the ownership check that the target is in fact a standby (the preflight
-// already proved it, but re-prove at the cutover boundary). No mutation.
+// stepSeed: for PostgreSQL the seed already happened in the live_replication
+// stage (the target standby exists). For MySQL the seed is performed by
+// setupMySQL (a streaming dump/restore before CHANGE REPLICATION SOURCE TO). For
+// Redis the seed is the REPLICAOF initial sync. This step re-proves, at the
+// cutover boundary, the target is in the expected pre-switch role (standby for
+// PG/MySQL, replica for Redis). No mutation. Records the preflight result.
 func (o *CutoverOrchestrator) stepSeed(cfg CutoverRequest, out *CutoverOutcome) stepAction {
 	return func(ctx context.Context, lease *FenceLease) (string, error) {
 		// Re-run preflight gates only (cheap, read-only). A target that is no
-		// longer a standby here means something promoted it out-of-band — fail.
-		r, err := o.pg.Preflight(ctx, cfg.Replication)
+		// longer in the expected role here means something promoted it
+		// out-of-band — fail.
+		r, err := o.driver.CutoverPreflight(ctx, cfg.Replication)
 		if err != nil {
 			return "", fmt.Errorf("seed boundary: %w", err)
 		}
@@ -310,7 +326,7 @@ func (o *CutoverOrchestrator) stepReplicating(cfg CutoverRequest, out *CutoverOu
 		if maxLag < 0 {
 			maxLag = PGCatchUpMaxLag
 		}
-		if err := o.pg.WaitForCatchUpPG(ctx, cfg.Replication, maxLag); err != nil {
+		if err := o.driver.WaitForCatchUp(ctx, cfg.Replication, maxLag); err != nil {
 			return "", fmt.Errorf("replicating: %w", err)
 		}
 		return "ok lag<=" + fmt.Sprint(maxLag), nil
@@ -325,7 +341,7 @@ func (o *CutoverOrchestrator) stepVerifying(cfg CutoverRequest, out *CutoverOutc
 		if maxLag < 0 {
 			maxLag = PGCatchUpMaxLag
 		}
-		if err := o.pg.WaitForCatchUpPG(ctx, cfg.Replication, maxLag); err != nil {
+		if err := o.driver.WaitForCatchUp(ctx, cfg.Replication, maxLag); err != nil {
 			return "", fmt.Errorf("verifying: %w", err)
 		}
 		return "ok verified", nil
@@ -358,7 +374,7 @@ func (o *CutoverOrchestrator) stepCatchingUp(cfg CutoverRequest, out *CutoverOut
 		if maxLag < 0 {
 			maxLag = PGCatchUpMaxLag
 		}
-		if err := o.pg.WaitForCatchUpPG(ctx, cfg.Replication, maxLag); err != nil {
+		if err := o.driver.WaitForCatchUp(ctx, cfg.Replication, maxLag); err != nil {
 			return "", fmt.Errorf("catching-up: %w", err)
 		}
 		return "ok caught-up", nil
@@ -369,7 +385,7 @@ func (o *CutoverOrchestrator) stepCatchingUp(cfg CutoverRequest, out *CutoverOut
 // boundary check before the switch.
 func (o *CutoverOrchestrator) stepVerifyingTarget(cfg CutoverRequest, out *CutoverOutcome) stepAction {
 	return func(ctx context.Context, lease *FenceLease) (string, error) {
-		r, err := o.pg.Preflight(ctx, cfg.Replication)
+		r, err := o.driver.CutoverPreflight(ctx, cfg.Replication)
 		if err != nil {
 			return "", fmt.Errorf("verifying-target: %w", err)
 		}
@@ -380,12 +396,13 @@ func (o *CutoverOrchestrator) stepVerifyingTarget(cfg CutoverRequest, out *Cutov
 	}
 }
 
-// stepSwitching: switch traffic to the target via NginxSwitcher. This is the
-// read-after-write ownership proof. The target is still a standby — clients see
-// read-only until promote. Failure fails closed (no auto-rollback).
+// stepSwitching: switch traffic to the target via the injected switcher
+// (Nginx or HAProxy). This is the read-after-write ownership proof. The target
+// is still a standby — clients see read-only until promote. Failure fails closed
+// (no auto-rollback).
 func (o *CutoverOrchestrator) stepSwitching(cfg CutoverRequest, out *CutoverOutcome) stepAction {
 	return func(ctx context.Context, lease *FenceLease) (string, error) {
-		res, err := o.traffic.Switch(ctx, cfg.NginxRequest)
+		res, err := o.traffic.Switch(ctx, cfg.TrafficRequest)
 		out.Switch = res
 		if err != nil {
 			return "", fmt.Errorf("switching: %w", err)
@@ -394,12 +411,13 @@ func (o *CutoverOrchestrator) stepSwitching(cfg CutoverRequest, out *CutoverOutc
 	}
 }
 
-// stepPromoting: promote the target standby to primary. The ONLY write to the
-// data plane. After this the target accepts writes; the source is fenced.
-// Post-promote probe (in PromotePG) is the ownership proof.
+// stepPromoting: promote the target standby to primary via the engine-agnostic
+// CutoverPromote primitive. The ONLY write to the data plane. After this the
+// target accepts writes; the source is fenced. Post-promote probe (in
+// CutoverPromote) is the ownership proof.
 func (o *CutoverOrchestrator) stepPromoting(cfg CutoverRequest, out *CutoverOutcome) stepAction {
 	return func(ctx context.Context, lease *FenceLease) (string, error) {
-		if err := o.pg.PromotePG(ctx, cfg.Replication); err != nil {
+		if err := o.driver.CutoverPromote(ctx, cfg.Replication); err != nil {
 			return "", fmt.Errorf("promoting: %w", err)
 		}
 		return "ok promoted", nil

@@ -15,9 +15,9 @@ import (
 // not PG/nginx. The real primitives have their own tests (pg_cutover_test.go,
 // nginx_switch_test.go).
 
-// fakePGDriver records calls and returns scripted errors. preflightRecovery
+// fakePGDriver records calls and returns scripted errors. targetInRecovery
 // controls TargetInRecovery so stepVerifyingTarget's standby check can pass or
-// fail. If promoteErr is set, PromotePG returns it.
+// fail. If promoteErr is set, CutoverPromote returns it.
 type fakePGDriver struct {
 	preflights   int
 	catchups     int
@@ -25,17 +25,17 @@ type fakePGDriver struct {
 	preflightErr error
 	catchupErr   error
 	promoteErr   error
-	// targetInRecovery is returned as PGPreflightResult.TargetInRecovery.
+	// targetInRecovery is returned as CutoverPreflightResult.TargetInRecovery.
 	targetInRecovery bool
 }
 
-func (f *fakePGDriver) Preflight(ctx context.Context, config ReplicationConfig) (PGPreflightResult, error) {
+func (f *fakePGDriver) CutoverPreflight(ctx context.Context, config ReplicationConfig) (CutoverPreflightResult, error) {
 	f.preflights++
 	if f.preflightErr != nil {
-		return PGPreflightResult{TargetInRecovery: f.targetInRecovery}, f.preflightErr
+		return CutoverPreflightResult{TargetInRecovery: f.targetInRecovery}, f.preflightErr
 	}
 	// A healthy pair: same major, source primary, target standby, replicator ok.
-	return PGPreflightResult{
+	return CutoverPreflightResult{
 		SourceVersionNum: 150003,
 		TargetVersionNum: 150001,
 		SourceInRecovery: false,
@@ -44,12 +44,12 @@ func (f *fakePGDriver) Preflight(ctx context.Context, config ReplicationConfig) 
 	}, nil
 }
 
-func (f *fakePGDriver) WaitForCatchUpPG(ctx context.Context, config ReplicationConfig, maxLagSeconds int64) error {
+func (f *fakePGDriver) WaitForCatchUp(ctx context.Context, config ReplicationConfig, maxLagSeconds int64) error {
 	f.catchups++
 	return f.catchupErr
 }
 
-func (f *fakePGDriver) PromotePG(ctx context.Context, config ReplicationConfig) error {
+func (f *fakePGDriver) CutoverPromote(ctx context.Context, config ReplicationConfig) error {
 	f.promotes++
 	return f.promoteErr
 }
@@ -113,10 +113,10 @@ func cutoverReq() CutoverRequest {
 	return CutoverRequest{
 		MigrationID:   1,
 		Holder:        "meshium-test",
-		Replication:   pgPreflightConfig(),
-		NginxRequest:  nginxSwitchReq("http://verify/health"),
-		MaxLagSeconds: 1,
-		ObserveFor:    0,
+		Replication:    pgPreflightConfig(),
+		TrafficRequest: nginxSwitchReq("http://verify/health"),
+		MaxLagSeconds:  1,
+		ObserveFor:     0,
 	}
 }
 
@@ -167,7 +167,7 @@ func TestCutoverOrchestratorNoDualWriterOrdering(t *testing.T) {
 	// Wrap promote to assert switch already ran: the wrapper observes the
 	// shared traffic fake's switch counter when PromotePG fires.
 	pg2 := &orderPGDriver{inner: pg, traffic: traffic}
-	o.pg = pg2
+	o.driver = pg2
 	if _, err := o.Run(context.Background(), cutoverReq()); err != nil {
 		t.Fatalf("run: %v", err)
 	}
@@ -186,18 +186,18 @@ type orderPGDriver struct {
 	switchCountAtPromote int
 }
 
-func (o *orderPGDriver) Preflight(ctx context.Context, config ReplicationConfig) (PGPreflightResult, error) {
-	return o.inner.Preflight(ctx, config)
+func (o *orderPGDriver) CutoverPreflight(ctx context.Context, config ReplicationConfig) (CutoverPreflightResult, error) {
+	return o.inner.CutoverPreflight(ctx, config)
 }
-func (o *orderPGDriver) WaitForCatchUpPG(ctx context.Context, config ReplicationConfig, maxLagSeconds int64) error {
-	return o.inner.WaitForCatchUpPG(ctx, config, maxLagSeconds)
+func (o *orderPGDriver) WaitForCatchUp(ctx context.Context, config ReplicationConfig, maxLagSeconds int64) error {
+	return o.inner.WaitForCatchUp(ctx, config, maxLagSeconds)
 }
-func (o *orderPGDriver) PromotePG(ctx context.Context, config ReplicationConfig) error {
+func (o *orderPGDriver) CutoverPromote(ctx context.Context, config ReplicationConfig) error {
 	o.switchCountAtPromote = o.traffic.switches
 	if o.switchCountAtPromote >= 1 {
 		o.promoteSawSwitch = true
 	}
-	return o.inner.PromotePG(ctx, config)
+	return o.inner.CutoverPromote(ctx, config)
 }
 
 // TestCutoverOrchestratorFailClosedOnPreflightFail: a preflight failure fails
@@ -273,7 +273,7 @@ func TestCutoverOrchestratorFailClosedOnStaleLeaseMidRun(t *testing.T) {
 	// fails.
 	pg.catchupErr = nil
 	pg2 := &stalePGDriver{inner: pg, clock: clock}
-	o.pg = pg2
+	o.driver = pg2
 	out, err := o.Run(context.Background(), cutoverReq())
 	if err == nil {
 		t.Fatal("stale lease returned no error; must fail closed")
@@ -296,19 +296,19 @@ type stalePGDriver struct {
 	calls int
 }
 
-func (s *stalePGDriver) Preflight(ctx context.Context, config ReplicationConfig) (PGPreflightResult, error) {
-	return s.inner.Preflight(ctx, config)
+func (s *stalePGDriver) CutoverPreflight(ctx context.Context, config ReplicationConfig) (CutoverPreflightResult, error) {
+	return s.inner.CutoverPreflight(ctx, config)
 }
-func (s *stalePGDriver) WaitForCatchUpPG(ctx context.Context, config ReplicationConfig, maxLagSeconds int64) error {
+func (s *stalePGDriver) WaitForCatchUp(ctx context.Context, config ReplicationConfig, maxLagSeconds int64) error {
 	s.calls++
 	if s.calls >= 2 {
 		// Advance past TTL so the next AssertHolds sees expiry.
 		s.clock.t = s.clock.t.Add(FenceTTL + time.Second)
 	}
-	return s.inner.WaitForCatchUpPG(ctx, config, maxLagSeconds)
+	return s.inner.WaitForCatchUp(ctx, config, maxLagSeconds)
 }
-func (s *stalePGDriver) PromotePG(ctx context.Context, config ReplicationConfig) error {
-	return s.inner.PromotePG(ctx, config)
+func (s *stalePGDriver) CutoverPromote(ctx context.Context, config ReplicationConfig) error {
+	return s.inner.CutoverPromote(ctx, config)
 }
 
 // TestCutoverOrchestratorIdempotentReentry: after a completed run, a second run

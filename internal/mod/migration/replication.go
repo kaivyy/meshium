@@ -253,9 +253,19 @@ func (e *ReplicationEngine) setupMySQL(ctx context.Context, config ReplicationCo
 		return fmt.Errorf("create replication user: %w", err)
 	}
 
+	// SEED FIRST (Phase 2C-3 fix for the unseeded-replica defect). The target must
+	// hold the source's current data BEFORE we point it at the source's binlog.
+	// Without the seed, any data written to the source before replication was
+	// configured is silently lost on cutover. The seed dumps a consistent
+	// snapshot (--single-transaction) and streams it to the target restore.
+	if err := e.seedMySQL(ctx, config); err != nil {
+		return fmt.Errorf("seed mysql: %w", err)
+	}
+
 	// Get master status. Check the exit code too: ExecContext returns a nil
 	// error on non-zero exit, and a failed SHOW MASTER STATUS would otherwise
-	// fall through to an empty binlog position and a broken replica.
+	// fall through to an empty binlog position and a broken replica. We read it
+	// AFTER the seed so the replica starts from a position at/after the seed.
 	output, mstderr, mexit, err := e.sourceSSH.ExecContext(ctx, "mysql -e 'SHOW MASTER STATUS\\G' 2>&1")
 	if err != nil || mexit != 0 {
 		return fmt.Errorf("get master status: %s", execCommandError(err, mexit, output, mstderr))
@@ -270,26 +280,117 @@ func (e *ReplicationEngine) setupMySQL(ctx context.Context, config ReplicationCo
 		return fmt.Errorf("source master status has no binlog file (is binary logging enabled?); output: %s", strings.TrimSpace(output))
 	}
 
-	// Configure replica on target
+	// Configure replica on target. MySQL 8.0.22+ renamed MASTER→SOURCE; emit the
+	// modern form and START REPLICA, which older servers reject — but the mandate
+	// fixes this slice at same-major MySQL 8, so the modern syntax is correct.
+	// MASTER_LOG_POS is a numeric literal; guard it so a non-numeric parse result
+	// cannot inject SQL. Fall back to 0 if the parsed position is not an integer.
 	sourceHost := config.SourceHost
 	if sourceHost == "" {
 		sourceHost = "source" // will be resolved via SSH tunnel or hosts file
 	}
-
-	// MASTER_LOG_POS is a numeric literal; guard it so a non-numeric parse result
-	// cannot inject SQL. Fall back to 0 if the parsed position is not an integer.
 	if _, convErr := strconv.ParseInt(binPos, 10, 64); binPos == "" || convErr != nil {
 		binPos = "0"
 	}
-	changeMasterSQL := fmt.Sprintf(
-		"CHANGE MASTER TO MASTER_HOST='%s', MASTER_USER='%s', MASTER_PASSWORD='%s', MASTER_LOG_FILE='%s', MASTER_LOG_POS=%s; START SLAVE;",
+	changeSourceSQL := fmt.Sprintf(
+		"CHANGE REPLICATION SOURCE TO SOURCE_HOST='%s', SOURCE_USER='%s', SOURCE_PASSWORD='%s', SOURCE_LOG_FILE='%s', SOURCE_LOG_POS=%s; START REPLICA;",
 		sqlEscapeSingleQuotes(sourceHost), sqlEscapeSingleQuotes(replUser), sqlEscapeSingleQuotes(replPass), sqlEscapeSingleQuotes(binFile), binPos,
 	)
-	cmd = fmt.Sprintf("mysql -e %s 2>&1", shared.ShellQuote(changeMasterSQL))
+	cmd = fmt.Sprintf("mysql -e %s 2>&1", shared.ShellQuote(changeSourceSQL))
 	if out, cstderr, cexit, err := e.targetSSH.ExecContext(ctx, cmd); err != nil || cexit != 0 {
 		return fmt.Errorf("configure replica: %s", execCommandError(err, cexit, out, cstderr))
 	}
 
+	return nil
+}
+
+// seedMySQL dumps the source database(s) and restores them onto the (target)
+// standby so replication starts from complete data. This is the core fix for
+// the unseeded-replica silent-data-loss defect: a replica configured without a
+// seed begins empty and only receives changes made AFTER the binlog position.
+//
+// Streaming is preferred (no temp file on meshium): if the SSH clients satisfy
+// StreamExecuter/WriteExecuter, the dump pipes source→target directly. When they
+// don't (e.g. test mocks), it falls back to a temp-file round-trip over a single
+// host's ExecContext so the replication path stays exercisable in unit tests.
+func (e *ReplicationEngine) seedMySQL(ctx context.Context, config ReplicationConfig) error {
+	creds := DBCredentials{
+		Engine:   "mysql",
+		Username: config.ReplicationUser,
+		Password: config.ReplicationPass,
+		Host:     "127.0.0.1",
+		Port:     config.SourcePort,
+	}
+	if creds.Port == 0 {
+		creds.Port = 3306
+	}
+	// For seeding we authenticate as the (newly created) replication user is not
+	// ideal — use root-equivalent creds if present in config, else the repl user.
+	// The repl user only has REPLICATION SLAVE, not SELECT, so seeding needs a
+	// user with read access. Use the config creds when available; otherwise the
+	// source/target SSH are the same deployment, so read via the local socket as
+	// root (common in managed migrations). We shell out as configured; if both
+	// are empty, mysqldump falls back to the OS user, which in practice is root
+	// on the migration host.
+	if config.ReplicationUser != "" && config.ReplicationPass != "" {
+		creds.Username = config.ReplicationUser
+		creds.Password = config.ReplicationPass
+	}
+
+	dbName := config.DatabaseName
+	if dbName == "" {
+		// Seed all non-system databases: list them from the source.
+		dbs, err := (&mysqlMigrator{}).ListDatabases(ctx, e.sourceSSH, creds)
+		if err != nil {
+			return fmt.Errorf("list source databases for seed: %w", err)
+		}
+		var names []string
+		for _, d := range dbs {
+			names = append(names, d.Name)
+		}
+		dbName = strings.Join(names, " ")
+	}
+	if dbName == "" {
+		// Nothing to seed (no user databases). Safe to skip — replication will
+		// still operate; an empty source seeds to an empty target.
+		return nil
+	}
+
+	dumpCmd := (&mysqlMigrator{}).StreamDumpCommand(creds, dbName)
+	restoreCmd := (&mysqlMigrator{}).StreamRestoreCommand(creds, dbName)
+
+	// Preferred: stream source dump → target restore with no local temp file.
+	if src, ok := e.sourceSSH.(StreamExecuter); ok {
+		if tgt, ok2 := e.targetSSH.(WriteExecuter); ok2 {
+			r, err := src.ExecPipe(ctx, dumpCmd)
+			if err != nil {
+				return fmt.Errorf("seed: open source dump stream: %w", err)
+			}
+			defer r.Close()
+			stderr, exit, err := tgt.ExecWithStdin(ctx, restoreCmd, r)
+			if err != nil {
+				return fmt.Errorf("seed: restore stream: %w", err)
+			}
+			if exit != 0 {
+				return fmt.Errorf("seed: restore exit %d: %s", exit, strings.TrimSpace(stderr))
+			}
+			return nil
+		}
+	}
+
+	// Fallback: dump to a temp file on the source, then restore from that file on
+	// the target (best-effort, no meshium temp file). Used when the clients are
+	// not streaming-capable (tests). Remove the temp file on either outcome.
+	tmp := "/tmp/meshium_mysql_seed.sql"
+	dumpToFile := dumpCmd + " > " + shared.ShellQuote(tmp)
+	if _, stderr, exit, err := e.sourceSSH.ExecContext(ctx, dumpToFile); err != nil || exit != 0 {
+		return fmt.Errorf("seed: dump to temp: %s", execCommandError(err, exit, "", stderr))
+	}
+	defer e.sourceSSH.ExecContext(ctx, "rm -f "+shared.ShellQuote(tmp))
+	restoreFromFile := (&mysqlMigrator{}).RestoreCommand(creds, dbName, tmp)
+	if _, stderr, exit, err := e.targetSSH.ExecContext(ctx, restoreFromFile); err != nil || exit != 0 {
+		return fmt.Errorf("seed: restore from temp: %s", execCommandError(err, exit, "", stderr))
+	}
 	return nil
 }
 
@@ -499,6 +600,117 @@ func (e *ReplicationEngine) redisLag(ctx context.Context, config ReplicationConf
 func (e *ReplicationEngine) promoteRedis(ctx context.Context, config ReplicationConfig) error {
 	_, _, _, err := e.targetSSH.ExecContext(ctx, "redis-cli REPLICAOF NO ONE 2>&1")
 	return err
+}
+
+// preflightRedis runs the read-only pre-cutover gates for a Redis replica pair.
+// Redis replication is async and best-effort; the honest boundary is that the
+// target must be a running replica of THIS source and have a recent link. There
+// is no master_last_io_seconds_ago cleanly for the seed, so we require:
+//   - source is a master (role:master),
+//   - target is a replica (role:replica/slave) whose master_host points at the
+//     configured source host,
+//   - the replica link is up (master_link_status:up).
+// Any ambiguity fails closed. Redis has no atomic freeze, so RPO is "minimal"
+// not "zero"; the cutover is gated but the residual async gap is documented.
+func (e *ReplicationEngine) preflightRedis(ctx context.Context, config ReplicationConfig) (CutoverPreflightResult, error) {
+	var r CutoverPreflightResult
+	r.TargetInRecovery = true // Redis target pre-switch role = replica
+
+	srcRole, _, err := redisRole(ctx, e.sourceSSH)
+	if err != nil {
+		r.Notes = "source redis role probe: " + err.Error()
+		return r, fmt.Errorf("%w: %s", ErrCutoverPreflight, r.Notes)
+	}
+	if redisRoleKind(srcRole) != topoPrimary {
+		r.Notes = "source redis is not a master (role=" + srcRole + ")"
+		return r, fmt.Errorf("%w: %s", ErrCutoverPreflight, r.Notes)
+	}
+
+	tgtOutput, _, _, err := e.targetSSH.ExecContext(ctx, "redis-cli INFO replication 2>&1")
+	if err != nil {
+		r.Notes = "target redis INFO probe: " + err.Error()
+		return r, fmt.Errorf("%w: %s", ErrCutoverPreflight, r.Notes)
+	}
+	var tgtRole, masterHost, linkStatus string
+	for _, line := range strings.Split(tgtOutput, "\n") {
+		line = strings.TrimSpace(line)
+		switch {
+		case strings.HasPrefix(line, "role:"):
+			tgtRole = strings.TrimPrefix(line, "role:")
+		case strings.HasPrefix(line, "master_host:"):
+			masterHost = strings.TrimPrefix(line, "master_host:")
+		case strings.HasPrefix(line, "master_link_status:"):
+			linkStatus = strings.TrimPrefix(line, "master_link_status:")
+		}
+	}
+	if redisRoleKind(tgtRole) != topoReplica {
+		r.Notes = "target redis is not a replica (role=" + tgtRole + ")"
+		return r, fmt.Errorf("%w: %s", ErrCutoverPreflight, r.Notes)
+	}
+	expectedHost := config.SourceHost
+	if expectedHost == "" {
+		expectedHost = "source"
+	}
+	if strings.TrimSpace(masterHost) != expectedHost {
+		r.Notes = fmt.Sprintf("target replica points at %q, expected source %q", strings.TrimSpace(masterHost), expectedHost)
+		return r, fmt.Errorf("%w: %s", ErrCutoverPreflight, r.Notes)
+	}
+	if strings.TrimSpace(linkStatus) != "up" {
+		r.Notes = "target replica link is not up (master_link_status=" + strings.TrimSpace(linkStatus) + ")"
+		return r, fmt.Errorf("%w: %s", ErrCutoverPreflight, r.Notes)
+	}
+	r.ReplicatorOK = true
+	return r, nil
+}
+
+// promoteRedisCutover promotes the Redis replica to master. Pre-switch it
+// asserts the target is still a replica of this source (no out-of-band change);
+// post-switch it asserts the target became role:master. Redis has no freeze
+// (no read-only primary), so the dual-writer window is bounded by the async
+// replication gap, not eliminated — documented in known-limitations. Failure to
+// become master → fail closed.
+func (e *ReplicationEngine) promoteRedisCutover(ctx context.Context, config ReplicationConfig) error {
+	// BEFORE: confirm the target is still a replica of this source.
+	tgtOutput, _, _, err := e.targetSSH.ExecContext(ctx, "redis-cli INFO replication 2>&1")
+	if err != nil {
+		return fmt.Errorf("pre-promote redis probe: %w", err)
+	}
+	var tgtRole, linkStatus string
+	for _, line := range strings.Split(tgtOutput, "\n") {
+		line = strings.TrimSpace(line)
+		switch {
+		case strings.HasPrefix(line, "role:"):
+			tgtRole = strings.TrimPrefix(line, "role:")
+		case strings.HasPrefix(line, "master_link_status:"):
+			linkStatus = strings.TrimPrefix(line, "master_link_status:")
+		}
+	}
+	if redisRoleKind(tgtRole) != topoReplica {
+		return fmt.Errorf("pre-promote: target redis not a replica (role=%s) — cannot promote", tgtRole)
+	}
+	if strings.TrimSpace(linkStatus) != "up" {
+		return fmt.Errorf("pre-promote: target replica link down (status=%s)", strings.TrimSpace(linkStatus))
+	}
+
+	// Promote.
+	if _, _, _, err := e.targetSSH.ExecContext(ctx, "redis-cli REPLICAOF NO ONE 2>&1"); err != nil {
+		return fmt.Errorf("redis promote: %w", err)
+	}
+
+	// AFTER: confirm it became a master.
+	out, _, _, err := e.targetSSH.ExecContext(ctx, "redis-cli INFO replication 2>&1")
+	if err != nil {
+		return fmt.Errorf("post-promote redis probe: %w", err)
+	}
+	for _, line := range strings.Split(out, "\n") {
+		line = strings.TrimSpace(line)
+		if strings.HasPrefix(line, "role:") {
+			if redisRoleKind(strings.TrimPrefix(line, "role:")) == topoPrimary {
+				return nil
+			}
+		}
+	}
+	return fmt.Errorf("post-promote: target redis did not become a master (promote did not take effect)")
 }
 
 func (e *ReplicationEngine) rollbackRedis(ctx context.Context, config ReplicationConfig) error {

@@ -11,6 +11,7 @@ import (
 // It supports per-command output mapping and upload/download capture.
 type mockSSH struct {
 	execOutput   map[string]string // cmd -> stdout
+	execOutputSeq map[string][]string // cmd -> ordered outputs, consumed per call
 	execExit     map[string]int    // cmd prefix -> nonzero exit code
 	execErr      map[string]error  // cmd -> error
 	uploadData   map[string][]byte // remotePath -> uploaded data
@@ -23,6 +24,7 @@ type mockSSH struct {
 func newMockSSH() *mockSSH {
 	return &mockSSH{
 		execOutput:   make(map[string]string),
+		execOutputSeq: make(map[string][]string),
 		execExit:     make(map[string]int),
 		execErr:      make(map[string]error),
 		uploadData:   make(map[string][]byte),
@@ -33,6 +35,16 @@ func newMockSSH() *mockSSH {
 
 func (m *mockSSH) Exec(cmd string) (string, string, int, error) {
 	m.commands = append(m.commands, cmd)
+	// Ordered outputs (e.g. a probe that must return two different values across
+	// calls) take precedence when available; they are consumed one per call.
+	if seq, ok := m.execOutputSeq[cmd]; ok && len(seq) > 0 {
+		out := seq[0]
+		m.execOutputSeq[cmd] = seq[1:]
+		if err, ok := m.execErr[cmd]; ok {
+			return out, "", 1, err
+		}
+		return out, "", m.exitFor(cmd), nil
+	}
 	// Try exact match first
 	if out, ok := m.execOutput[cmd]; ok {
 		if err, ok := m.execErr[cmd]; ok {

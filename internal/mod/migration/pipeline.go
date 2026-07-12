@@ -1838,17 +1838,17 @@ func (s *trafficSwitchStage) Execute(ctx context.Context, pc *PipelineContext) e
 	return ErrAwaitingCutover
 }
 
-// runAutoCutover drives the Phase 2A fenced cutover orchestrator when
+// runAutoCutover drives the Phase 2A+2C fenced cutover orchestrator when
 // MigrationConfig.AutoCutover is true. It builds the orchestrator from the
 // pipeline context, runs the 12-step machine (fencing before every step,
 // switch-before-promote, fail-closed), and persists the outcome. Any error
 // fails closed: the cutover record records the sanitized failure and the
 // stage returns the error so the pipeline stops at NeedsManualIntervention.
 //
-// ponytail: Phase 2A scope is PostgreSQL + Nginx only. Other engines / traffic
-// providers fail closed here with an explicit "unsupported" error rather than
-// attempting an unsafe cutover. Add MongoDB/MySQL/multi-provider when their
-// preflight/promote primitives exist.
+// Phase 2C: PostgreSQL, MySQL (seeded), and Redis are supported with fenced
+// cutover; traffic switches via nginx or haproxy. MongoDB has no safe cutover
+// contract and fails closed here. Engines/providers without a fenced switcher
+// fail closed with an explicit unsupported error rather than an unsafe cutover.
 func (s *trafficSwitchStage) runAutoCutover(ctx context.Context, pc *PipelineContext) error {
 	pc.OnProgress(WSMessage{Step: "traffic_switch", Status: "progress", Value: "Fenced cutover: acquiring lease and driving switch-before-promote..."})
 
@@ -1860,15 +1860,22 @@ func (s *trafficSwitchStage) runAutoCutover(ctx context.Context, pc *PipelineCon
 		return s.failAutoCutover(ctx, pc, nil, fmt.Errorf("repo does not support fence leases (cannot run fenced cutover safely)"))
 	}
 
-	// Phase 2A: PostgreSQL only. Build the replication config from the user's
-	// DatabaseConfig (the replicator creds) + source/target hosts. No creds are
-	// persisted; they live only in the in-memory request for the preflight probe.
+	// Phase 2C: dispatch by engine + traffic provider. Build the replication
+	// config from the user's DatabaseConfig (the replicator creds) + source/target
+	// hosts. No creds are persisted; they live only in the in-memory request for
+	// the preflight probe. Engines with no safe cutover contract (mongodb) and
+	// providers with no fenced switcher (everything but nginx/haproxy) fail closed
+	// here rather than attempting an unsafe cutover.
 	dc := pc.Config.DatabaseConfig
-	if dc == nil || !pgEngine(dc.Engine) {
-		return s.failAutoCutover(ctx, pc, nil, fmt.Errorf("autoCutover requires a postgres DatabaseConfig (Phase 2A: postgres + nginx only)"))
+	if dc == nil {
+		return s.failAutoCutover(ctx, pc, nil, fmt.Errorf("autoCutover requires a DatabaseConfig"))
+	}
+	dbType, ok := cutoverEngineType(dc.Engine)
+	if !ok {
+		return s.failAutoCutover(ctx, pc, nil, fmt.Errorf("autoCutover: engine %q has no fenced-cutover contract (supported: postgres, mysql, redis; mongodb is not safe)", dc.Engine))
 	}
 	if pc.Config.TrafficConfig == "" {
-		return s.failAutoCutover(ctx, pc, nil, fmt.Errorf("autoCutover requires TrafficConfig (full target nginx.conf)"))
+		return s.failAutoCutover(ctx, pc, nil, fmt.Errorf("autoCutover requires TrafficConfig (full provider config)"))
 	}
 
 	holder, err := GenerateHolder()
@@ -1877,18 +1884,18 @@ func (s *trafficSwitchStage) runAutoCutover(ctx context.Context, pc *PipelineCon
 	}
 
 	replConfig := ReplicationConfig{
-		DatabaseType:    "postgres",
+		DatabaseType:    dbType,
 		DatabaseName:    dc.DatabaseName,
 		SourceHost:       pc.SourceServer.Host,
-		SourcePort:       pgPort(dc),
+		SourcePort:       defaultPort(dc.Engine),
 		TargetHost:       pc.TargetServer.Host,
-		TargetPort:       pgPort(dc),
+		TargetPort:       defaultPort(dc.Engine),
 		ReplicationUser:  dc.Username,
 		ReplicationPass:  dc.Password,
 		MigrationID:      pc.MigrationID,
 	}
 
-	nginxReq := NginxSwitchRequest{
+	trafficReq := TrafficSwitchRequest{
 		IdempotencyKey: fmt.Sprintf("meshium-cutover-%d-%s", pc.MigrationID, holder),
 		NewConfig:      pc.Config.TrafficConfig,
 		VerifyURL:      pc.Config.HealthCheckURL,
@@ -1896,17 +1903,23 @@ func (s *trafficSwitchStage) runAutoCutover(ctx context.Context, pc *PipelineCon
 
 	auth := NewFencingAuthority(fenceRepo)
 	machine := newCutoverMachine(pc.Repo, auth, pc.MigrationID)
-	pg := NewReplicationEngine(pc.SourceSSH, pc.TargetSSH, pc.Repo)
-	traffic := NewNginxSwitcher(pc.TargetSSH, nil)
-	o := NewCutoverOrchestrator(machine, auth, pg, traffic)
+	engine := NewReplicationEngine(pc.SourceSSH, pc.TargetSSH, pc.Repo)
+
+	// Provider dispatch: nginx and haproxy have fenced switchers with
+	// read-after-write verification. Any other provider is unsupported here.
+	traffic, trafficErr := newTrafficSwitcher(pc.Config.TrafficProvider, pc.TargetSSH)
+	if trafficErr != nil {
+		return s.failAutoCutover(ctx, pc, nil, trafficErr)
+	}
+	o := NewCutoverOrchestrator(machine, auth, engine, traffic)
 
 	out, runErr := o.Run(ctx, CutoverRequest{
-		MigrationID:   pc.MigrationID,
-		Holder:        holder,
-		Replication:   replConfig,
-		NginxRequest:  nginxReq,
-		MaxLagSeconds: PGCatchUpMaxLag,
-		ObserveFor:    pc.Config.ObservationDuration,
+		MigrationID:    pc.MigrationID,
+		Holder:         holder,
+		Replication:    replConfig,
+		TrafficRequest: trafficReq,
+		MaxLagSeconds:  PGCatchUpMaxLag,
+		ObserveFor:     pc.Config.ObservationDuration,
 	})
 
 	if runErr != nil {
@@ -2000,6 +2013,40 @@ func pgPort(dc *DatabaseConfig) int {
 		return dc.Port
 	}
 	return 5432
+}
+
+// cutoverEngineType normalizes an engine string to the ReplicationConfig
+// DatabaseType the fenced cutover supports. MongoDB returns ok=false: it has no
+// replicaset-lag measurement, so a safe cutover contract cannot exist — callers
+// fail closed. PostgreSQL, MySQL/MariaDB, and Redis are the supported engines.
+func cutoverEngineType(engine string) (string, bool) {
+	e := strings.ToLower(strings.TrimSpace(engine))
+	switch e {
+	case "postgres", "postgresql":
+		return "postgres", true
+	case "mysql", "mariadb":
+		return "mysql", true
+	case "redis":
+		return "redis", true
+	case "mongodb":
+		return "", false
+	default:
+		return "", false
+	}
+}
+
+// newTrafficSwitcher builds the fenced traffic switcher for a provider. Only
+// nginx and haproxy have fenced switchers with read-after-write verification;
+// anything else is unsupported for automated cutover (fail closed upstream).
+func newTrafficSwitcher(provider TrafficProvider, ssh SSHExecuter) (trafficSwitchDriver, error) {
+	switch provider {
+	case TrafficProviderNginx:
+		return NewNginxSwitcher(ssh, nil), nil
+	case TrafficProviderHAProxy:
+		return NewHAProxySwitcher(ssh, nil), nil
+	default:
+		return nil, fmt.Errorf("autoCutover: traffic provider %q has no fenced switcher (supported: nginx, haproxy)", provider)
+	}
 }
 
 // outFinalState safely reads the outcome's final state for an error message.

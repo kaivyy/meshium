@@ -3,7 +3,6 @@ package migration
 import (
 	"bytes"
 	"context"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -11,8 +10,6 @@ import (
 	"strings"
 	"sync"
 	"time"
-
-	"meshium/internal/shared"
 )
 
 // Phase 2A-5: Nginx traffic-switch provider — idempotent switch + post-switch
@@ -63,31 +60,11 @@ var ErrNginxReloadFailed = errors.New("nginx reload failed")
 // ErrNginxConfigTestFailed is returned when `nginx -t` rejects the new config.
 var ErrNginxConfigTestFailed = errors.New("nginx config test failed")
 
-// NginxSwitchRequest is the input to NginxSwitcher.Switch. The NewConfig is the
-// full replacement nginx.conf (or upstream snippet) to write to ConfigPath;
-// the switcher does NOT regex-edit the live config (the legacy path's bug was
-// assuming the regex matched). The operator/plan supplies the full target config.
-type NginxSwitchRequest struct {
-	IdempotencyKey string            `json:"idempotencyKey"`           // dedup key; empty = always run
-	ConfigPath     string            `json:"configPath,omitempty"`    // default /etc/nginx/nginx.conf
-	NewConfig      string            `json:"newConfig"`               // full replacement config
-	VerifyURL      string            `json:"verifyUrl"`               // health endpoint to read-after-write
-	VerifyHeader   string            `json:"verifyHeader,omitempty"`  // expected header, e.g. X-Meshium-Target
-	VerifyValue    string            `json:"verifyValue,omitempty"`   // expected header/body value, e.g. target
-}
-
-// NginxSwitchResult is the outcome the orchestrator persists (sanitized) on the
-// traffic_switch_config. LastResult is the raw payload; SanitizedResult is
-// safe to store.
-type NginxSwitchResult struct {
-	Switched         bool   `json:"switched"`
-	ConfigTestOK     bool   `json:"configTestOk"`
-	ReloadOK         bool   `json:"reloadOk"`
-	Verified         bool   `json:"verified"`
-	VerifyResponse   string `json:"verifyResponse,omitempty"`
-	SanitizedConfig  string `json:"sanitizedConfig,omitempty"` // newConfig with secrets redacted
-	SanitizedResult  string `json:"sanitizedResult,omitempty"` // full result, sanitized
-}
+// NginxSwitchRequest and NginxSwitchResult are type aliases of
+// TrafficSwitchRequest / TrafficSwitchResult (defined in
+// traffic_switch_common.go, shared with HAProxySwitcher). They are redeclared
+// here only as aliases for call-site readability; the canonical definitions and
+// JSON tags live in traffic_switch_common.go.
 
 // NginxSwitcher swaps the nginx config to point at the target and verifies the
 // traffic moved. SSH is to the nginx host (the pipeline's targetSSH in the
@@ -125,8 +102,8 @@ func (s *NginxSwitcher) Switch(ctx context.Context, req NginxSwitchRequest) (*Ng
 		s.mu.Unlock()
 	}
 
-	res := &NginxSwitchResult{SanitizedConfig: sanitizeConfig(req.NewConfig)}
-	res.SanitizedResult = sanitizeResult(res)
+	res := &NginxSwitchResult{SanitizedConfig: sanitizeTrafficConfig(req.NewConfig)}
+	res.SanitizedResult = sanitizeTrafficResult(res)
 
 	// Step 1: write the new config (full replacement, no regex).
 	if err := s.ssh.Upload(bytes.NewReader([]byte(req.NewConfig)), req.ConfigPath); err != nil {
@@ -138,7 +115,7 @@ func (s *NginxSwitcher) Switch(ctx context.Context, req NginxSwitchRequest) (*Ng
 	// valid. Revert and fail.
 	if err := s.configTest(ctx, req.ConfigPath); err != nil {
 		s.revert(ctx, req)
-		res.SanitizedResult = sanitizeResult(res)
+		res.SanitizedResult = sanitizeTrafficResult(res)
 		return res, fmt.Errorf("%w: %v", ErrNginxConfigTestFailed, err)
 	}
 	res.ConfigTestOK = true
@@ -146,7 +123,7 @@ func (s *NginxSwitcher) Switch(ctx context.Context, req NginxSwitchRequest) (*Ng
 	// Step 3: reload, retried up to NginxReloadRetries.
 	if err := s.reloadWithRetry(ctx); err != nil {
 		s.revert(ctx, req)
-		res.SanitizedResult = sanitizeResult(res)
+		res.SanitizedResult = sanitizeTrafficResult(res)
 		return res, fmt.Errorf("%w: %v", ErrNginxReloadFailed, err)
 	}
 	res.ReloadOK = true
@@ -155,7 +132,7 @@ func (s *NginxSwitcher) Switch(ctx context.Context, req NginxSwitchRequest) (*Ng
 	vresp, verr := s.verify(ctx, req)
 	res.VerifyResponse = vresp
 	if verr != nil {
-		res.SanitizedResult = sanitizeResult(res)
+		res.SanitizedResult = sanitizeTrafficResult(res)
 		// Do NOT revert automatically here: the config IS pointing at the
 		// target but verification could not prove traffic arrived. The
 		// orchestrator decides rollback vs manual-intervention. We return
@@ -164,7 +141,7 @@ func (s *NginxSwitcher) Switch(ctx context.Context, req NginxSwitchRequest) (*Ng
 	}
 	res.Verified = true
 	res.Switched = true
-	res.SanitizedResult = sanitizeResult(res)
+	res.SanitizedResult = sanitizeTrafficResult(res)
 
 	if req.IdempotencyKey != "" {
 		s.mu.Lock()
@@ -257,29 +234,9 @@ func (s *NginxSwitcher) revert(ctx context.Context, req NginxSwitchRequest) {
 	_, _, _, _ = s.ssh.ExecContext(ctx, "nginx -s reload 2>&1")
 }
 
-// sanitizeConfig redacts secrets from a stored nginx config blob. Reuses
-// shared.SanitizeJSONRawMessage when the config is JSON; raw text is passed
-// through SanitizeString (e.g. clears passwords/token patterns).
-func sanitizeConfig(config string) string {
-	trimmed := strings.TrimSpace(config)
-	if strings.HasPrefix(trimmed, "{") || strings.HasPrefix(trimmed, "[") {
-		raw := shared.SanitizeJSONRawMessage(json.RawMessage(config))
-		return string(raw)
-	}
-	return shared.SanitizeString(config)
-}
-
-// sanitizeResult returns the sanitized JSON of the result for storage.
-func sanitizeResult(r *NginxSwitchResult) string {
-	b, err := json.Marshal(r)
-	if err != nil {
-		return ""
-	}
-	return string(shared.SanitizeJSONRawMessage(json.RawMessage(b)))
-}
-
-// Ensure NginxSwitchResult.SanitizedConfig is not exported with secrets: the
-// constructor paths above redact before assignment. ponytail: once the
-// orchestrator persists the full provider config (not just the result), store
-// the sanitized original too for audit. Add when Commit 6 wires persistence.
-var _ = sanitizeConfig
+// sanitizeConfig / sanitizeResult are defined once in traffic_switch_common.go
+// (shared by NginxSwitcher and HAProxySwitcher). NginxSwitcher reuses them via
+// the NginxSwitchRequest/NginxSwitchResult aliases of TrafficSwitchRequest/
+// TrafficSwitchResult. The shared helpers redact secrets from a stored config
+// blob (JSON-aware via shared.SanitizeJSONRawMessage, else
+// shared.SanitizeString) and from the result.

@@ -115,6 +115,70 @@
 5. **No zero-downtime claim.** Phase 2B is about transfer
    correctness/resumability, not liveness. Downtime still = transfer time.
 
+## What Phase 2C adds (cutover engine/provider extension)
+
+> **Status: implemented.** Extends the Phase 2A fenced PostgreSQL cutover to
+> additional engines and one more traffic provider, behind the same fail-closed
+> contract. PostgreSQL, MySQL (seeded), and Redis are supported; MongoDB is
+> **not** (fails closed at dispatch). See `docs/superpowers/specs/2026-07-13-
+> phase2c-engine-providers.md` for the full contract and compatibility matrix.
+
+### Supported engines
+
+- **PostgreSQL** (Phase 2A): same-major only, fenced, source-freeze (read-only
+  GUC) deferred as defense-in-depth. Verified by `pg_cutover_integration_test.go`.
+- **MySQL / MariaDB** (seeded replication): same-major only. The target is
+  **seeded** (streamed `mysqldump` → `mysql` restore) *before* the replica is
+  configured, so the target is not empty on cutover (fixes the unseeded
+  Phase-1 defect). Preflight gates: same-major, `log_bin` ON, unique non-zero
+  `server_id`, source `read_only=OFF`, target `read_only=ON`, replicator
+  connectivity. Promote freezes the source (`read_only=ON`) **before** stopping
+  the replica and making the target writable; post-promote probe must show the
+  target is now a primary or it fails closed.
+- **Redis** (fenced): source must be `role:master`, target a `role:slave`
+  pointing at this source with `master_link_status:up`. Promote runs
+  `REPLICAOF NO ONE` and confirms the target became `role:master`. Redis has
+  **no freeze** — the dual-writer window is bounded by the async replication
+  gap, not eliminated. This is the one accepted residual risk; do not claim a
+  hard no-dual-writer guarantee for Redis.
+
+### Supported traffic providers
+
+- **nginx**: `NginxSwitcher` — idempotent (idempotency key + cache), bounded,
+  read-after-write verify, sanitized persist. (Phase 2A.)
+- **haproxy**: `HAProxySwitcher` — identical contract to nginx (`haproxy -c`
+  config test, `systemctl reload`, same verify/sanitize). Second supported
+  auto-switch provider (Phase 2C).
+
+### MongoDB — NOT supported, fails closed
+
+MongoDB replication cutover is **refused** at the pipeline dispatch layer
+(`autoCutover` with engine `mongodb` → immediate `failAutoCutover`) and at every
+primitive (`setupMongoDB`, `preflightMongoDB`, `promoteMongoDB`,
+`rollbackMongoDB` all return errors before issuing a mutating command). The
+blocker is that replica-set lag has no measurement in this codebase, so
+catch-up cannot be verified before promotion — promoting would be blind. Use
+manual cutover (the Phase 1 baseline) for MongoDB. Runbook:
+`docs/mongodb-cutover-runbook.md`.
+
+## Residual limitations (Phase 2C cutover)
+
+1. **MySQL source freeze uses `read_only` GUC**, not a PG-style hard freeze; a
+   writer that bypasses the lease could still touch the source during the
+   switch→promote window. The fence lease is the hard serializing fence; the
+   `read_only` flip closes the dual-writer window on the happy path.
+2. **Redis has no source freeze.** The dual-writer window is bounded by async
+   repl lag. Accept the gap or use manual cutover for strict no-dual-writer
+   requirements.
+3. **Single target, single traffic provider per cutover.** No multi-standby
+   pinning, no simultaneous multi-provider switch.
+4. **Cutover bounded by one lease lifetime** (~4m50s). No lease-renewal loop; a
+   cutover that cannot finish in one lease fails closed.
+5. **No automatic backout.** The orchestrator fails closed and persists the
+   failure; the operator owns the backout (see `docs/cutover-runbook.md` §5 and
+   `docs/mongodb-cutover-runbook.md`).
+6. **MongoDB cutover is manual only.** No automated Mongo cutover this pass.
+
 ## Wording rules
 
 API responses, UI text, and docs must use these exact terms and must **not**
