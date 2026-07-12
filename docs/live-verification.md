@@ -107,16 +107,20 @@ When set, the adapter wraps every command in `docker exec -i <container> …`
 works: `docker exec -i <c> pg_dump` pipes to `docker exec -i <c> pg_restore`.
 This keeps the same adapter surface — only the command prefix changes.
 
-## Replica / low-downtime cutover (Phase 2 — not shipped)
+## Replica / low-downtime cutover (Phase 2)
 
-> **Phase 1 ships dump/restore only.** No live replication, no automatic
-> cutover, no zero-downtime claim. See [`docs/known-limitations.md`](known-limitations.md).
+> **PostgreSQL fenced cutover is shipped (opt-in, `AutoCutover=true`).** See
+> [`docs/known-limitations.md`](known-limitations.md) and
+> [`docs/cutover-runbook.md`](cutover-runbook.md). All other engines (MySQL,
+> MongoDB, Redis) and cross-major PostgreSQL remain deferred — **no
+> zero-downtime claim** for those. Phase 1 dump/restore is unchanged.
 
 Dump/restore (Phase 1) implies **downtime = transfer time**. For low downtime,
-Phase 2 would wire live replication so writes during the transfer are
-captured and replayed, then a short cutover flips traffic. The infra already
-exists (`ReplicationEngine`, `CutoverEngine`, `FreezeManager`) but is not yet
-connected to the pipeline's `liveReplicationStage` / `trafficSwitchStage`.
+Phase 2A wires live PostgreSQL physical replication (`ReplicationEngine`:
+`Preflight` / `WaitForCatchUpPG` / `PromotePG`) into a fenced 12-step
+`CutoverOrchestrator` driven by `trafficSwitchStage.runAutoCutover`. The fence
+lease serializes the cutover; the no-dual-writer invariant holds on the happy
+path. MySQL/Mongo/Redis and `FreezeManager` source-freeze remain deferred.
 
 Per-engine replication approach:
 

@@ -4,7 +4,9 @@
 
 Meshium provides a guided 11-step wizard for performing assisted server migrations. The wizard walks the user through discovery, risk assessment, planning, provisioning, execution, and post-cutover observation — with real-time monitoring and rollback of the changes the pipeline itself applied.
 
-> **Important — cutover is not automated.** The Phase 1 pipeline transfers data and configuration via dump/restore, but it does **not** set up live replication and does **not** automatically switch production traffic from the source to the target. The traffic-switch stage records a **manual-cutover checkpoint** and stops at `awaiting_cutover` for an operator-confirmed commit; the operator moves traffic themselves (DNS / reverse proxy / load balancer) and then verifies. Meshium does not advertise "zero-downtime"; downtime equals transfer time. See [`docs/known-limitations.md`](known-limitations.md) for the authoritative capability list and `docs/architecture.md` ("Cutover & Downtime Honesty").
+> **Important — cutover is manual by default.** The Phase 1 pipeline transfers data and configuration via dump/restore, but it does **not** set up live replication and does **not** automatically switch production traffic from the source to the target. The traffic-switch stage records a **manual-cutover checkpoint** and stops at `awaiting_cutover` for an operator-confirmed commit; the operator moves traffic themselves (DNS / reverse proxy / load balancer) and then verifies. Meshium does not advertise "zero-downtime"; downtime equals transfer time.
+>
+> **Opt-in exception (Phase 2A):** a PostgreSQL migration with `AutoCutover=true` runs a fenced, automated cutover (durable lease + `pg_promote`). PostgreSQL same-major only; still not "zero-downtime" (bounded by one lease lifetime ≈ 4m50s). See [`docs/cutover-runbook.md`](cutover-runbook.md) and [`docs/known-limitations.md`](known-limitations.md) for the authoritative capability list and `docs/architecture.md` ("Cutover & Downtime Honesty").
 
 ---
 
