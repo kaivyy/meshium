@@ -4,6 +4,7 @@ import (
 	"context"
 	"io"
 	"strings"
+	"sync"
 	"testing"
 
 	"meshium/internal/mod/migration"
@@ -45,7 +46,9 @@ func TestValidateVolNameRejectsInjection(t *testing.T) {
 
 // P0-10: clean volume names must be shell-quoted in every remote command, and a
 // hostile container name must short-circuit Apply with an error (no command
-// issued for it).
+// issued for it). The tar-over-SSH relay is only reachable as an explicit,
+// operator-visible DEGRADED fallback (AllowDegraded=true); otherwise Apply
+// fails closed rather than silently downgrading.
 func TestVolumePathShellQuoted(t *testing.T) {
 	src := &stubSSH{}
 	dst := &stubSSH{}
@@ -55,9 +58,14 @@ func TestVolumePathShellQuoted(t *testing.T) {
 		Volumes:       []string{"data"},
 		SourceSSH:     src,
 		TargetSSH:    dst,
+		AllowDegraded: true, // operator explicitly opted into the degraded relay
 	}
-	if _, err := step.Apply(migration.StepContext{Ctx: context.Background()}); err != nil {
+	ctx := &capturingCtx{}
+	if _, err := step.Apply(migration.StepContext{Ctx: context.Background(), Progress: ctx.emit}); err != nil {
 		t.Fatalf("apply: %v", err)
+	}
+	if !ctx.sawWarning("DEGRADED") {
+		t.Fatalf("degraded fallback must emit an operator-visible warning; msgs=%v", ctx.msgs)
 	}
 	for _, c := range src.commands {
 		if strings.Contains(c, "tar cf") && !strings.Contains(c, "'/tmp/meshium-vol-web.tar'") {
@@ -66,6 +74,24 @@ func TestVolumePathShellQuoted(t *testing.T) {
 		if strings.Contains(c, "docker stop") && !strings.Contains(c, "'web'") {
 			t.Fatalf("container name not quoted in docker stop: %s", c)
 		}
+	}
+}
+
+// TestVolumeDegradedNotSilent asserts that without explicit AllowDegraded,
+// the docker-volume step fails closed instead of silently using the relay.
+func TestVolumeDegradedNotSilent(t *testing.T) {
+	src := &stubSSH{}
+	dst := &stubSSH{}
+	step := &DockerVolumeMigrationStep{
+		StepName:      "vol",
+		ContainerName: "web",
+		Volumes:       []string{"data"},
+		SourceSSH:     src,
+		TargetSSH:    dst,
+		// AllowDegraded defaults to false → must fail closed.
+	}
+	if _, err := step.Apply(migration.StepContext{Ctx: context.Background()}); err == nil {
+		t.Fatal("expected fail-closed error when degraded fallback not permitted")
 	}
 }
 
@@ -87,4 +113,28 @@ func TestVolumeHostileContainerRejected(t *testing.T) {
 	if len(src.commands) != 0 {
 		t.Fatalf("no commands should run for a hostile name; got %v", src.commands)
 	}
+}
+
+// capturingCtx collects progress messages so tests can assert a
+// degraded-fallback warning was actually emitted.
+type capturingCtx struct {
+	mu   sync.Mutex
+	msgs []migration.WSMessage
+}
+
+func (c *capturingCtx) emit(m migration.WSMessage) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.msgs = append(c.msgs, m)
+}
+
+func (c *capturingCtx) sawWarning(sub string) bool {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	for _, m := range c.msgs {
+		if m.Status == "warning" && strings.Contains(m.Value, sub) {
+			return true
+		}
+	}
+	return false
 }

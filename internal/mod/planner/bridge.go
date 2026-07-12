@@ -221,6 +221,13 @@ type DockerVolumeMigrationStep struct {
 	Volumes       []string
 	SourceSSH     transport.SSHExecuter
 	TargetSSH     transport.SSHExecuter
+	// AllowDegraded permits the weaker tar-over-SSH relay (data flows
+	// through meshium) ONLY as an explicit, operator-visible fallback.
+	// When false and direct rsync is unavailable, the step fails closed
+	// to manual intervention — never a silent downgrade.
+	AllowDegraded bool
+	// Category is the transfer category used for compression policy + reporting.
+	Category string
 }
 
 func (s *DockerVolumeMigrationStep) Name() string { return s.StepName }
@@ -277,6 +284,34 @@ func (s *DockerVolumeMigrationStep) Apply(sctx migration.StepContext) (string, e
 		if err := validateVolName(vol); err != nil {
 			return "", fmt.Errorf("volume name: %w", err)
 		}
+
+		// Classify the volume path. An ambiguous/unknown path must NOT be
+		// silently transferred — fail closed to manual intervention.
+		kind := transfer.ClassifyVolumePath(vol)
+		if kind == transfer.VolumeUnknown {
+			return "", fmt.Errorf("%w: volume path %q is not an authoritative host/bind or docker-materialized path; operator must verify and transfer manually",
+				transfer.ErrTransferTopologyUnsupported, vol)
+		}
+
+		// Decide the transfer path. This step does not have target host
+		// topology (host/user/port) to form a true remote→remote rsync
+		// spec, so "direct rsync" cannot be asserted here. We therefore
+		// only ever use the tar-over-SSH relay as an EXPLICIT, operator-
+		// visible degraded fallback, and refuse (fail closed) when it is
+		// not permitted. Never a silent downgrade.
+		if !s.AllowDegraded {
+			return "", fmt.Errorf("%w: volume %q cannot use direct transfer in this topology and degraded fallback is not permitted; enable AllowDegraded or transfer manually",
+				transfer.ErrTransferStrategyUnavailable, vol)
+		}
+
+		if sctx.Progress != nil {
+			sctx.Progress(migration.WSMessage{
+				Step:   s.StepName,
+				Status: "warning",
+				Value:  fmt.Sprintf("DEGRADED transfer (tar-over-SSH relay through meshium) for volume %s — direct rsync not asserted in this topology", vol),
+			})
+		}
+
 		if sctx.Progress != nil {
 			sctx.Progress(migration.WSMessage{
 				Step:   s.StepName,
@@ -290,7 +325,6 @@ func (s *DockerVolumeMigrationStep) Apply(sctx migration.StepContext) (string, e
 		s.SourceSSH.ExecContext(ctx, fmt.Sprintf("tar cf %s -C %s .", shared.ShellQuote(sourcePath), shared.ShellQuote(vol)))
 
 		// Download from source, upload to target
-		// This is a simplified version — in production, we'd use the transfer engine
 		destPath := fmt.Sprintf("/tmp/meshium-vol-%s.tar", s.ContainerName)
 		pipeReader, pipeWriter := newPipe()
 		go func() {
