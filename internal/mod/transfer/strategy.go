@@ -174,6 +174,59 @@ func (s *StrategySelector) SCP() *SCPStrategy { return s.scp }
 // Rsync returns the rsync strategy.
 func (s *StrategySelector) Rsync() *RsyncStrategy { return s.rsync }
 
+// SelectResult is the decision of SelectWithFallback: which strategy to use,
+// the operating mode, and whether the choice was a degraded fallback rather
+// than the preferred direct path. Degraded=true MUST be surfaced to the
+// operator — it is never a silent downgrade.
+type SelectResult struct {
+	Strategy  TransferStrategy
+	Mode      string // "direct" | "degraded"
+	Degraded  bool
+	Available RsyncAvailability // populated only for the rsync direct path
+}
+
+// SelectWithFallback chooses a strategy, preferring direct rsync and only
+// permitting a weaker fallback (SCP/SFTP) when allowDegraded is true. It
+// never returns a fallback silently: callers read SelectResult.Degraded and
+// emit an operator-visible warning/event before proceeding.
+//
+// If rsync direct is unavailable and allowDegraded is false, it returns
+// ErrTransferStrategyUnavailable (fail closed) instead of downgrading.
+func (s *StrategySelector) SelectWithFallback(ctx context.Context, fileSize int64, opts TransferOptions, src, dst TransferTarget, allowDegraded bool) (SelectResult, error) {
+	avail := s.rsync.Availability(ctx, src, dst)
+	if avail.OK() {
+		return SelectResult{Strategy: s.rsync, Mode: "direct", Degraded: false, Available: avail}, nil
+	}
+
+	if !allowDegraded {
+		err := avail.Err
+		if err == nil {
+			err = ErrTransferStrategyUnavailable
+		}
+		return SelectResult{}, fmt.Errorf("%w: direct rsync unavailable (src=%v tgt=%v reach=%v)",
+			ErrTransferStrategyUnavailable, avail.SourceRsync, avail.TargetRsync, avail.Reachable)
+	}
+
+	// Degraded fallback: SCP/SFTP. Still require a usable path; if both ends
+	// are local SCP also degenerates, but that is a valid local copy.
+	if err := validateEndpoints(src, dst); err != nil {
+		return SelectResult{}, fmt.Errorf("%w: %v", ErrTransferStrategyUnavailable, err)
+	}
+	return SelectResult{Strategy: s.scp, Mode: "degraded", Degraded: true}, nil
+}
+
+// validateEndpoints rejects topologies the engine cannot represent safely:
+// both local (handled elsewhere) or a remote end without an SSH client.
+func validateEndpoints(src, dst TransferTarget) error {
+	if !src.IsLocal && src.SSHClient == nil {
+		return fmt.Errorf("%w: remote source has no SSH client", ErrTransferInvalidPath)
+	}
+	if !dst.IsLocal && dst.SSHClient == nil {
+		return fmt.Errorf("%w: remote target has no SSH client", ErrTransferInvalidPath)
+	}
+	return nil
+}
+
 // --- File size helpers ---
 
 // GetFileSize returns the size of a file at the given target.
