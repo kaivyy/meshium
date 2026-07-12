@@ -3,6 +3,7 @@ package transfer
 import (
 	"bufio"
 	"context"
+	"errors"
 	"fmt"
 	"os/exec"
 	"strings"
@@ -72,7 +73,16 @@ func execLocalRsync(ctx context.Context, argv []string, opts TransferOptions, pr
 	err = execCmd.Wait()
 	if err != nil {
 		if ctx.Err() != nil {
-			return nil, ctx.Err()
+			return nil, fmt.Errorf("rsync failed: %w: %v", ErrTransferInactivity, ctx.Err())
+		}
+		// Map rsync's exit code to a typed error when available; otherwise
+		// wrap the raw failure so a partial/unknown exit is never swallowed.
+		var exitErr *exec.ExitError
+		if errors.As(err, &exitErr) {
+			if codeErr := classifyRsyncExit(exitErr.ExitCode()); codeErr != nil {
+				return nil, fmt.Errorf("rsync failed: %w: %s", codeErr, stderrBuilder.String())
+			}
+			// exit 0 would not have errored; fall through to generic wrap
 		}
 		return nil, fmt.Errorf("rsync failed: %w: %s", err, stderrBuilder.String())
 	}

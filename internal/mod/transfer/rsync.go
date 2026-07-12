@@ -181,13 +181,20 @@ func (s *RsyncStrategy) remoteToRemote(ctx context.Context, src, dst TransferTar
 	cmd := fmt.Sprintf("rsync %s %s %s",
 		strings.Join(args, " "), shared.ShellQuote(src.Path), dstSpec)
 
-	// Execute via SSH on the source
+	// Execute via SSH on the source. rsync's stdout is only the file list and
+	// (with --progress) per-file progress lines — NOT the transferred data,
+	// which flows source→target directly. Capturing that is bounded, so the
+	// buffered ExecContext is safe here (unlike a meshium-relayed dump).
 	stdout, stderr, exitCode, err := src.SSHClient.ExecContext(ctx, cmd)
 	if err != nil {
+		// Context cancellation maps to a typed inactivity/timeout error.
+		if ctx.Err() != nil {
+			return nil, fmt.Errorf("rsync remote-to-remote: %w: %v", ErrTransferInactivity, ctx.Err())
+		}
 		return nil, fmt.Errorf("rsync remote-to-remote failed: %w", err)
 	}
-	if exitCode != 0 {
-		return nil, fmt.Errorf("rsync remote-to-remote failed: exit code %d: %s", exitCode, stderr)
+	if codeErr := classifyRsyncExit(exitCode); codeErr != nil {
+		return nil, fmt.Errorf("rsync remote-to-remote failed: %w: %s", codeErr, strings.TrimSpace(stderr))
 	}
 
 	// Parse progress from stdout
