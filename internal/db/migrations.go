@@ -560,6 +560,34 @@ func Migrate(db *sql.DB) error {
 			updated_at      DATETIME DEFAULT CURRENT_TIMESTAMP
 		)`,
 		`CREATE INDEX IF NOT EXISTS idx_migration_plans_migration ON migration_plans(migration_id)`,
+
+		// Phase 2B: durable transfer checkpoints for resume/reconcile after a
+		// backend restart. (transfer_id, file_name) is the resume key.
+		`CREATE TABLE IF NOT EXISTS transfer_checkpoints (
+			id                   INTEGER PRIMARY KEY AUTOINCREMENT,
+			transfer_id          TEXT NOT NULL,
+			migration_id         INTEGER NOT NULL,
+			category             TEXT NOT NULL DEFAULT '',
+			file_name            TEXT NOT NULL,
+			strategy             TEXT NOT NULL DEFAULT '',
+			mode                 TEXT NOT NULL DEFAULT 'direct',
+			source_host          TEXT NOT NULL DEFAULT '',
+			source_path          TEXT NOT NULL DEFAULT '',
+			target_host          TEXT NOT NULL DEFAULT '',
+			target_path          TEXT NOT NULL DEFAULT '',
+			total_bytes          INTEGER NOT NULL DEFAULT 0,
+			bytes_transferred    INTEGER NOT NULL DEFAULT 0,
+			resumable            INTEGER NOT NULL DEFAULT 0,
+			source_snapshot      TEXT NOT NULL DEFAULT '',
+			target_partial_state TEXT NOT NULL DEFAULT '',
+			checksum_source      TEXT NOT NULL DEFAULT '',
+			checksum_target      TEXT NOT NULL DEFAULT '',
+			last_verified_phase  TEXT NOT NULL DEFAULT '',
+			started_at           DATETIME,
+			updated_at           DATETIME
+		)`,
+		`CREATE UNIQUE INDEX IF NOT EXISTS idx_tcp_transfer_file ON transfer_checkpoints(transfer_id, file_name)`,
+		`CREATE INDEX IF NOT EXISTS idx_tcp_migration ON transfer_checkpoints(migration_id)`,
 	}
 
 	for _, stmt := range indexStatements {

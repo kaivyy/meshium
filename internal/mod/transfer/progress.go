@@ -173,22 +173,9 @@ func (w *progressWriter) Write(p []byte) (int, error) {
 
 // --- Transfer checkpoint storage ---
 
-// TransferCheckpoint stores the state of a transfer for resume.
-type TransferCheckpoint struct {
-	ID              int64  `json:"id"`
-	TransferID      string `json:"transferId"`  // unique ID for this transfer
-	FileName        string `json:"fileName"`     // name of the file being transferred
-	ByteOffset      int64  `json:"byteOffset"`   // bytes transferred so far
-	TotalBytes      int64  `json:"totalBytes"`    // total file size
-	Checksum        string `json:"checksum"`      // checksum of transferred data (if available)
-	Strategy        string `json:"strategy"`      // transfer strategy used
-	SourcePath      string `json:"sourcePath"`
-	DestPath        string `json:"destPath"`
-	CreatedAt       string `json:"createdAt"`
-	UpdatedAt       string `json:"updatedAt"`
-}
+// TransferCheckpoint is defined in checkpoint.go (Phase 2B extended schema).
 
-// CheckpointStore stores transfer checkpoints in SQLite.
+// CheckpointStore stores transfer checkpoints.
 type CheckpointStore interface {
 	// SaveCheckpoint saves or updates a transfer checkpoint.
 	SaveCheckpoint(cp TransferCheckpoint) error
