@@ -17,5 +17,9 @@ test:
 	cd web && npm install && npm run check && npm run build
 	go test ./...
 
+# Integration tests require the docker CLI and pull postgres:15 on demand.
+test-integration:
+	go test -tags integration ./internal/mod/migration/ -run 'PGCutoverPrimitivesLive|PGPreflightFailsWhenTargetNotStandby|FencedCutoverWithRealPG' -v -timeout 300s
+
 clean:
 	rm -rf bin/ cmd/server/web/build/ web/.svelte-kit/

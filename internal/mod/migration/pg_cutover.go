@@ -199,8 +199,10 @@ func pgReplicatorConnectivity(ctx context.Context, targetSSH SSHExecuter, config
 		replUser = "replicator"
 	}
 	// A read-only probe: SELECT 1 via the replication connection. PGPASSWORD via
-	// env (never -p on argv). No secret in the command string.
-	cmd := fmt.Sprintf("PGPASSWORD=%s psql -h %s -p %d -U %s -tAc 'SELECT 1;' 2>&1",
+	// env (never -p on argv). No secret in the command string. Connect to the
+	// `postgres` DB explicitly — without -d psql defaults dbname to the
+	// username, which for a replication-only role does not exist.
+	cmd := fmt.Sprintf("PGPASSWORD=%s psql -h %s -p %d -U %s -d postgres -tAc 'SELECT 1;' 2>&1",
 		shared.ShellQuote(config.ReplicationPass), shared.ShellQuote(sourceHost), port, shared.ShellQuote(replUser))
 	out, _, exit, err := targetSSH.ExecContext(ctx, cmd)
 	if err != nil {
