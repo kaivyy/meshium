@@ -33,7 +33,7 @@ import (
 // preflightMySQL runs the read-only pre-cutover gates for a same-major
 // seeded-replication pair. It issues NO destructive command. Any failure returns
 // ErrCutoverPreflight with the actionable reason in result.Notes.
-func (e *ReplicationEngine) preflightMySQL(ctx context.Context, config ReplicationConfig) (CutoverPreflightResult, error) {
+func (e *ReplicationEngine) preflightMySQL(ctx context.Context, config ReplicationConfig, sourceFrozen bool) (CutoverPreflightResult, error) {
 	var r CutoverPreflightResult
 
 	// Gate 1: same-major (SQL-parseable; use leading major component).
@@ -76,17 +76,26 @@ func (e *ReplicationEngine) preflightMySQL(ctx context.Context, config Replicati
 		return r, fmt.Errorf("%w: %s", ErrCutoverPreflight, r.Notes)
 	}
 
-	// Gate 4: source must be a writable primary (read_only OFF), target must be a
-	// standby (read_only ON). MySQL cutover keeps the target read-only until
-	// promote, exactly like the Pg standby contract.
+	// Gate 4: source must be a writable primary (read_only OFF) UNLESS the
+	// FencingSource step has already frozen it. MySQL cutover freezes the source
+	// (read_only=ON) before promote to close the dual-writer window, so at the
+	// post-freeze VerifyingTarget boundary a frozen source is required and a
+	// source that became writable again means the freeze was lost out-of-band →
+	// fail closed. Target must be a standby (read_only ON) throughout, exactly
+	// like the Pg standby contract.
 	srcRO, ok, err := mysqlReadOnly(ctx, e.sourceSSH)
 	if err != nil || !ok {
 		r.Notes = "source read_only probe: " + err.Error()
 		return r, fmt.Errorf("%w: %s", ErrCutoverPreflight, r.Notes)
 	}
-	r.SourceInRecovery = strings.EqualFold(srcRO, "ON")
-	if r.SourceInRecovery {
-		r.Notes = "source is read_only=ON (standby) — source must be a writable primary"
+	srcIsRO := strings.EqualFold(srcRO, "ON")
+	r.SourceInRecovery = srcIsRO
+	if srcIsRO && !sourceFrozen {
+		r.Notes = "source is read_only=ON (standby) — source must be a writable primary before the fence is applied"
+		return r, fmt.Errorf("%w: %s", ErrCutoverPreflight, r.Notes)
+	}
+	if !srcIsRO && sourceFrozen {
+		r.Notes = "source is read_only=OFF after freeze — the source freeze was lost out-of-band; aborting to avoid a dual-writer window"
 		return r, fmt.Errorf("%w: %s", ErrCutoverPreflight, r.Notes)
 	}
 	tgtRO, ok2, err := mysqlReadOnly(ctx, e.targetSSH)
@@ -209,7 +218,7 @@ func (e *ReplicationEngine) promoteMySQLCutover(ctx context.Context, config Repl
 // post-seed CHANGE REPLICATION SOURCE/MASTER. Reused by setupMySQL after the
 // seed completes. It is a thin wrapper over parseMySQLMasterStatus.
 func mysqlMasterStatusBinlog(ctx context.Context, ssh SSHExecuter) (string, string, error) {
-	output, mstderr, mexit, err := ssh.ExecContext(ctx, "mysql -e 'SHOW MASTER STATUS\\G' 2>&1")
+	output, mstderr, mexit, err := mysqlShowMasterStatus(ctx, ssh)
 	if err != nil {
 		return "", "", err
 	}

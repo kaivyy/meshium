@@ -91,7 +91,7 @@ type CutoverOutcome struct {
 // fake without building the full engine. *ReplicationEngine satisfies it via
 // CutoverPreflight / WaitForCatchUp / CutoverFreezeSource / CutoverPromote.
 type cutoverDriver interface {
-	CutoverPreflight(ctx context.Context, config ReplicationConfig) (CutoverPreflightResult, error)
+	CutoverPreflight(ctx context.Context, config ReplicationConfig, sourceFrozen bool) (CutoverPreflightResult, error)
 	WaitForCatchUp(ctx context.Context, config ReplicationConfig, maxLagSeconds int64) error
 	CutoverFreezeSource(ctx context.Context, config ReplicationConfig) error
 	CutoverPromote(ctx context.Context, config ReplicationConfig) error
@@ -290,7 +290,7 @@ func (o *CutoverOrchestrator) acquireOrRecover(ctx context.Context, cfg CutoverR
 // replicator connectivity). No mutation. Records PGPreflightResult.
 func (o *CutoverOrchestrator) stepPreflight(cfg CutoverRequest, out *CutoverOutcome) stepAction {
 	return func(ctx context.Context, lease *FenceLease) (string, error) {
-		r, err := o.driver.CutoverPreflight(ctx, cfg.Replication)
+		r, err := o.driver.CutoverPreflight(ctx, cfg.Replication, false)
 		out.Preflight = r
 		if err != nil {
 			return "", err
@@ -310,7 +310,7 @@ func (o *CutoverOrchestrator) stepSeed(cfg CutoverRequest, out *CutoverOutcome) 
 		// Re-run preflight gates only (cheap, read-only). A target that is no
 		// longer in the expected role here means something promoted it
 		// out-of-band — fail.
-		r, err := o.driver.CutoverPreflight(ctx, cfg.Replication)
+		r, err := o.driver.CutoverPreflight(ctx, cfg.Replication, false)
 		if err != nil {
 			return "", fmt.Errorf("seed boundary: %w", err)
 		}
@@ -399,7 +399,10 @@ func (o *CutoverOrchestrator) stepCatchingUp(cfg CutoverRequest, out *CutoverOut
 // boundary check before the switch.
 func (o *CutoverOrchestrator) stepVerifyingTarget(cfg CutoverRequest, out *CutoverOutcome) stepAction {
 	return func(ctx context.Context, lease *FenceLease) (string, error) {
-		r, err := o.driver.CutoverPreflight(ctx, cfg.Replication)
+		// sourceFrozen=true: FencingSource already ran, so the source is expected
+		// to be read_only=ON. A source that became writable again here means the
+		// freeze was lost out-of-band → CutoverPreflight fails closed.
+		r, err := o.driver.CutoverPreflight(ctx, cfg.Replication, true)
 		if err != nil {
 			return "", fmt.Errorf("verifying-target: %w", err)
 		}

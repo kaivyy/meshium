@@ -56,14 +56,22 @@ var ErrCutoverPreflight = fmt.Errorf("cutover preflight failed")
 // on success, (result, ErrCutoverPreflight) on any gate failure with the reason
 // in result.Notes. MongoDB returns an immediate fail-closed error (no replica-set
 // lag measurement → no safe cutover).
-func (e *ReplicationEngine) CutoverPreflight(ctx context.Context, config ReplicationConfig) (CutoverPreflightResult, error) {
+//
+// sourceFrozen indicates the FencingSource step has already run: the source is
+// expected to be physically frozen (read_only=ON for MySQL). Pre-freeze the
+// source must be a writable primary; post-freeze a still-frozen source is
+// required and a source that became writable again means the freeze was lost
+// out-of-band → fail closed. PostgreSQL's freeze uses default_transaction_read_only
+// (which does not flip pg_is_in_recovery), so the param is inert there but kept
+// uniform across engines.
+func (e *ReplicationEngine) CutoverPreflight(ctx context.Context, config ReplicationConfig, sourceFrozen bool) (CutoverPreflightResult, error) {
 	switch config.DatabaseType {
 	case "postgres", "postgresql":
-		return e.preflightPostgresCutover(ctx, config)
+		return e.preflightPostgresCutover(ctx, config, sourceFrozen)
 	case "mysql", "mariadb":
-		return e.preflightMySQL(ctx, config)
+		return e.preflightMySQL(ctx, config, sourceFrozen)
 	case "redis":
-		return e.preflightRedis(ctx, config)
+		return e.preflightRedis(ctx, config, sourceFrozen)
 	case "mongodb":
 		// No replica-set lag measurement → catch-up cannot be verified → no safe
 		// cutover. Fail closed HERE, before any mutation.
@@ -76,7 +84,7 @@ func (e *ReplicationEngine) CutoverPreflight(ctx context.Context, config Replica
 // preflightPostgresCutover adapts the Phase 2A PostgreSQL Preflight into the
 // engine-agnostic result. The PG Preflight already enforces same-major,
 // source-primary, target-standby, disk, and replicator gates.
-func (e *ReplicationEngine) preflightPostgresCutover(ctx context.Context, config ReplicationConfig) (CutoverPreflightResult, error) {
+func (e *ReplicationEngine) preflightPostgresCutover(ctx context.Context, config ReplicationConfig, sourceFrozen bool) (CutoverPreflightResult, error) {
 	r, err := e.Preflight(ctx, config)
 	if err != nil {
 		// err already wraps ErrPGPreflight with Notes inside r.Notes.
@@ -122,7 +130,7 @@ func (e *ReplicationEngine) CutoverPromote(ctx context.Context, config Replicati
 }
 
 // ErrNoSourceFreeze is returned by CutoverFreezeSource for engines that cannot
-// physically enforce a write-freeze on the source (Redis, MySQL today). It is
+// physically enforce a write-freeze on the source (Redis today). It is
 // NOT fatal: the orchestrator records it as a degraded-but-continuable condition
 // (manual freeze required) so it never silently claims RPO=0 for an engine whose
 // source can still accept writes during the cutover window.
@@ -139,16 +147,42 @@ func (e *ReplicationEngine) CutoverFreezeSource(ctx context.Context, config Repl
 	switch config.DatabaseType {
 	case "postgres", "postgresql":
 		return e.freezePostgresSource(ctx, config)
-	case "mysql", "mariadb", "redis":
-		// No source freeze exists for these engines yet (B1/B3). Report it
-		// honestly so the orchestrator can downgrade to degraded rather than
-		// claim a closed dual-writer window.
+	case "mysql", "mariadb":
+		// Held read_only=ON + super_read_only=ON on the source. This is stronger
+		// and more durable than the legacy FinalSync FLUSH TABLES WITH READ LOCK
+		// (session-scoped, released on process exit — see replication.go B2 note),
+		// so the fenced cutover path supersedes that fragile lock with a real
+		// freeze. Non-SUPER connections are rejected on write; the lease-holder
+		// (SUPER) can still drive the cutover.
+		return e.freezeMySQLSource(ctx, config)
+	case "redis":
+		// No source freeze exists for Redis yet (B3). Report it honestly so the
+		// orchestrator can downgrade to degraded rather than claim a closed
+		// dual-writer window.
 		return ErrNoSourceFreeze
 	case "mongodb":
 		return fmt.Errorf("%w: mongodb cutover not supported", ErrCutoverPreflight)
 	default:
 		return fmt.Errorf("unsupported engine for source freeze: %s", config.DatabaseType)
 	}
+}
+
+// freezeMySQLSource freezes the source by setting read_only=ON and
+// super_read_only=ON (held, survives the client session) and verifies it took
+// effect. Non-SUPER users can no longer write, closing the dual-writer window
+// for application traffic.
+func (e *ReplicationEngine) freezeMySQLSource(ctx context.Context, config ReplicationConfig) error {
+	if err := mysqlSetReadOnly(ctx, e.sourceSSH, true); err != nil {
+		return fmt.Errorf("freeze source: set read_only: %w", err)
+	}
+	ro, ok, err := mysqlReadOnly(ctx, e.sourceSSH)
+	if err != nil || !ok {
+		return fmt.Errorf("freeze source: verify read_only: %v", err)
+	}
+	if !strings.EqualFold(ro, "ON") {
+		return fmt.Errorf("freeze source: read_only=%q, expected ON", ro)
+	}
+	return nil
 }
 
 // freezePostgresSource sets default_transaction_read_only=on on the source via
@@ -248,10 +282,14 @@ func mysqlServerID(ctx context.Context, ssh SSHExecuter) (int64, string) {
 // (Replica_IO_Running=Yes AND Replica_SQL_Running=Yes). MySQL 8.0.22+ uses
 // "Replica_*"; older/legacy uses "Slave_*". Both forms are accepted.
 func mysqlReplicaRunning(ctx context.Context, ssh SSHExecuter) (bool, bool, string, string) {
-	out, _, _, err := ssh.ExecContext(ctx, "mysql -NBe 'SHOW REPLICA STATUS\\G' 2>&1")
+	// Use `-e` (NOT `-NBe`): under `-B` batch mode the `\G` vertical format
+	// strips the `Replica_IO_Running: ` labels, leaving bare Yes/No values that
+	// parseReplicaStatus cannot match — it would report the replica as not running
+	// even though it is healthy. `-e` keeps the labels.
+	out, _, _, err := ssh.ExecContext(ctx, "mysql -e 'SHOW REPLICA STATUS\\G' 2>&1")
 	if err != nil {
 		// Fall back to legacy Slave spelling.
-		out, _, _, err = ssh.ExecContext(ctx, "mysql -NBe 'SHOW SLAVE STATUS\\G' 2>&1")
+		out, _, _, err = ssh.ExecContext(ctx, "mysql -e 'SHOW SLAVE STATUS\\G' 2>&1")
 		if err != nil {
 			return false, false, "", err.Error()
 		}

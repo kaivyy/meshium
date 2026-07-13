@@ -28,7 +28,7 @@ func TestPreflightRedisHappyPath(t *testing.T) {
 	tgt.execOutput[`redis-cli INFO replication 2>&1`] = redisReplReplicaOf("source")
 
 	e := &ReplicationEngine{sourceSSH: src, targetSSH: tgt}
-	r, err := e.preflightRedis(context.Background(), ReplicationConfig{DatabaseType: "redis", SourceHost: "source"})
+	r, err := e.preflightRedis(context.Background(), ReplicationConfig{DatabaseType: "redis", SourceHost: "source"}, false)
 	if err != nil {
 		t.Fatalf("preflight: %v (notes=%q)", err, r.Notes)
 	}
@@ -44,7 +44,7 @@ func TestPreflightRedisSourceNotMaster(t *testing.T) {
 	tgt.execOutput[`redis-cli INFO replication 2>&1`] = redisReplReplicaOf("source")
 
 	e := &ReplicationEngine{sourceSSH: src, targetSSH: tgt}
-	r, err := e.preflightRedis(context.Background(), ReplicationConfig{DatabaseType: "redis", SourceHost: "source"})
+	r, err := e.preflightRedis(context.Background(), ReplicationConfig{DatabaseType: "redis", SourceHost: "source"}, false)
 	if err == nil || r.Notes == "" {
 		t.Fatal("source not master must fail preflight")
 	}
@@ -57,7 +57,7 @@ func TestPreflightRedisTargetWrongMaster(t *testing.T) {
 	tgt.execOutput[`redis-cli INFO replication 2>&1`] = redisReplReplicaOf("other-host")
 
 	e := &ReplicationEngine{sourceSSH: src, targetSSH: tgt}
-	r, err := e.preflightRedis(context.Background(), ReplicationConfig{DatabaseType: "redis", SourceHost: "source"})
+	r, err := e.preflightRedis(context.Background(), ReplicationConfig{DatabaseType: "redis", SourceHost: "source"}, false)
 	if err == nil || r.Notes == "" {
 		t.Fatal("target replica pointing at wrong master must fail preflight")
 	}
@@ -70,7 +70,7 @@ func TestPreflightRedisLinkDown(t *testing.T) {
 	tgt.execOutput[`redis-cli INFO replication 2>&1`] = "role:slave\nmaster_host:source\nmaster_link_status:down\n"
 
 	e := &ReplicationEngine{sourceSSH: src, targetSSH: tgt}
-	r, err := e.preflightRedis(context.Background(), ReplicationConfig{DatabaseType: "redis", SourceHost: "source"})
+	r, err := e.preflightRedis(context.Background(), ReplicationConfig{DatabaseType: "redis", SourceHost: "source"}, false)
 	if err == nil || r.Notes == "" {
 		t.Fatal("link down must fail preflight")
 	}

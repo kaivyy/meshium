@@ -53,7 +53,7 @@ func TestNewTrafficSwitcherSupported(t *testing.T) {
 // cannot be verified, so automated cutover must not proceed.
 func TestPreflightMongoDBFailsClosed(t *testing.T) {
 	e := &ReplicationEngine{}
-	_, err := e.CutoverPreflight(context.Background(), ReplicationConfig{DatabaseType: "mongodb"})
+	_, err := e.CutoverPreflight(context.Background(), ReplicationConfig{DatabaseType: "mongodb"}, false)
 	if err == nil {
 		t.Fatal("MongoDB CutoverPreflight must fail closed")
 	}

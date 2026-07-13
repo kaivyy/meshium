@@ -29,7 +29,7 @@ read-after-write (`NginxSwitcher.verify`, nginx_switch.go:193).
 |---|---|---|---|---|
 | PostgreSQL | `automatic` | **deferred** (PG not wired to orchestrator switch) | **`automatic` (VERIFIED, 3A)** | replication + fenced cutover live; source freeze GUC now enforced + verified (B1 closed, ca439c5) |
 | PostgreSQL | `manual` | supported | supported | operator publishes/promotes via runbook |
-| MySQL | `automatic` | **deferred** | `automatic` after 3B acceptance | seeded repl live + integration test exists |
+| MySQL | `automatic` | **deferred** | **`automatic` (VERIFIED, 3B)** | seeded repl + fenced cutover live; source freeze `read_only=ON`+`super_read_only=ON` held + verified; non-SUPER write rejected post-freeze (dual-writer closed); `CutoverPreflight` now stage-aware so the post-freeze re-check tolerates the frozen source; `SHOW BINARY LOG STATUS`/`SHOW REPLICA STATUS` 8.4 renames handled with legacy fallback |
 | MySQL | `manual` | supported | supported | |
 | Redis | `automatic` | **blocked** (no integration test, no source freeze) | `degraded` or `blocked` after 3C proof | unit tests only; RPO window unproven (B3) |
 | Redis | `manual` | supported | supported | `REPLICAOF`/`REPLICAOF NO ONE` |

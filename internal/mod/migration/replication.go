@@ -270,7 +270,7 @@ func (e *ReplicationEngine) setupMySQL(ctx context.Context, config ReplicationCo
 	// error on non-zero exit, and a failed SHOW MASTER STATUS would otherwise
 	// fall through to an empty binlog position and a broken replica. We read it
 	// AFTER the seed so the replica starts from a position at/after the seed.
-	output, mstderr, mexit, err := e.sourceSSH.ExecContext(ctx, "mysql -e 'SHOW MASTER STATUS\\G' 2>&1")
+	output, mstderr, mexit, err := mysqlShowMasterStatus(ctx, e.sourceSSH)
 	if err != nil || mexit != 0 {
 		return fmt.Errorf("get master status: %s", execCommandError(err, mexit, output, mstderr))
 	}
@@ -398,16 +398,28 @@ func (e *ReplicationEngine) seedMySQL(ctx context.Context, config ReplicationCon
 	return nil
 }
 
+// mysqlLagSeconds reads replication lag (seconds behind) from the target. MySQL
+// 8.4 renamed `SHOW SLAVE STATUS`→`SHOW REPLICA STATUS` and the metric
+// `Seconds_Behind_Master`→`Seconds_Behind_Source`, and removed the old names;
+// MariaDB still uses the legacy forms. Try the modern statement/metric first,
+// then fall back, parsing whichever output appears.
 func (e *ReplicationEngine) mysqlLag(ctx context.Context, config ReplicationConfig) (int64, error) {
-	output, _, _, err := e.targetSSH.ExecContext(ctx, "mysql -e 'SHOW SLAVE STATUS\\G' 2>&1")
-	if err != nil {
-		return -1, err
+	var output string
+	for _, stmt := range []string{"SHOW REPLICA STATUS", "SHOW SLAVE STATUS"} {
+		out, _, exit, err := e.targetSSH.ExecContext(ctx, fmt.Sprintf("mysql -e %s 2>&1", shared.ShellQuote(stmt+"\\G")))
+		if err != nil {
+			return -1, err
+		}
+		if exit == 0 {
+			output = out
+			break
+		}
 	}
 	for _, line := range strings.Split(output, "\n") {
 		line = strings.TrimSpace(line)
-		if strings.HasPrefix(line, "Seconds_Behind_Master:") {
-			val := strings.TrimSpace(strings.TrimPrefix(line, "Seconds_Behind_Master:"))
-			if val == "NULL" {
+		if strings.HasPrefix(line, "Seconds_Behind_Source:") || strings.HasPrefix(line, "Seconds_Behind_Master:") {
+			val := strings.TrimSpace(strings.TrimPrefix(strings.TrimPrefix(line, "Seconds_Behind_Source:"), "Seconds_Behind_Master:"))
+			if val == "NULL" || val == "" {
 				return -1, fmt.Errorf("replication not running")
 			}
 			return strconv.ParseInt(val, 10, 64)
@@ -432,6 +444,30 @@ func (e *ReplicationEngine) rollbackMySQL(ctx context.Context, config Replicatio
 	// MySQL destructive rollback shortcuts are prohibited this pass regardless of
 	// topology (no automated RESET/STOP). A safe re-point needs fencing (Phase 2).
 	return fmt.Errorf("%w: mysql automated rollback not supported this pass — %s", ErrUnsafeTopology, probe.reason())
+}
+
+// mysqlShowMasterStatus runs the binlog-position query against the source.
+// MySQL 8.4 renamed `SHOW MASTER STATUS` to `SHOW BINARY LOG STATUS` and
+// dropped the old name, while MariaDB still uses `SHOW MASTER STATUS`. Try the
+// modern statement first, then fall back to the legacy one, so the same code
+// certifies against both. The parser below handles both outputs identically
+// (both emit `File:`/`Position:`).
+func mysqlShowMasterStatus(ctx context.Context, ssh SSHExecuter) (string, string, int, error) {
+	for _, stmt := range []string{"SHOW BINARY LOG STATUS", "SHOW MASTER STATUS"} {
+		output, stderr, exit, err := ssh.ExecContext(ctx, fmt.Sprintf("mysql -e %s 2>&1", shared.ShellQuote(stmt+"\\G")))
+		if err != nil {
+			return "", "", -1, err
+		}
+		if exit == 0 && strings.Contains(output, "File:") {
+			return output, stderr, exit, nil
+		}
+		if exit != 0 && strings.Contains(stderr, "syntax") {
+			continue // renamed away — try the other statement
+		}
+		// Non-syntax error (e.g. binary logging off): surface it.
+		return output, stderr, exit, nil
+	}
+	return "", "SHOW MASTER STATUS not supported (not a MySQL/MariaDB source?)", 1064, nil
 }
 
 func parseMySQLMasterStatus(output string) (string, string) {
@@ -647,7 +683,7 @@ func (e *ReplicationEngine) promoteRedis(ctx context.Context, config Replication
 //   - the replica link is up (master_link_status:up).
 // Any ambiguity fails closed. Redis has no atomic freeze, so RPO is "minimal"
 // not "zero"; the cutover is gated but the residual async gap is documented.
-func (e *ReplicationEngine) preflightRedis(ctx context.Context, config ReplicationConfig) (CutoverPreflightResult, error) {
+func (e *ReplicationEngine) preflightRedis(ctx context.Context, config ReplicationConfig, sourceFrozen bool) (CutoverPreflightResult, error) {
 	var r CutoverPreflightResult
 	r.TargetInRecovery = true // Redis target pre-switch role = replica
 

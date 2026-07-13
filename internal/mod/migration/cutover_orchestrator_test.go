@@ -30,7 +30,7 @@ type fakePGDriver struct {
 	targetInRecovery bool
 }
 
-func (f *fakePGDriver) CutoverPreflight(ctx context.Context, config ReplicationConfig) (CutoverPreflightResult, error) {
+func (f *fakePGDriver) CutoverPreflight(ctx context.Context, config ReplicationConfig, sourceFrozen bool) (CutoverPreflightResult, error) {
 	f.preflights++
 	if f.preflightErr != nil {
 		return CutoverPreflightResult{TargetInRecovery: f.targetInRecovery}, f.preflightErr
@@ -240,8 +240,8 @@ type orderPGDriver struct {
 	switchCountAtPromote int
 }
 
-func (o *orderPGDriver) CutoverPreflight(ctx context.Context, config ReplicationConfig) (CutoverPreflightResult, error) {
-	return o.inner.CutoverPreflight(ctx, config)
+func (o *orderPGDriver) CutoverPreflight(ctx context.Context, config ReplicationConfig, sourceFrozen bool) (CutoverPreflightResult, error) {
+	return o.inner.CutoverPreflight(ctx, config, sourceFrozen)
 }
 func (o *orderPGDriver) WaitForCatchUp(ctx context.Context, config ReplicationConfig, maxLagSeconds int64) error {
 	return o.inner.WaitForCatchUp(ctx, config, maxLagSeconds)
@@ -353,8 +353,8 @@ type stalePGDriver struct {
 	calls int
 }
 
-func (s *stalePGDriver) CutoverPreflight(ctx context.Context, config ReplicationConfig) (CutoverPreflightResult, error) {
-	return s.inner.CutoverPreflight(ctx, config)
+func (s *stalePGDriver) CutoverPreflight(ctx context.Context, config ReplicationConfig, sourceFrozen bool) (CutoverPreflightResult, error) {
+	return s.inner.CutoverPreflight(ctx, config, sourceFrozen)
 }
 func (s *stalePGDriver) WaitForCatchUp(ctx context.Context, config ReplicationConfig, maxLagSeconds int64) error {
 	s.calls++
