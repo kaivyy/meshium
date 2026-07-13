@@ -221,6 +221,28 @@ ambiguity; no weakening of the Phase 1–3 safety contract.** Sequencing:
   *proves* the resume/integrity contract end-to-end. A chunked engine remains a
   deferred option, not an in-Phase-4 change.
 
+#### 4D — advanced database scenario: PostgreSQL logical replication (pub/sub)
+- **PostgreSQL LOGICAL replication primitives** (`internal/mod/migration/pg_logical.go`),
+  a distinct axis from the proven physical/streaming-standby path. Adds
+  `PreflightLogicalPG` (same-major, source is a primary, **wal_level=logical**
+  hard gate, target is an independent primary not a standby, replication user
+  connectivity — all pre-mutation, fail-closed), `SetupLogicalReplicationPG`
+  (idempotent `CREATE PUBLICATION`/`CREATE SUBSCRIPTION`; credential placed inside
+  the DSN via `logicalConnString`, SQL-escaped, never a `-p` argv flag), and
+  `WaitForLogicalCatchUpPG` (per-table row-count parity with a bounded wait —
+  measures lag, never assumes 0). Unit-tested (`pg_logical_test.go`): wal_level
+  gate, cross-major rejection, standby-target rejection, idempotent re-run.
+- **Logical replication proven LIVE** (`pg_logical_integration_test.go`):
+  two real PostgreSQL 15 primaries (source `wal_level=logical`), full preflight
+  → publication + subscription → a source row replicates to the target →
+  `WaitForLogicalCatchUpPG` reaches parity and the replicated row is read back on
+  the target (row-count parity = 2/2).
+- **Honest scope:** 4D proves the bounded logical-replication axis end-to-end at
+  the primitive + catch-up level. It is NOT wired through the full fenced cutover
+  orchestrator this increment (that would risk regressing the proven 4A/4B
+  machine), so logical cutover is documented as `degraded`/scoped, not claimed
+  `automatic`. Wiring it to the fenced traffic switcher is a follow-on.
+
 ### Phase 2C — additional cutover engines & traffic providers
 
 Extends the Phase 2A fenced PostgreSQL cutover to **MySQL (seeded)** and

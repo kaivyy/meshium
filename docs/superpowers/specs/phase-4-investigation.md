@@ -133,7 +133,7 @@ unless at least as safe). A chunked engine is a later/deferred option.
 
 | Engine | Next axis | Exact blocker | Belongs in |
 |---|---|---|---|
-| PostgreSQL | logical replication (pub/sub) | new preflight (publication exists, no conflicting slots) + role model | 4D |
+| PostgreSQL | logical replication (pub/sub) | new preflight (publication exists, no conflicting slots) + role model | **VERIFIED 4D** (primitives + live; not wired to fenced orchestrator yet → scoped `degraded`) |
 | PostgreSQL | cross-major | version-skew replication risks; needs dual-version pair | 4D (deferred unless paired) |
 | PostgreSQL | subset/table-scoped | `pg_publication` scoping + seed subset | 4D |
 | MySQL | GTID vs non-GTID | auto-position vs file/pos; preflight must detect | 4D |
