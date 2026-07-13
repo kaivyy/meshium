@@ -74,6 +74,7 @@ type PipelineRepo interface {
 	// --- Audit trail ---
 	CreateAuditEntry(ctx context.Context, e AuditEntry) (int64, error)
 	GetAuditTrail(migrationID int, limit int) ([]AuditEntry, error)
+	GetAuditEntryByIdempotencyKey(ctx context.Context, migrationID int, key string) (*AuditEntry, error)
 
 	// --- Diagnostic bundle (Phase2D-4) ---
 	BuildDiagnosticBundle(ctx context.Context, migrationID int) (*DiagnosticBundle, error)
@@ -1107,6 +1108,11 @@ func (r *sqliteRepo) CreateAuditEntry(ctx context.Context, e AuditEntry) (int64,
 			e.CorrelationID = rid
 		}
 	}
+	if e.IdempotencyKey == "" {
+		if key := IdempotencyKeyFrom(ctx); key != "" {
+			e.IdempotencyKey = key
+		}
+	}
 	res, err := r.db.Exec(
 		`INSERT INTO audit_trail (migration_id, event_type, event_data, previous_state, new_state, actor,
 			correlation_id, idempotency_key, actor_type, fence_generation, fence_status,
@@ -1194,6 +1200,78 @@ func (r *sqliteRepo) GetAuditTrail(migrationID int, limit int) ([]AuditEntry, er
 		results = append(results, e)
 	}
 	return results, nil
+}
+
+// GetAuditEntryByIdempotencyKey returns the most recent audit entry recorded
+// under a client-supplied idempotency key for a migration, or nil if none.
+// Used to de-duplicate retried REST mutations: a repeat request carrying the
+// same key can be answered from the original outcome instead of re-executing.
+func (r *sqliteRepo) GetAuditEntryByIdempotencyKey(ctx context.Context, migrationID int, key string) (*AuditEntry, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+	row := r.db.QueryRowContext(ctx,
+		`SELECT id, migration_id, event_type, event_data, previous_state, new_state, actor, created_at,
+			correlation_id, idempotency_key, actor_type, fence_generation, fence_status,
+			topology_summary, traffic_verify_summary, approval_ref, result
+		 FROM audit_trail WHERE migration_id = ? AND idempotency_key = ?
+		 ORDER BY created_at DESC LIMIT 1`,
+		migrationID, key)
+
+	var e AuditEntry
+	var eventData, previousState, newState, actor sql.NullString
+	var correlationID, idempotencyKey, actorType, fenceStatus, topologySummary, trafficVerifySummary, approvalRef, result sql.NullString
+	var fenceGeneration sql.NullInt64
+	if err := row.Scan(
+		&e.ID, &e.MigrationID, &e.EventType, &eventData, &previousState, &newState, &actor, &e.CreatedAt,
+		&correlationID, &idempotencyKey, &actorType, &fenceGeneration, &fenceStatus,
+		&topologySummary, &trafficVerifySummary, &approvalRef, &result,
+	); err != nil {
+		if err == sql.ErrNoRows {
+			return nil, nil
+		}
+		return nil, err
+	}
+	if eventData.Valid {
+		e.EventData = eventData.String
+	}
+	if previousState.Valid {
+		e.PreviousState = previousState.String
+	}
+	if newState.Valid {
+		e.NewState = newState.String
+	}
+	if actor.Valid {
+		e.Actor = actor.String
+	}
+	if correlationID.Valid {
+		e.CorrelationID = correlationID.String
+	}
+	if idempotencyKey.Valid {
+		e.IdempotencyKey = idempotencyKey.String
+	}
+	if actorType.Valid {
+		e.ActorType = actorType.String
+	}
+	if fenceGeneration.Valid {
+		e.FenceGeneration = int(fenceGeneration.Int64)
+	}
+	if fenceStatus.Valid {
+		e.FenceStatus = fenceStatus.String
+	}
+	if topologySummary.Valid {
+		e.TopologySummary = topologySummary.String
+	}
+	if trafficVerifySummary.Valid {
+		e.TrafficVerifySummary = trafficVerifySummary.String
+	}
+	if approvalRef.Valid {
+		e.ApprovalRef = approvalRef.String
+	}
+	if result.Valid {
+		e.Result = result.String
+	}
+	return &e, nil
 }
 
 // BuildDiagnosticBundle aggregates a migration's durable state into one

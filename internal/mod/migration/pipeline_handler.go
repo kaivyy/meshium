@@ -478,6 +478,24 @@ func (h *PipelineHandler) handlePipelineMigrationByID(w http.ResponseWriter, r *
 }
 
 func (h *PipelineHandler) handlePipelineAction(w http.ResponseWriter, r *http.Request, id int, action string) {
+	// Phase2D-5: honor a client-supplied Idempotency-Key. A retried mutation
+	// (network blip, client timeout) carrying the same key is answered from the
+	// original audit outcome instead of re-executing — never masking a real
+	// failure. The key is also threaded into the action's audit rows for
+	// traceability. A key with no prior entry proceeds normally.
+	if key := r.Header.Get("Idempotency-Key"); key != "" {
+		if prev, err := h.repo.GetAuditEntryByIdempotencyKey(r.Context(), id, key); err == nil && prev != nil && prev.Result != "" {
+			shared.WriteJSON(w, http.StatusOK, map[string]string{
+				"status":          prev.NewState,
+				"idempotencyKey":  key,
+				"replayedFromAudit": "true",
+			})
+			return
+		}
+		ctx := WithIdempotencyKey(r.Context(), key)
+		r = r.WithContext(ctx)
+	}
+
 	switch action {
 	case "cutover":
 		if r.Method != http.MethodPost {

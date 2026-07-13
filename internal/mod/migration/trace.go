@@ -186,6 +186,23 @@ func OperatorActionIDFrom(ctx context.Context) string {
 // at every call site that needs to label an id in a log/event field.
 func MigrationIDToString(id int) string { return strconv.Itoa(id) }
 
+// keyIdempotencyKey carries the client-supplied Idempotency-Key for a mutating
+// REST action, so the audit row records it and a retry can be de-duplicated.
+const keyIdempotencyKey traceKey = keyCorrelation + 1
+
+// WithIdempotencyKey carries a client-supplied idempotency key on the context.
+func WithIdempotencyKey(ctx context.Context, key string) context.Context {
+	return context.WithValue(ctx, keyIdempotencyKey, key)
+}
+
+// IdempotencyKeyFrom extracts the idempotency key ("" if unset).
+func IdempotencyKeyFrom(ctx context.Context) string {
+	if k, ok := ctx.Value(keyIdempotencyKey).(string); ok {
+		return k
+	}
+	return ""
+}
+
 // parseID parses a base-10 migration id; returns 0 and an error on bad input.
 func parseID(s string) (int, error) {
 	return strconv.Atoi(s)

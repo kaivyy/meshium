@@ -843,6 +843,9 @@ func (m *mockPipelineRepo) CreateAuditEntry(ctx context.Context, e AuditEntry) (
 func (m *mockPipelineRepo) GetAuditTrail(migrationID int, limit int) ([]AuditEntry, error) {
 	return nil, nil
 }
+func (m *mockPipelineRepo) GetAuditEntryByIdempotencyKey(ctx context.Context, migrationID int, key string) (*AuditEntry, error) {
+	return nil, nil
+}
 func (m *mockPipelineRepo) BuildDiagnosticBundle(ctx context.Context, migrationID int) (*DiagnosticBundle, error) {
 	return &DiagnosticBundle{MigrationID: migrationID}, nil
 }
