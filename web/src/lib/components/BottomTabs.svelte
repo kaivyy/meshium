@@ -1,6 +1,7 @@
 <script lang="ts">
   import type { AuditEntry, WSMessageExtended, MigrationEvent, PlannerWarning, DependencyGraph } from '$lib/api/pipeline';
   import DependencyGraphView from './DependencyGraphView.svelte';
+  import MigrationLogAudit from './MigrationLogAudit.svelte';
 
   export let auditTrail: AuditEntry[];
   export let wsMessages: WSMessageExtended[];
@@ -11,13 +12,14 @@
   export let onRefreshAudit: () => void;
   export let onExportReport: () => void;
 
-  type TabName = 'timeline' | 'logs' | 'events' | 'graph' | 'warnings' | 'report';
+  type TabName = 'timeline' | 'logs' | 'events' | 'audit' | 'graph' | 'warnings' | 'report';
   let activeTab: TabName = 'timeline';
 
   const tabs: { id: TabName; label: string; icon: string }[] = [
     { id: 'timeline', label: 'Timeline', icon: '🕐' },
     { id: 'logs', label: 'Logs', icon: '📋' },
     { id: 'events', label: 'Events', icon: '⚡' },
+    { id: 'audit', label: 'Audit', icon: '🛡️' },
     { id: 'graph', label: 'Dependency Graph', icon: '🔗' },
     { id: 'warnings', label: 'Warnings', icon: '⚠️' },
     { id: 'report', label: 'Report', icon: '📊' },
@@ -112,6 +114,9 @@
       {:else}
         <p class="text-fg-subtle text-center py-6 text-sm">No events recorded yet.</p>
       {/if}
+
+    {:else if activeTab === 'audit'}
+      <MigrationLogAudit {auditTrail} {events} onExport={onExportReport} />
 
     {:else if activeTab === 'graph'}
       <DependencyGraphView graph={dependencyGraph} />
