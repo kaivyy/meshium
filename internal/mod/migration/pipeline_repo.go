@@ -7,6 +7,8 @@ import (
 	"errors"
 	"fmt"
 	"time"
+
+	"meshium/internal/shared"
 )
 
 // PipelineRepo extends the existing Repo and JobRepository interfaces with
@@ -72,6 +74,9 @@ type PipelineRepo interface {
 	// --- Audit trail ---
 	CreateAuditEntry(ctx context.Context, e AuditEntry) (int64, error)
 	GetAuditTrail(migrationID int, limit int) ([]AuditEntry, error)
+
+	// --- Diagnostic bundle (Phase2D-4) ---
+	BuildDiagnosticBundle(ctx context.Context, migrationID int) (*DiagnosticBundle, error)
 
 	// --- Metrics ---
 	CreateMetric(ctx context.Context, m MigrationMetric) (int64, error)
@@ -1189,6 +1194,81 @@ func (r *sqliteRepo) GetAuditTrail(migrationID int, limit int) ([]AuditEntry, er
 		results = append(results, e)
 	}
 	return results, nil
+}
+
+// BuildDiagnosticBundle aggregates a migration's durable state into one
+// operator-exportable snapshot for incident recovery (Phase2D-4). It never
+// masks a failure: any sub-query error is propagated and the caller surfaces
+// it rather than returning a partial/fabricated bundle. The config is redacted
+// so the bundle is safe to share; secrets never leave the boundary.
+func (r *sqliteRepo) BuildDiagnosticBundle(ctx context.Context, migrationID int) (*DiagnosticBundle, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+
+	b := &DiagnosticBundle{GeneratedAt: time.Now().UTC().Format(time.RFC3339), MigrationID: migrationID}
+
+	// Best-effort aggregation: a missing record is not an error (e.g. a
+	// migration that never started replication), but a transport/query error is.
+	if m, err := r.GetMigration(migrationID); err != nil {
+		return nil, fmt.Errorf("diagnostic: load migration: %w", err)
+	} else {
+		b.Migration = m
+	}
+
+	if cfg, err := r.GetMigrationConfig(migrationID); err != nil {
+		return nil, fmt.Errorf("diagnostic: load config: %w", err)
+	} else if cfg != nil {
+		raw, _ := json.Marshal(cfg)
+		redacted := shared.SanitizeJSONRawMessage(raw)
+		var cfgMap map[string]interface{}
+		if err := json.Unmarshal(redacted, &cfgMap); err == nil {
+			b.Config = cfgMap
+		}
+	}
+
+	if stages, err := r.GetStages(migrationID); err != nil {
+		return nil, fmt.Errorf("diagnostic: load stages: %w", err)
+	} else {
+		b.Stages = stages
+	}
+	if trail, err := r.GetAuditTrail(migrationID, 200); err != nil {
+		return nil, fmt.Errorf("diagnostic: load audit: %w", err)
+	} else {
+		b.AuditTrail = trail
+	}
+	if events, err := r.GetEvents(ctx, migrationID, 0, 500); err != nil {
+		return nil, fmt.Errorf("diagnostic: load events: %w", err)
+	} else {
+		b.Events = events
+	}
+	if fl, err := r.GetFenceLease(migrationID); err != nil {
+		return nil, fmt.Errorf("diagnostic: load fence: %w", err)
+	} else {
+		b.Fence = fl
+	}
+	if tc, err := r.GetTrafficSwitchConfig(migrationID); err != nil {
+		return nil, fmt.Errorf("diagnostic: load traffic: %w", err)
+	} else {
+		b.Traffic = tc
+	}
+	if co, err := r.GetCutoverHistory(migrationID); err != nil {
+		return nil, fmt.Errorf("diagnostic: load cutover: %w", err)
+	} else {
+		b.Cutover = co
+	}
+	if rb, err := r.GetRollbackHistory(migrationID); err != nil {
+		return nil, fmt.Errorf("diagnostic: load rollback: %w", err)
+	} else {
+		b.Rollback = rb
+	}
+	if ss, err := r.GetSyncSessions(migrationID); err != nil {
+		return nil, fmt.Errorf("diagnostic: load sync: %w", err)
+	} else {
+		b.SyncSessions = ss
+	}
+
+	return b, nil
 }
 
 // --- Metrics ---

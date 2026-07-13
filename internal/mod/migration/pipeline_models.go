@@ -350,6 +350,30 @@ type AuditEntry struct {
 
 // --- Metrics Models ---
 
+// DiagnosticBundle is an operator-exportable snapshot of a migration's full
+// state for incident recovery and post-mortem. It aggregates the durable
+// records a post-incident investigator needs (config, stages, audit, events,
+// fence, traffic, cutover, rollback, transfers) into one read. The Config
+// field is redacted (secrets masked) so the bundle is safe to attach to a
+// ticket or hand to a third party. It never returns a false-success: if a
+// sub-query fails the bundle surfaces the error rather than fabricating state.
+type DiagnosticBundle struct {
+	GeneratedAt  string                 `json:"generatedAt"`
+	MigrationID  int                    `json:"migrationId"`
+	Migration    *Migration             `json:"migration,omitempty"`
+	Config       map[string]interface{} `json:"config,omitempty"` // redacted
+	Stages       []PipelineStage        `json:"stages,omitempty"`
+	AuditTrail   []AuditEntry           `json:"auditTrail,omitempty"`
+	Events       []MigrationEvent       `json:"events,omitempty"`
+	Fence        *FenceLease            `json:"fence,omitempty"`
+	Traffic      *TrafficSwitchConfig   `json:"traffic,omitempty"`
+	Cutover      []CutoverRecord        `json:"cutover,omitempty"`
+	Rollback     []RollbackRecord       `json:"rollback,omitempty"`
+	SyncSessions []SyncSession          `json:"syncSessions,omitempty"`
+}
+
+// --- Metrics Models ---
+
 // MigrationMetric stores a time-series metric for a migration.
 type MigrationMetric struct {
 	ID          int64   `json:"id"`
