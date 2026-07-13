@@ -23,7 +23,7 @@ slice, with one commit per slice.
 | 6 — Operator recovery API/UX + runbooks | `b6c1bec` | `recoveryGuidance` + `/api/pipeline/recovery` + runbook; 2 tests |
 | 7 — Concurrency caps + transfer-limit wiring | `3247d45` | global sem + per-server `(source,target)` resource lock (atomic claim) + bandwidth honesty warn; 8 tests |
 | 8 — Dead-code cleanup + feature gating + docs | `0ebed66` | removed orphan `parseCategories`; API guardrail map for unsupported provider/replication; gate test + docs |
-| 9 — Release suite + secret-leak gate | `HEAD` | audit-boundary sanitization + JSON key-aware redaction; consolidated release-gate secret test; this report |
+| 9 — Release suite + secret-leak gate | `1e19092` | audit-boundary sanitization + JSON key-aware redaction; consolidated release-gate secret test; this report |
 
 ## Tests per slice (migration package, non-integration)
 
