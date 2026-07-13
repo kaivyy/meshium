@@ -298,7 +298,7 @@ ambiguity; no weakening of the Phase 1–3 safety contract.** Sequencing:
   (previously only failed closed at switch). No expansion weakened the Phase 1–3
   safety contract.
 
-#### 4G — UI truthfulness, operator UX & release-parity audit (IN PROGRESS)
+#### 4G — UI truthfulness, operator UX & release-parity audit (DONE)
 - **Mandate:** UI is NOT the source of truth. Backend stays authoritative for
   authz, fencing, legal transitions, action gating, idempotency, cutover/rollback
   legality. The UI only *reflects* or *guides*; it never re-derives a safety
@@ -328,6 +328,51 @@ ambiguity; no weakening of the Phase 1–3 safety contract.** Sequencing:
     (`awaiting_cutover`, `needs_manual_intervention`, `rollback_degraded`,
     `interrupted`) instead of silently de-emphasizing them.
   - `npm run check` clean; 22 unit assertions on the support-status model pass.
+- **Slice 3B — preflight / compatibility UX (DONE):** `CompatibilityChecklist.svelte`
+  groups preflight results into Blocking (critical/high fail) / Review required
+  (warning/info fail) / Passed (collapsible), with a `role="status"` can-proceed
+  summary. The pipeline page step 1 uses it in place of the old inline list, so a
+  blocking result is never hidden behind a green Next button.
+- **Slice 3C — pipeline timeline / progress / evidence (DONE):** `MigrationEvidencePanel.svelte`
+  renders sync sessions (bytes/speed/checksum/progress), replication status
+  (host→host / mode / lag), and cutover-safety evidence (traffic-verify summary,
+  fence status + generation, topology summary) straight from the audit trail —
+  with honest empty states when the backend emitted no evidence, rather than
+  faking a green check.
+- **Slice 3D — cutover / observation / manual-intervention UX (DONE):** `SafetyStatePanel.svelte`
+  renders state-specific operator guidance (`role="alert"`, `aria-live="polite"`)
+  for `awaiting_cutover` / `observing` / `needs_manual_intervention` /
+  `rollback_degraded`. Manual vs automatic copy is driven by the migration's
+  `autoCutover` flag. It forbids assumptions in the degraded/unknown states and
+  carries the "do not auto-rollback after target writes" caveat.
+- **Slice 3E — realtime reconnect / replay parity (DONE):** `wsPipelineConnect`
+  now arms a `staleTimer` (emits `stale` if no frame arrives) and emits
+  `replaying` while reconciling after a reconnect; `MigrationHeader` reflects both
+  states in words (not color-only) and the page shows a global "data may be stale"
+  banner. Reconnect replays missed events via `?after_seq=` and a REST sweep
+  reconciles at the end, so a disconnect/reorder/duplicate never shows as live.
+- **Slice 3F — logs / audit / search / redaction (DONE):** `lib/redact.ts` masks
+  connection-string creds, `-p`/`-P` password flags, `REDISCLI_AUTH`/`PGPASSWORD`,
+  Bearer tokens, password/secret JSON keys, and token query params. `MigrationLogAudit.svelte`
+  (new Audit tab) combines audit + events into one searchable, level-filterable,
+  fully-redacted list; it never renders a raw secret and shows a redaction note.
+- **Slice 3G — action safety / confirmation (DONE):** destructive actions are now
+  state-specific and guarded. The confirm modal covers commit (previously had no
+  confirm step), cutover, and rollback, each with honest copy about irreversibility
+  — the commit modal states rollback is **no longer safe** once the target has
+  writes. A double-submit guard disables every action button while `actionLoading`;
+  when the WS is `stale` cutover/commit/rollback/next are disabled and
+  `openConfirmation` refuses with a toast, so operators never act on a stale
+  snapshot. Disabled-reason tooltips explain every blocked action.
+- **Slice 3H — accessibility / responsive / performance (DONE):** the confirm
+  dialog is keyboard- and SR-equivalent (Esc to cancel, autofocus on open,
+  `aria-labelledby` + `aria-describedby`, focusable root). Status badges already
+  pair color with text+icon. `MigrationLogAudit` caps rendered rows (200 default /
+  1000 while filtering) and shows a "refine your search" hint instead of dumping a
+  huge trail, keeping long audits responsive.
+- **Tests:** 50 frontend unit tests pass (`npm run check` 0 errors, `npm run build`
+  green). Commits: 3A `cd5269e`, 3B `69809ef`, 3C `74e676c`, 3D `5648404`,
+  3E `1914b17`, 3F `f80bdf7`, 3G `6453564`, 3H `c184f1b`.
 
 ### Phase 2C — additional cutover engines & traffic providers
 
