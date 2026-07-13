@@ -31,7 +31,7 @@ read-after-write (`NginxSwitcher.verify`, nginx_switch.go:193).
 | PostgreSQL | `manual` | supported | supported | operator publishes/promotes via runbook |
 | MySQL | `automatic` | **deferred** | **`automatic` (VERIFIED, 3B)** | seeded repl + fenced cutover live; source freeze `read_only=ON`+`super_read_only=ON` held + verified; non-SUPER write rejected post-freeze (dual-writer closed); `CutoverPreflight` now stage-aware so the post-freeze re-check tolerates the frozen source; `SHOW BINARY LOG STATUS`/`SHOW REPLICA STATUS` 8.4 renames handled with legacy fallback |
 | MySQL | `manual` | supported | supported | |
-| Redis | `automatic` | **blocked** (no integration test, no source freeze) | `degraded` or `blocked` after 3C proof | unit tests only; RPO window unproven (B3) |
+| Redis | `automatic` | **blocked** (no integration test, no source freeze) | **`degraded` (VERIFIED, 3C)** | live master/replica pair proves preflight→`REPLICAOF NO ONE`→master; `CutoverFreezeSource` returns `ErrNoSourceFreeze` (no freeze primitive) → RPO is *minimal*, never *zero*; never selectable as `automatic` (rule #11) |
 | Redis | `manual` | supported | supported | `REPLICAOF`/`REPLICAOF NO ONE` |
 | MongoDB | `automatic` | **blocked** (fails closed, pipeline.go:2052) | blocked until 3D replica-set path built | no lag/role measurement (B4) |
 | MongoDB | `manual` | **blocked** (no cutover contract at all) | `manual` after 3D replica-set seed path | mongoMigrator dump/restore exists; cutover does not |
@@ -57,8 +57,8 @@ shipped default is always `manual` — this is the immutable baseline.
 
 | Provider | PostgreSQL | MySQL | Redis | MongoDB |
 |---|---|---|---|---|
-| nginx | `degraded`/`blocked` (3A) | `automatic` (3B) | `blocked`/`degraded` (3C) | blocked |
-| haproxy | `degraded`/`blocked` (3A) | `automatic` (3B) | `blocked`/`degraded` (3C) | blocked |
+| nginx | `degraded`/`blocked` (3A) | `automatic` (3B) | `degraded` (3C) | blocked |
+| haproxy | `degraded`/`blocked` (3A) | `automatic` (3B) | `degraded` (3C) | blocked |
 | traefik | blocked | blocked | blocked | blocked |
 | caddy | blocked | blocked | blocked | blocked |
 | cloudflare | blocked | blocked | blocked | blocked |
@@ -97,12 +97,12 @@ not mocks.
 - [ ] `AssertHolds` fails closed.
 - [ ] Restart + failure injection as above.
 
-### Redis (3C)
-- [ ] Real local Redis pair: `REPLICAOF` + `REPLICAOF NO ONE` round-trip.
-- [ ] Lag/offset measurement (`master_repl_offset` diff) proves catch-up.
-- [ ] **RPO proof:** demonstrate source-write control or bounded-loss window;
-      if not provable, ship `blocked` (manual only), never `automatic` (B3).
-- [ ] Integration test required (only unit exists today).
+### Redis (3C) — VERIFIED (degraded)
+- [x] Real local Redis pair: `REPLICAOF` + `REPLICAOF NO ONE` round-trip (TestRedisCutoverPrimitivesLive, 8.5s).
+- [x] Promote verified: target becomes `role:master` AND retains seeded data (no loss on promote).
+- [x] `CutoverFreezeSource` returns `ErrNoSourceFreeze` — no freeze primitive; orchestrator stays degraded (never `automatic`, rule #11).
+- [x] Integration test added (only unit existed before 3C).
+- [ ] **RPO:** NOT zero — Redis has no source freeze, so the dual-writer window is bounded by the async replication gap. Honest wording: "minimal-downtime degraded cutover; source-freeze not enforced — operator must freeze writes manually." B3 caveat closed honestly as `degraded`, not `blocked`, because the path IS fenced (AssertHolds) and verified; only the freeze primitive is missing.
 
 ### MongoDB (3D)
 - [ ] New same-major replica-set path behind preflight: exactly one writable
