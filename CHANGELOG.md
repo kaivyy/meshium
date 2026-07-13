@@ -266,6 +266,37 @@ ambiguity; no weakening of the Phase 1–3 safety contract.** Sequencing:
   legacy maps, engine/provider execution-time gates, config-support mirrors
   validate, and the policy endpoint serves the matrix.
 
+#### 4F — production certification & release gates
+- **Authoritative certification record** (`docs/superpowers/specs/
+  phase-4-production-certification.md`). Every support claim is backed by the
+  real local Docker / local rsync test named inline; a capability is `automatic`
+  ONLY when wired-in-code + fenced (`AssertHolds` before every mutation, no
+  `ForceTransition(Committed)`, fail-closed on ambiguity) + ownership proven by
+  read-after-write + verified by a live integration test asserting the end
+  state. Anything else is `manual` / `degraded` / `blocked` / `deferred`, with
+  reason. No universal "zero downtime" claim — product wording fixed to
+  "minimal-downtime migration for supported configurations."
+- **Release matrix** (`docs/superpowers/specs/phase-4-release-matrix.md`):
+  the exact supported automatic combinations (engine × mode × provider), a one-
+  glance certified-vs-not table, the honest status legend, and the runtime
+  introspection endpoint `GET /api/pipeline/policy` (the same `PolicyMatrix`
+  enforced at execution time).
+- **Operator runbooks + certification drills** (`docs/superpowers/specs/
+  phase-4-runbooks.md`): Runbook A (verify support before planning), B (automatic
+  cutover, switch→promote), C (fail-closed recovery at `NeedsManualIntervention`),
+  D (Redis `degraded` with manual source-freeze), E (PostgreSQL logical scoped
+  `degraded`); plus the per-slice certification drills that must pass on a release
+  commit (`go test` commands + assertions — a drill failure is a no-ship).
+- **Final report** (`docs/superpowers/specs/phase-4-final-report.md`): headline
+  result table, per-slice what-was-proven, immutable-baseline preservation, commit
+  chain, honest status legend, and the known-limitations carried into
+  certification (Redis no-freeze, MongoDB no-automatic, PG logical primitive-only,
+  bastion untested, cross-major blocked, external DNS/Cloudflare blocked).
+- **De-recognition of earlier "possible" claims:** PostgreSQL Docker Compose is
+  now `automatic` (was `possible`/unverified) per `TestPGComposeCutoverLive`; the
+  other 4 non-nginx/haproxy providers are now explicitly `blocked` for automatic
+  (previously only failed closed at switch). No expansion weakened the Phase 1–3
+  safety contract.
 
 ### Phase 2C — additional cutover engines & traffic providers
 

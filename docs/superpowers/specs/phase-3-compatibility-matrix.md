@@ -8,6 +8,13 @@
 > code, (b) fenced (`AssertHolds` before every mutation), and (c) verified by a
 > real local integration test during Phase 3. Anything else is `manual`,
 > `degraded`, `blocked`, or `deferred` — never silently downgraded to automatic.
+>
+> **Phase 4 authority:** Phase 4 expanded this matrix (topology, provider, WAN,
+> advanced DB, policy, certification). The cells Phase 4 touched are now
+> authoritative in **`phase-4-release-matrix.md`** (exact supported automatic
+> combinations) and **`phase-4-production-certification.md`** (per-cell evidence
+> + ship/no-ship gates). This Phase 3 document remains the historical
+> per-engine acceptance record; for any divergence, the Phase 4 docs win.
 
 ## 1. Status legend
 
@@ -59,7 +66,7 @@ shipped default is always `manual` — this is the immutable baseline.
 |---|---|---|---|---|
 | nginx | `degraded`/`blocked` (3A) | `automatic` (3B) | `degraded` (3C) | blocked |
 | haproxy | `degraded`/`blocked` (3A) | `automatic` (3B) | `degraded` (3C) | blocked |
-| caddy | `degraded`/`blocked` (4B) | `degraded`/`blocked` (4B) | `degraded`/`blocked` (4B) | blocked |
+| caddy | `automatic` (4B, live integration) | `automatic` (4B, live integration) | `degraded` (4B) | blocked |
 | traefik | blocked | blocked | blocked | blocked |
 | cloudflare | blocked | blocked | blocked | blocked |
 | docker | blocked | blocked | blocked | blocked |
