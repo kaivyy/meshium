@@ -45,8 +45,8 @@ shipped default is always `manual` — this is the immutable baseline.
 | Topology | PostgreSQL | MySQL | Redis | MongoDB |
 |---|---|---|---|---|
 | host → host, same major | `degraded`→`automatic` (3A) | `automatic` (3B) | `degraded`/`blocked` (3C) | `blocked`→`manual` (3D) |
-| Docker container pair | possible (SSH into container) | possible | possible | possible |
-| Docker Compose pair | possible | possible | possible | possible |
+| Docker container pair | `automatic` (3A, live integration) | `automatic` (3B) | `degraded` (3C) | `blocked`→`manual` (3D) |
+| Docker Compose pair | `automatic` (4A, live integration) | possible | possible | possible |
 | cross-major version | **blocked** | **blocked** | **blocked** | **blocked** |
 | sharded / cluster (Redis Cluster, Mongo sharded) | n/a | n/a | **blocked** | **blocked** |
 | managed (RDS, Atlas, ElastiCache, Cloud SQL) | **blocked** (no replica control) | **blocked** | **blocked** | **blocked** |

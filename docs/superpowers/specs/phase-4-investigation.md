@@ -66,7 +66,7 @@ correlation IDs; ownership = read-after-write. (See phase-3-final-report.md §3.
 |---|---|---|---|---|---|---|
 | host→host (SSH) | direct SSH | proven (3A) | proven (3B) | proven (3C) | proven (3D) | none for host mode itself |
 | Docker container pair | `docker exec` | unit only | **live (3B)** | **live (3C)** | **live (3D)** | PG container pair has no live test yet |
-| Docker Compose pair | `docker compose exec -T` | unverified | unverified | unverified | unverified | `compose exec` quoting + service-discovery unverified |
+| Docker Compose pair | `docker compose exec -T` | **automatic (VERIFIED 4A)** | unverified | unverified | unverified | `compose exec` quoting + service-discovery now verified for PG via `TestPGComposeCutoverLive` |
 | bastion/jump-host | `ssh -J` / `dialBastion` | implemented, unverified | implemented, unverified | implemented, unverified | implemented, unverified | no cutover integration test through bastion |
 
 **Assumptions common to all modes:** source→target direct connectivity (or via
@@ -74,14 +74,13 @@ SSH/bastion); DB client binaries present on the execution surface; credentials
 via env / `-e` (never `-p` on argv); `StrictHostKeyChecking=accept-new` for rsync
 transport.
 
-**Finding (B‑1):** the only *live* topology proofs are host→host (PG/MySQL/Redis/
+**Finding (B‑1):** the only *live* topology proofs were host→host (PG/MySQL/Redis/
 Mongo) and Docker-container (MySQL/Redis/Mongo). **Docker Compose and bastion
-have zero live cutover proof.** Phase 4A's first increment should close the
-lowest-risk gap: **PostgreSQL container/Compose pair** (PG host→host is already
-proven, so expanding its execution mode is the safest single-axis move) OR
-**bastion** if transport safety can be proven. Recommendation: start with the
-**PostgreSQL Docker-container pair** (mirror the MySQL 3B container proof for
-PG), then **Compose**, then **bastion** — one per increment.
+had zero live cutover proof.** Phase 4A's first increment closed the
+lowest-risk gap: **PostgreSQL Docker-Compose pair** verified live via
+`TestPGComposeCutoverLive` (4A), certifying the compose execution mode through
+`CertifyTopology` + the real preflight/catch-up/promote primitives. Next 4A
+increment: **bastion** (transport safety through `ssh -J` / `dialBastion`).
 
 ## C. Provider inventory
 
@@ -184,9 +183,10 @@ RBAC/external-secret-manager are larger and can follow.
 Default order confirmed, with the lowest-risk first increment per sub-phase
 chosen from the findings above:
 
-1. **4A topology** — first increment: **PostgreSQL Docker-container pair**
-   (PG host→host proven in 3A; mirror MySQL 3B container proof). Then Compose,
-   then bastion — one per increment.
+1. **4A topology** — first increment: **PostgreSQL Docker-Compose pair**
+   (VERIFIED 4A, `TestPGComposeCutoverLive`). Next: bastion (via
+   `ssh -J` / `dialBastion`), then expand the container pair to MySQL/Redis/Mongo.
+   One execution mode at a time.
 2. **4B provider** — first increment: **one locally-verifiable provider**
    (application-config switch or second reverse-proxy adapter) with
    read-after-write ownership; ALSO tighten the API guardrail so the 5

@@ -164,7 +164,25 @@ by real local integration + failure-injection evidence; fail-closed on
 ambiguity; no weakening of the Phase 1–3 safety contract.** Sequencing:
 4A topology → 4B provider → 4C WAN/transfer → 4D advanced DB → 4E enterprise →
 4F certification. Investigation doc:
-`docs/superpowers/specs/phase-4-investigation.md` (pending).
+`docs/superpowers/specs/phase-4-investigation.md` (done).
+
+#### 4A — topology expansion & execution-mode certification
+- **ExecutionMode + CertifyTopology** (`internal/mod/migration/topology_mode.go`).
+  A cutover's topology is a certified, persisted property, not an assumption:
+  `CertifyTopology` classifies the requested mode (host / container / compose /
+  bastion), issues a read-only tool-availability probe, and returns
+  `TopologyEvidence` (`mode`, `sourceId`, `targetId`, `composeProject`,
+  `bastionId`, `toolAvailable`, `connectivity`, `supportStatus`). Unknown or
+  tool-missing modes fail closed with `ErrUnsupportedMode` and no transport probe
+  is issued. Unit-tested (`topology_mode_test.go`).
+- **PostgreSQL Docker-Compose execution mode certified live.**
+  `TestPGComposeCutoverLive` (`pg_compose_integration_test.go`) stands up a real
+  primary + standby via `docker compose`, certifies the compose mode, then drives
+  the real `preflightPostgresCutover` / `WaitForCatchUp` / `PromotePG` primitives
+  through a `composeExecuter` (`docker compose exec -T -u postgres <service>`),
+  asserting the standby is promoted to primary with seeded data intact, then re-
+  certifies topology for restart reconciliation. PostgreSQL Compose pair is now
+  `automatic` (was `possible`/unverified).
 
 ### Phase 2C — additional cutover engines & traffic providers
 
