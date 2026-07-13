@@ -350,6 +350,10 @@ func (e *SyncEngine) buildRsyncCommand(config SyncConfig, incremental bool) stri
 		args = append(args, fmt.Sprintf("--bwlimit=%d", config.BandwidthLimit))
 	}
 
+	if config.ParallelTransfers > 1 {
+		args = append(args, fmt.Sprintf("--parallel=%d", config.ParallelTransfers))
+	}
+
 	if config.DeleteExtraneous {
 		args = append(args, "--delete")
 	}

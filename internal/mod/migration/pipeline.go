@@ -72,8 +72,28 @@ type Pipeline struct {
 	stages           []PipelineStageHandler
 	mu               sync.Mutex
 	runningPipelines sync.Map // migrationID → struct{} (prevents concurrent execution)
-	lifecycle        *pipelineRegistry
+	// sem caps the number of pipelines executing at once across DISTINCT
+	// migrations. runningPipelines only dedupes a single migration; without sem
+	// a fleet of migrations would run unbounded in parallel and contend for the
+	// same source/target disks, DB, and SSH connections.
+	sem           chan struct{}
+	maxConcurrent int
+	lifecycle     *pipelineRegistry
+	// resourceMu guards resourceLocks. runningPipelines stops a SINGLE migration
+	// from running twice; sem caps the GLOBAL count; resourceLocks stop two
+	// DISTINCT migrations from mutating the same server concurrently (e.g.
+	// migration A: host 3→4 and migration B: host 4→5 would otherwise fork
+	// both sides of host 4 at once and corrupt its disks/DB/SSH). Refcounted
+	// so a migration holding several servers releases each exactly once.
+	resourceMu    sync.Mutex
+	resourceLocks map[int]int // serverID → holder count
 }
+
+// DefaultMaxConcurrentMigrations bounds how many migrations may run at once.
+// It is a global safety ceiling, not a perf tuning knob: one host's SSH pool
+// and disks saturate well before the CPU does, so this prevents one operator
+// from starving others. Overridable via SetMaxConcurrent.
+const DefaultMaxConcurrentMigrations = 4
 
 // NewPipeline creates a new Pipeline with the given dependencies.
 // The stages are registered in the correct order for the zero-downtime pipeline.
@@ -99,6 +119,8 @@ func NewPipeline(
 		registry:  registry,
 		lifecycle: newPipelineRegistry(),
 	}
+	p.maxConcurrent = DefaultMaxConcurrentMigrations
+	p.sem = make(chan struct{}, p.maxConcurrent)
 	defaultRegistry = registry
 	p.registerDefaultStages()
 	return p, nil
@@ -160,6 +182,14 @@ func (p *Pipeline) Execute(ctx context.Context, migrationID int, onProgress Step
 	}
 	defer p.release(migrationID)
 
+	// Bound global parallelism across distinct migrations. If shutdown is in
+	// progress the lifecycle register check below will reject; here we just
+	// wait for a free slot (honoring ctx cancellation).
+	if !p.acquireSlot(ctx) {
+		return fmt.Errorf("migration %d not started: %w", migrationID, ctx.Err())
+	}
+	defer p.releaseSlot()
+
 	// Register with the lifecycle registry so application shutdown can drain
 	// this run. The derived execCtx is cancelled either by the caller (WS
 	// disconnect) or by the registry during shutdown; on cancellation the stage
@@ -179,6 +209,19 @@ func (p *Pipeline) Execute(ctx context.Context, migrationID int, onProgress Step
 	if err != nil {
 		return fmt.Errorf("migration not found: %w", err)
 	}
+
+	// Claim exclusive ownership of the source AND target servers before any
+	// mutating work begins. runningPipelines blocks a re-entrant same-migration
+	// run; this blocks a DISTINCT migration from forking the same host while we
+	// hold it (e.g. migration A: 3→4 and B: 4→5 must not run concurrently, or
+	// host 4 is corrupted on both ends). The check-and-claim is atomic so two
+	// goroutines cannot both win the race. Fail closed (no wait) if either
+	// server is already held — a stuck wait risks a wedged run.
+	heldServers := p.tryAcquireResource(migration.SourceID, migration.TargetID)
+	if heldServers == nil {
+		return fmt.Errorf("migration %d cannot start: source or target server is busy with another migration", migrationID)
+	}
+	defer p.releaseResourceLocks(heldServers)
 
 	// Load config
 	config, err := p.repo.GetMigrationConfig(migrationID)
@@ -973,6 +1016,132 @@ func (p *Pipeline) release(migrationID int) {
 	p.runningPipelines.Delete(migrationID)
 }
 
+// SetMaxConcurrent changes the global ceiling on simultaneously executing
+// migrations. The change applies to new acquisitions only; in-flight runs are
+// unaffected. n must be >= 1; values <= 0 are ignored (keep the current cap).
+func (p *Pipeline) SetMaxConcurrent(n int) {
+	if n < 1 {
+		return
+	}
+	p.mu.Lock()
+	p.maxConcurrent = n
+	p.sem = make(chan struct{}, n)
+	p.mu.Unlock()
+}
+
+// acquireSlot blocks until a global execution slot is free or ctx is done.
+// Returns true if a slot was acquired (caller must call releaseSlot).
+func (p *Pipeline) acquireSlot(ctx context.Context) bool {
+	p.ensureSem()
+	select {
+	case p.sem <- struct{}{}:
+		return true
+	case <-ctx.Done():
+		return false
+	}
+}
+
+func (p *Pipeline) releaseSlot() {
+	p.ensureSem()
+	<-p.sem
+}
+
+// ensureSem lazily initializes the concurrency semaphore. Tests that build
+// *Pipeline directly (bypassing NewPipeline) have a nil sem; without this they
+// would block forever on a nil channel. Guarded so concurrent first-use is safe.
+func (p *Pipeline) ensureSem() {
+	if p.sem != nil {
+		return
+	}
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	if p.sem == nil {
+		if p.maxConcurrent < 1 {
+			p.maxConcurrent = DefaultMaxConcurrentMigrations
+		}
+		p.sem = make(chan struct{}, p.maxConcurrent)
+	}
+}
+
+// acquireResourceLocks claims exclusive ownership of every server this
+// migration will mutate (source and target). Two DISTINCT migrations may not
+// hold the same server simultaneously — that is the gap runningPipelines and
+// sem leave open. Refcounted so a migration whose source==target (rejected at
+// the API, but defense-in-depth) or a retry does not deadlock itself.
+// Returns the list of serverIDs it claimed; releaseResourceLocks frees them.
+func (p *Pipeline) acquireResourceLocks(servers ...int) []int {
+	p.resourceMu.Lock()
+	defer p.resourceMu.Unlock()
+	if p.resourceLocks == nil {
+		p.resourceLocks = make(map[int]int)
+	}
+	claimed := make([]int, 0, len(servers))
+	for _, s := range servers {
+		if s == 0 {
+			continue
+		}
+		p.resourceLocks[s]++
+		claimed = append(claimed, s)
+	}
+	return claimed
+}
+
+// releaseResourceLocks decrements the holder count for each server, deleting
+// the entry once it returns to zero so a later migration may claim it.
+func (p *Pipeline) releaseResourceLocks(servers []int) {
+	if len(servers) == 0 {
+		return
+	}
+	p.resourceMu.Lock()
+	defer p.resourceMu.Unlock()
+	for _, s := range servers {
+		if p.resourceLocks[s] > 1 {
+			p.resourceLocks[s]--
+		} else {
+			delete(p.resourceLocks, s)
+		}
+	}
+}
+
+// canAcquireResource reports whether NO one else currently holds any of the
+// given servers. Used before blocking so a retry/bump sees the live state.
+func (p *Pipeline) canAcquireResource(servers ...int) bool {
+	p.resourceMu.Lock()
+	defer p.resourceMu.Unlock()
+	for _, s := range servers {
+		if s != 0 && p.resourceLocks[s] > 0 {
+			return false
+		}
+	}
+	return true
+}
+
+// tryAcquireResource atomically checks AND claims every server in one critical
+// section, so two goroutines cannot both pass the check and then both claim the
+// same host (a check-then-acquire TOCTOU). Returns the claimed server list, or
+// nil if any one is already held by another migration (nothing is claimed).
+func (p *Pipeline) tryAcquireResource(servers ...int) []int {
+	p.resourceMu.Lock()
+	defer p.resourceMu.Unlock()
+	if p.resourceLocks == nil {
+		p.resourceLocks = make(map[int]int)
+	}
+	for _, s := range servers {
+		if s != 0 && p.resourceLocks[s] > 0 {
+			return nil
+		}
+	}
+	claimed := make([]int, 0, len(servers))
+	for _, s := range servers {
+		if s == 0 {
+			continue
+		}
+		p.resourceLocks[s]++
+		claimed = append(claimed, s)
+	}
+	return claimed
+}
+
 func (p *Pipeline) failPipeline(ctx context.Context, sm *StateMachine, migrationID int, errMsg string, onProgress StepCallback) {
 	onProgress(WSMessage{Step: "pipeline", Status: "error", Error: errMsg})
 	// P0-2 ForceTransition audit: StateFailed is failure-marking only — it can
@@ -1461,6 +1630,14 @@ func syncConfigFromPipelineContext(pc *PipelineContext) SyncConfig {
 		cfg.TargetHost = pc.TargetServer.Host
 		cfg.TargetPort = pc.TargetServer.Port
 		cfg.TargetUser = pc.TargetServer.Username
+	}
+	// Honor the per-migration transfer controls declared on MigrationConfig so
+	// they actually reach rsync (--bwlimit / --parallel). Previously this
+	// builder ignored pc.Config, so the limits were config-only and never
+	// applied when the SyncEngine is wired in.
+	if pc.Config != nil {
+		cfg.BandwidthLimit = pc.Config.BandwidthLimit
+		cfg.ParallelTransfers = pc.Config.ParallelTransfers
 	}
 	return cfg
 }

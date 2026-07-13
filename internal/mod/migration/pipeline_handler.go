@@ -191,6 +191,11 @@ func (h *PipelineHandler) handleCreatePipelineMigration(w http.ResponseWriter, r
 		req.Config = DefaultMigrationConfig()
 	}
 	normalizeMigrationConfig(req.Config, req.Categories)
+	// Honesty guard: the live pipeline replays collected category data through
+	// appliers, it never drives rsync, so BandwidthLimit/ParallelTransfers are
+	// inert on the active path. Warn before persisting so an operator expecting
+	// throttled transfers is not silently misconfigured.
+	warnTransferLimitsHonesty(r.Context(), req.Config)
 	if err := h.encryptDBConfig(req.Config); err != nil {
 		shared.WriteError(w, http.StatusInternalServerError, fmt.Sprintf("failed to secure db credentials: %v", err), "INTERNAL")
 		return
@@ -592,6 +597,27 @@ func normalizeMigrationConfig(config *MigrationConfig, categories []string) {
 	}
 }
 
+// warnTransferLimitsHonesty emits a single operator-visible warning when
+// per-migration transfer limits (BandwidthLimit / ParallelTransfers) are set
+// but the live pipeline cannot honor them. The active path replays collected
+// category data through appliers and never invokes the rsync-backed
+// SyncEngine, so --bwlimit / --parallel are inert unless that engine is
+// driven. We surface this instead of silently swallowing the config so an
+// operator is never misled into expecting throttled transfers.
+func warnTransferLimitsHonesty(ctx context.Context, config *MigrationConfig) {
+	if config == nil {
+		return
+	}
+	if config.BandwidthLimit > 0 || config.ParallelTransfers > 0 {
+		shared.LogCtx(ctx).Warn(
+			"transfer limits set but not honored on the active pipeline path",
+			"bandwidthLimit", config.BandwidthLimit,
+			"parallelTransfers", config.ParallelTransfers,
+			"detail", "active path replays collected data via appliers; limits apply only when the rsync SyncedTransfer engine is driven",
+		)
+	}
+}
+
 func (h *PipelineHandler) handleConfigByID(w http.ResponseWriter, r *http.Request, id int) {
 	switch r.Method {
 	case http.MethodGet:
@@ -610,6 +636,7 @@ func (h *PipelineHandler) handleConfigByID(w http.ResponseWriter, r *http.Reques
 			return
 		}
 		normalizeMigrationConfig(&cfg, cfg.Categories)
+		warnTransferLimitsHonesty(r.Context(), &cfg)
 		if len(cfg.Categories) == 0 {
 			shared.WriteError(w, http.StatusBadRequest, "at least one category is required", "VALIDATION_ERROR")
 			return
