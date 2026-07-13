@@ -128,10 +128,16 @@
 
     <!-- WS Indicator -->
     {#if pipelineRunning || pipelinePaused}
-      <span class="flex items-center gap-1.5 text-xs">
+      <span class="flex items-center gap-1.5 text-xs" role="status">
         {#if wsConnectionState === 'connected'}
           <span class="h-2 w-2 rounded-full bg-success"></span>
           <span class="text-success">Live</span>
+        {:else if wsConnectionState === 'replaying'}
+          <span class="h-2 w-2 rounded-full bg-info animate-pulse"></span>
+          <span class="text-info">Replaying history</span>
+        {:else if wsConnectionState === 'stale'}
+          <span class="h-2 w-2 rounded-full bg-warning"></span>
+          <span class="text-warning" title="No live frame received recently — shown data may be out of date">Stale</span>
         {:else if wsConnectionState === 'reconnecting' || wsConnectionState === 'connecting'}
           <span class="h-2 w-2 rounded-full bg-warning animate-pulse"></span>
           <span class="text-warning">Reconnecting</span>

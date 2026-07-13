@@ -729,6 +729,9 @@
       }
     }, (status: WSConnectionState) => {
       wsConnectionState = status;
+      // A reconnect attempt clears the stale flag; a fresh frame re-arms it.
+      if (status === 'reconnecting' || status === 'connecting') metricsStale = true;
+      if (status === 'connected') metricsStale = false;
       if (status === 'failed') { pipelineRunning = false; toast.error('WebSocket connection lost.'); }
     });
   }
@@ -1010,6 +1013,19 @@
     {wsConnectionState}
     autoCutoverConfigured={config?.autoCutover ?? false}
   />
+
+  <!-- ═══ GLOBAL REALTIME-STALENESS BANNER (4G 3E) ═══ -->
+  {#if wsConnectionState === 'stale'}
+    <div class="px-3 sm:px-4 py-2 bg-warning/10 border-b border-warning/30 text-warning text-xs font-medium flex items-center gap-2" role="alert" aria-live="polite">
+      <span class="h-2 w-2 rounded-full bg-warning animate-pulse"></span>
+      Data may be stale — no live update received recently. Shown metrics are not realtime.
+    </div>
+  {:else if wsConnectionState === 'replaying'}
+    <div class="px-3 sm:px-4 py-2 bg-info/10 border-b border-info/30 text-info text-xs font-medium flex items-center gap-2" role="alert" aria-live="polite">
+      <span class="h-2 w-2 rounded-full bg-info animate-pulse"></span>
+      Reconnecting — replaying missed events to reconcile with the server.
+    </div>
+  {/if}
 
   <!-- ═══ PIPELINE STEPPER ═══ -->
   <PipelineStepper {currentStep} {stepStatuses} {pipelineRunning} />

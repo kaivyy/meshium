@@ -605,7 +605,10 @@ export const pipelineApi = {
 
 // --- Pipeline WebSocket ---
 
-export type WSConnectionState = 'connecting' | 'connected' | 'disconnected' | 'reconnecting' | 'failed';
+// `stale` = connected transport but no frame within staleTimeout (operator must
+// not treat the shown metrics as realtime). `replaying` = a reconnect happened
+// and we are re-hydrating missed events before resuming live frames.
+export type WSConnectionState = 'connecting' | 'connected' | 'disconnected' | 'reconnecting' | 'failed' | 'stale' | 'replaying';
 
 function getWsToken(): string {
   return typeof localStorage !== 'undefined' ? localStorage.getItem('meshium_session_token') ?? '' : '';
@@ -626,6 +629,9 @@ export interface WSPipelineOptions {
   initialDelay?: number;
   maxDelay?: number;
   heartbeatInterval?: number;
+  // No live frame within this window (ms) after a connected frame ⇒ `stale`.
+  // Operators must not treat the displayed metrics as realtime while stale.
+  staleTimeout?: number;
 }
 
 /**
@@ -647,17 +653,33 @@ export function wsPipelineConnect(
   const initialDelay = opts?.initialDelay ?? 1000;
   const maxDelay = opts?.maxDelay ?? 30000;
   const heartbeatInterval = opts?.heartbeatInterval ?? 30000;
+  const staleTimeout = opts?.staleTimeout ?? 15000;
 
   let retries = 0;
   let lastSequence = 0;
   let ws: WebSocket | null = null;
   let heartbeatTimer: ReturnType<typeof setInterval> | null = null;
   let reconnectTimer: ReturnType<typeof setTimeout> | null = null;
+  let staleTimer: ReturnType<typeof setTimeout> | null = null;
   let closed = false;
 
   function clearTimers() {
     if (heartbeatTimer) { clearInterval(heartbeatTimer); heartbeatTimer = null; }
     if (reconnectTimer) { clearTimeout(reconnectTimer); reconnectTimer = null; }
+    if (staleTimer) { clearTimeout(staleTimer); staleTimer = null; }
+  }
+
+  function armStaleTimer() {
+    if (staleTimer) clearTimeout(staleTimer);
+    staleTimer = setTimeout(() => {
+      // Only flag stale if currently believed connected/healthy.
+      staleTimer = null;
+      onStatusChange('stale');
+    }, staleTimeout);
+  }
+
+  function disarmStaleTimer() {
+    if (staleTimer) { clearTimeout(staleTimer); staleTimer = null; }
   }
 
   function connect() {
@@ -672,9 +694,12 @@ export function wsPipelineConnect(
     ws.onopen = () => {
       retries = 0;
       onStatusChange('connected');
+      armStaleTimer();
 
-      // Replay missed events after reconnect
+      // Replay missed events after reconnect — surface `replaying` so the UI
+      // never presents replayed history as brand-new live data.
       if (lastSequence > 0) {
+        onStatusChange('replaying');
         replayEvents(migrationId, lastSequence).then((events) => {
           for (const event of events) {
             onMessage(event);
@@ -682,6 +707,8 @@ export function wsPipelineConnect(
               lastSequence = event.sequence;
             }
           }
+          onStatusChange('connected');
+          armStaleTimer();
         });
       }
 
@@ -701,6 +728,9 @@ export function wsPipelineConnect(
           lastSequence = msg.sequence;
         }
         onMessage(msg);
+        // Any real frame means the data is live again.
+        disarmStaleTimer();
+        armStaleTimer();
       } catch {
         // Ignore non-JSON messages
       }
