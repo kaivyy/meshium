@@ -187,6 +187,14 @@ func (h *PipelineHandler) handleCreatePipelineMigration(w http.ResponseWriter, r
 		return
 	}
 
+	// Guardrail: reject config that selects an unsupported provider/replication
+	// engine at the API boundary, before any state is persisted or a pipeline
+	// is started. Unsupported selections fail closed mid-migration otherwise.
+	if err := validateConfigSupport(req.Config); err != nil {
+		shared.WriteError(w, http.StatusBadRequest, err.Error(), "VALIDATION_ERROR")
+		return
+	}
+
 	if req.Config == nil {
 		req.Config = DefaultMigrationConfig()
 	}
@@ -618,6 +626,47 @@ func warnTransferLimitsHonesty(ctx context.Context, config *MigrationConfig) {
 	}
 }
 
+// supportedTrafficProviders is the runtime guardrail consulted at API
+// validation. Selectable providers are exactly those Phase 2C proved fail
+// closed for unsupported switches — the UI/API cannot select one that lacks a
+// fenced switcher or an honest enforcement path. Empty provider is permitted
+// (means "no traffic switch configured yet").
+var supportedTrafficProviders = map[TrafficProvider]bool{
+	TrafficProviderNginx:      true,
+	TrafficProviderHAProxy:    true,
+	TrafficProviderTraefik:    true,
+	TrafficProviderCloudflare: true,
+	TrafficProviderCaddy:      true,
+	TrafficProviderDocker:     true,
+	TrafficProviderDNS:        true,
+}
+
+// supportedReplicationModes is the runtime guardrail for the replication
+// strategy. Anything outside this set is not a supported engine within scope.
+var supportedReplicationModes = map[ReplicationMode]bool{
+	ReplicationModeNone:      true,
+	ReplicationModeStreaming: true,
+	ReplicationModeLogical:   true,
+	ReplicationModeReplica:   true,
+	ReplicationModeDump:      true,
+}
+
+// validateConfigSupport rejects config that selects an unsupported
+// provider/replication engine at the API boundary, so a client is told up
+// front instead of discovering it via a fail-closed cutover mid-migration.
+func validateConfigSupport(config *MigrationConfig) error {
+	if config == nil {
+		return nil
+	}
+	if config.TrafficProvider != "" && !supportedTrafficProviders[config.TrafficProvider] {
+		return fmt.Errorf("unsupported traffic provider %q: must be one of the supported providers", config.TrafficProvider)
+	}
+	if config.ReplicationMode != "" && !supportedReplicationModes[config.ReplicationMode] {
+		return fmt.Errorf("unsupported replication mode %q: must be one of the supported modes", config.ReplicationMode)
+	}
+	return nil
+}
+
 func (h *PipelineHandler) handleConfigByID(w http.ResponseWriter, r *http.Request, id int) {
 	switch r.Method {
 	case http.MethodGet:
@@ -637,6 +686,10 @@ func (h *PipelineHandler) handleConfigByID(w http.ResponseWriter, r *http.Reques
 		}
 		normalizeMigrationConfig(&cfg, cfg.Categories)
 		warnTransferLimitsHonesty(r.Context(), &cfg)
+		if err := validateConfigSupport(&cfg); err != nil {
+			shared.WriteError(w, http.StatusBadRequest, err.Error(), "VALIDATION_ERROR")
+			return
+		}
 		if len(cfg.Categories) == 0 {
 			shared.WriteError(w, http.StatusBadRequest, "at least one category is required", "VALIDATION_ERROR")
 			return

@@ -179,6 +179,37 @@ manual cutover (the Phase 1 baseline) for MongoDB. Runbook:
    `docs/mongodb-cutover-runbook.md`).
 6. **MongoDB cutover is manual only.** No automated Mongo cutover this pass.
 
+## What Phase 2D adds (operability, auditability, recovery)
+
+- **Concurrency / resource safety.** Three independent guards run before any
+  mutating work: (1) per-migration dedupe (`runningPipelines`) blocks a
+  re-entrant same-migration run; (2) a global semaphore (`sem`, default 4,
+  tunable via `SetMaxConcurrent`) caps how many migrations run at once; (3) a
+  **per-server resource lock** keyed by `(sourceID, targetID)` blocks two
+  *distinct* migrations from mutating the same server concurrently (e.g.
+  migration A: 3→4 and B: 4→5 cannot both fork host 4). The check-and-claim is
+  atomic; a busy source/target fails the second migration closed rather than
+  racing or wedging. Cancel/interrupt still persist checkpoints.
+- **Transfer-limit honesty.** `BandwidthLimit` / `ParallelTransfers` are
+  **only** applied when the rsync-backed `SyncEngine` is driven (it emits
+  `--bwlimit` / `--parallel`). The live pipeline replays *collected category
+  data* through appliers and never drives rsync, so those limits are **inert
+  on the active path** — they are surfaced as an operator-visible warning at
+  config create/PUT rather than silently swallowing the value. Do not claim
+  throttled transfers unless the rsync SyncedTransfer engine is the path.
+- **Supported-selection guardrail.** At the API boundary, `TrafficProvider`
+  and `ReplicationMode` are validated against a runtime guardrail map. A client
+  selecting an unsupported provider/mode is rejected with `400 VALIDATION_ERROR`
+  before any state is persisted or a pipeline started — it cannot reach a
+  fail-closed cutover mid-migration. Selectable providers: nginx, haproxy,
+  traefik, cloudflare, caddy, docker, dns. Selectable modes: none, streaming,
+  logical, replica, dump.
+- **Observability / recovery.** Structured redacting logger (no raw secrets in
+  any sink), one correlation ID per operation propagated through the whole
+  pipeline, durable audit trail, `/api/pipeline/diagnostics/{id}` redacted
+  bundle, `/api/pipeline/recovery/{id}` operator guidance, and REST idempotency
+  keys. See `docs/runbooks/operator-recovery.md`.
+
 ## Wording rules
 
 API responses, UI text, and docs must use these exact terms and must **not**
