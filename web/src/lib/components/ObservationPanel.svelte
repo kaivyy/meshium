@@ -7,6 +7,7 @@
   export let observationProgress: number;
   export let stepStatus: string;
   export let actionLoading: boolean;
+  export let staleData: boolean = false;
   export let onCommit: () => void;
   export let onRollback: () => void;
 
@@ -82,15 +83,17 @@
     <div class="flex items-center gap-3">
       <button
         on:click={onCommit}
-        disabled={actionLoading}
-        class="px-6 py-2.5 bg-success hover:bg-success/90 text-accent-fg disabled:opacity-50 rounded-lg font-medium transition-colors"
+        disabled={actionLoading || staleData}
+        title={staleData ? 'Live data unavailable — wait for reconnection before committing' : 'Finalize migration. After commit, rollback is no longer safe.'}
+        class="px-6 py-2.5 bg-success hover:bg-success/90 text-accent-fg disabled:opacity-40 disabled:cursor-not-allowed rounded-lg font-medium transition-colors"
       >
         {actionLoading ? 'Committing...' : 'Commit Migration'}
       </button>
       <button
         on:click={onRollback}
-        disabled={actionLoading}
-        class="px-6 py-2.5 bg-error hover:bg-error/90 text-accent-fg disabled:opacity-50 rounded-lg font-medium transition-colors"
+        disabled={actionLoading || staleData}
+        title={staleData ? 'Live data unavailable — wait for reconnection before acting' : 'Revert to the last rollback point'}
+        class="px-6 py-2.5 bg-error hover:bg-error/90 text-accent-fg disabled:opacity-40 disabled:cursor-not-allowed rounded-lg font-medium transition-colors"
       >
         Rollback
       </button>

@@ -99,8 +99,13 @@
 
   // ── Step Action Loading ──
   let actionLoading = false;
-  type ConfirmationAction = 'cutover' | 'rollback';
+  type ConfirmationAction = 'cutover' | 'commit' | 'rollback';
   let confirmationAction: ConfirmationAction | null = null;
+
+  // Live data is required before any irreversible/state-changing action. When
+  // the WS is stale we refuse cutover/commit/rollback and force a fresh frame —
+  // never let an operator act on a snapshot that may be out of date (4G 3G).
+  $: staleData = wsConnectionState === 'stale';
   const trafficConfigPlaceholder = '{"configPath":"/etc/nginx/conf.d/app.conf","newServer":"10.0.0.2:80"}';
 
   onMount(async () => {
@@ -773,12 +778,17 @@
     return ['failed', 'interrupted'].includes(state.toLowerCase());
   }
 
-  function openConfirmation(action: ConfirmationAction) { confirmationAction = action; }
+  function openConfirmation(action: ConfirmationAction) {
+    if (staleData) { toast.error('Live data unavailable — wait for reconnection before acting'); return; }
+    confirmationAction = action;
+  }
   function closeConfirmation() { if (!actionLoading) confirmationAction = null; }
 
   async function runConfirmedAction() {
+    if (actionLoading) return; // double-submit guard
     if (confirmationAction === 'rollback') { await rollbackPipeline(); return; }
-    if (confirmationAction === 'cutover') { await confirmCutover(); }
+    if (confirmationAction === 'cutover') { await confirmCutover(); return; }
+    if (confirmationAction === 'commit') { await commitMigration(); }
   }
 
   async function confirmCutover() {
@@ -1040,7 +1050,7 @@
         </button>
       {/if}
       {#if currentStep < 10}
-        <button on:click={goNext} disabled={!canProceed(currentStep) || actionLoading} class="flex items-center gap-1.5 px-3 py-1.5 bg-accent hover:bg-accent-hover text-accent-fg disabled:opacity-40 disabled:cursor-not-allowed rounded-lg text-xs font-medium transition-colors">
+        <button on:click={goNext} disabled={!canProceed(currentStep) || actionLoading || staleData} title={staleData ? 'Live data unavailable — wait for reconnection before proceeding' : ''} class="flex items-center gap-1.5 px-3 py-1.5 bg-accent hover:bg-accent-hover text-accent-fg disabled:opacity-40 disabled:cursor-not-allowed rounded-lg text-xs font-medium transition-colors">
           {currentStep === 7 && replicationLag <= 5 ? 'Ready for Cutover' : 'Next'}
           <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="m5 12h14"/><path d="m12 5 7 7-7 7"/></svg>
         </button>
@@ -1066,7 +1076,12 @@
         </button>
       {/if}
       {#if rollbackAvailable}
-        <button on:click={() => openConfirmation('rollback')} class="flex items-center gap-1.5 px-3 py-1.5 bg-error hover:bg-error/90 text-accent-fg rounded-lg text-xs font-medium transition-colors">
+        <button
+          on:click={() => openConfirmation('rollback')}
+          disabled={actionLoading || staleData}
+          title={staleData ? 'Live data unavailable — wait for reconnection before acting' : 'Revert migration changes to the last rollback point'}
+          class="flex items-center gap-1.5 px-3 py-1.5 bg-error hover:bg-error/90 text-accent-fg rounded-lg text-xs font-medium transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
+        >
           <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 12a9 9 0 1 0 9-9 9.75 9.75 0 0 0-6.74 2.74L3 8"/><path d="M3 3v5h5"/></svg>
           Rollback
         </button>
@@ -1566,6 +1581,7 @@
             {containerHealth}
             {rollbackAvailable}
             {actionLoading}
+            {staleData}
             onCutover={() => openConfirmation('cutover')}
           />
 
@@ -1580,7 +1596,8 @@
             {observationProgress}
             stepStatus={stepStatuses[9]}
             {actionLoading}
-            onCommit={commitMigration}
+            {staleData}
+            onCommit={() => openConfirmation('commit')}
             onRollback={() => openConfirmation('rollback')}
           />
         {/if}
@@ -1629,28 +1646,36 @@
 
 {#if confirmationAction}
   <div class="fixed inset-0 z-50 flex items-center justify-center bg-black/70 px-4" role="presentation">
-    <div class="w-full max-w-md rounded-xl border border-border-strong bg-surface p-6 shadow-2xl" role="dialog" aria-modal="true" tabindex="-1">
+    <div class="w-full max-w-md rounded-xl border border-border-strong bg-surface p-6 shadow-2xl" role="dialog" aria-modal="true" aria-labelledby="confirm-title" tabindex="-1">
       <div class="flex items-start gap-3">
-        <div class="mt-0.5 flex h-9 w-9 shrink-0 items-center justify-center rounded-lg {confirmationAction === 'rollback' ? 'bg-error/15 text-error' : 'bg-warning/15 text-warning'}">
+        <div class="mt-0.5 flex h-9 w-9 shrink-0 items-center justify-center rounded-lg {confirmationAction === 'rollback' ? 'bg-error/15 text-error' : confirmationAction === 'commit' ? 'bg-success/15 text-success' : 'bg-warning/15 text-warning'}">
           {#if confirmationAction === 'rollback'}
             <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 12a9 9 0 1 0 9-9 9.75 9.75 0 0 0-6.74 2.74L3 8"/><path d="M3 3v5h5"/></svg>
+          {:else if confirmationAction === 'commit'}
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M20 6 9 17l-5-5"/></svg>
           {:else}
             <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M13 2 3 14h9l-1 8 10-12h-9l1-8z"/></svg>
           {/if}
         </div>
         <div>
-          <h2 class="text-lg font-semibold">{confirmationAction === 'rollback' ? 'Confirm Rollback' : 'Confirm Cutover'}</h2>
+          <h2 id="confirm-title" class="text-lg font-semibold">
+            {confirmationAction === 'commit' ? 'Confirm Commit' : confirmationAction === 'rollback' ? 'Confirm Rollback' : 'Confirm Cutover'}
+          </h2>
           <p class="mt-2 text-sm leading-6 text-fg-muted">
-            {confirmationAction === 'rollback'
-              ? 'This will revert migration changes and restore the last known rollback point. Continue only if you are ready to interrupt the current migration flow.'
-              : 'This will freeze writes, run the final sync, verify health, and switch traffic from source to target. Continue only when replication and health checks are ready.'}
+            {#if confirmationAction === 'commit'}
+              Committing finalizes the migration. After commit, target is the production system and rollback is <strong>no longer safe</strong> &mdash; the source is released and target has received writes. Only commit once the observation window has passed and health is stable.
+            {:else if confirmationAction === 'rollback'}
+              This will revert migration changes and restore the last known rollback point. Rollback is only safe before the target receives application writes. Continue only if you are ready to interrupt the current migration flow.
+            {:else}
+              This will freeze writes, run the final sync, verify health, and switch traffic from source to target. Continue only when replication and health checks are ready &mdash; a failed cutover may require manual rollback.
+            {/if}
           </p>
         </div>
       </div>
       <div class="mt-6 flex justify-end gap-3">
         <button type="button" on:click={closeConfirmation} disabled={actionLoading} class="rounded-lg bg-surface-muted px-4 py-2 text-sm font-medium text-fg-muted transition-colors hover:bg-surface disabled:cursor-not-allowed disabled:opacity-50">Cancel</button>
-        <button type="button" on:click={runConfirmedAction} disabled={actionLoading} class="rounded-lg px-4 py-2 text-sm font-medium text-accent-fg transition-colors disabled:cursor-not-allowed disabled:opacity-50 {confirmationAction === 'rollback' ? 'bg-error hover:bg-error/90' : 'bg-warning hover:bg-warning/90'}">
-          {actionLoading ? 'Working...' : confirmationAction === 'rollback' ? 'Rollback' : 'Cutover'}
+        <button type="button" on:click={runConfirmedAction} disabled={actionLoading} class="rounded-lg px-4 py-2 text-sm font-medium text-accent-fg transition-colors disabled:cursor-not-allowed disabled:opacity-50 {confirmationAction === 'rollback' ? 'bg-error hover:bg-error/90' : confirmationAction === 'commit' ? 'bg-success hover:bg-success/90' : 'bg-warning hover:bg-warning/90'}">
+          {actionLoading ? 'Working...' : confirmationAction === 'commit' ? 'Commit' : confirmationAction === 'rollback' ? 'Rollback' : 'Cutover'}
         </button>
       </div>
     </div>

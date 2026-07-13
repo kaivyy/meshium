@@ -8,6 +8,7 @@
   export let containerHealth: ContainerHealthInfo[];
   export let rollbackAvailable: boolean;
   export let actionLoading: boolean;
+  export let staleData: boolean = false;
   export let onCutover: () => void;
 
   // ── Checklist Items ──
@@ -65,12 +66,15 @@
   <div class="flex items-center gap-3">
     <button
       on:click={onCutover}
-      disabled={!allChecksPassed || actionLoading}
+      disabled={!allChecksPassed || actionLoading || staleData}
+      title={staleData ? 'Live data unavailable — wait for reconnection before cutover' : ''}
       class="px-6 py-2.5 bg-warning text-accent-fg hover:bg-warning/90 disabled:opacity-40 disabled:cursor-not-allowed rounded-lg font-medium transition-colors"
     >
       {actionLoading ? 'Cutover in progress...' : 'Start Cutover'}
     </button>
-    {#if !allChecksPassed}
+    {#if staleData}
+      <span class="text-xs text-warning">Live data unavailable</span>
+    {:else if !allChecksPassed}
       <span class="text-xs text-fg-subtle">{checks.filter((c) => !c.done).length} checks remaining</span>
     {/if}
   </div>
