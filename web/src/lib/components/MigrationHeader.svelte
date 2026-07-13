@@ -12,6 +12,10 @@
   export let pipelineRunning: boolean;
   export let pipelinePaused: boolean;
   export let wsConnectionState: string;
+  // What the operator actually configured (authoritative from backend config).
+  // Drives honest awaiting_cutover copy: if automatic is configured AND the
+  // server supports it, say so; otherwise say manual — never the old constant.
+  export let autoCutoverConfigured: boolean = false;
 
   function riskColor(cls: string): string {
     switch (cls) {
@@ -54,7 +58,9 @@
   function operatorGuidance(state: string): string {
     switch (state.toLowerCase()) {
       case 'awaiting_cutover':
-        return 'Manual cutover required: move traffic to the target (DNS / reverse proxy / load balancer), then confirm here to commit. No automatic cutover.';
+        return autoCutoverConfigured
+          ? 'Automatic cutover is configured (fenced). Confirm the switch below to commit — the server will move traffic and verify ownership.'
+          : 'Manual cutover required: move traffic to the target (DNS / reverse proxy / load balancer), then confirm here to commit.';
       case 'needs_manual_intervention':
         return 'Rollback could not complete safely (unsafe or ambiguous replication topology). Review the target manually before any further action.';
       case 'rollback_degraded':

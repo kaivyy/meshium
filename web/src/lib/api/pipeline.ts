@@ -254,10 +254,26 @@ export interface MigrationConfig {
   drainQueuesOnCutover: boolean;
   observationDuration?: number;
   autoRollbackOnError: boolean;
+  // autoCutover opts into the fenced cutover orchestrator. Mirrors the backend
+  // MigrationConfig.AutoCutover JSON field. The backend enforces the support
+  // matrix at the configure boundary — the UI only reflects/enables it per the
+  // fetched policy; it never re-derives the decision.
+  autoCutover?: boolean;
   maxErrorRate?: number;
   maxLatencyMs?: number;
   maxRetries?: number;
   retryDelay?: number;
+}
+
+// --- Support / policy matrix (GET /api/pipeline/policy) ---
+
+export interface PolicyMatrix {
+  autoCutoverDefault: boolean;
+  supportedEngines: string[];
+  supportedTrafficProviders: string[];
+  supportedReplicationModes: string[];
+  supportedExecutionModes: string[];
+  notes: string[];
 }
 
 export interface PipelineActionResponse {
@@ -507,6 +523,11 @@ export interface PlannerResult {
 // --- Pipeline API ---
 
 export const pipelineApi = {
+  // Policy / support matrix (Phase 4E/4G): the authoritative list of what the
+  // server will permit for automatic cutover. UI consumes this; it does not
+  // re-derive support decisions.
+  getPolicy: () => api.get(`/pipeline/policy`) as Promise<PolicyMatrix>,
+
   // Session
   getSession: (id: number) => api.get(`/pipeline/migrations/${id}`) as Promise<MigrationSession>,
   getStages: (id: number) => api.get(`/pipeline/migrations/${id}/stages`) as Promise<PipelineStage[]>,
@@ -556,7 +577,7 @@ export const pipelineApi = {
   getPlannerResult: (id: number) => api.get(`/pipeline/migrations/${id}/planner-result`) as Promise<PlannerResult>,
 
   // Config
-  configure: (id: number, config: MigrationConfig) => api.put(`/pipeline/migrations/${id}/config`, config) as Promise<MigrationConfig>,
+  configure: (id: number, config: Partial<MigrationConfig>) => api.put(`/pipeline/migrations/${id}/config`, config) as Promise<MigrationConfig>,
 
   // Actions
   cutover: (id: number) => api.post(`/pipeline/migrations/${id}/actions/cutover`, {}) as Promise<PipelineActionResponse>,

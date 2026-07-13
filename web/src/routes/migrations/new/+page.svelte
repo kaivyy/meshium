@@ -5,6 +5,13 @@
   import { api } from '$lib/api/client';
   import { toast } from '$lib/stores/toast';
   import { wsPlan, type WSMessage, type PlanRequest } from '$lib/api/migrations';
+  import { pipelineApi, type PolicyMatrix } from '$lib/api/pipeline';
+  import {
+    canAutoCutover,
+    engineSupport,
+    trafficProviderSupport
+  } from '$lib/support-status';
+  import SupportStatusBadge from '$lib/components/SupportStatusBadge.svelte';
   import type { Server } from '$lib/stores/servers';
   import { ArrowLeft, ArrowRight, Check, Package, FileCode, Settings, Users, Loader, Container, Database } from 'lucide-svelte';
 
@@ -22,6 +29,15 @@
   let dbUsername = '';
   let dbPassword = '';
   let dbName = '';
+  // Traffic provider + automatic-cutover selection (Phase 4G, slice 3A). The
+  // backend's /api/pipeline/policy is authoritative for what is selectable as
+  // automatic; this UI only reflects + gates on it. Default provider is empty
+  // (manual) so the shipped default is never automatic.
+  let trafficProvider = '';
+  let autoCutover = false;
+  let policy: PolicyMatrix | null = null;
+  let policyError = '';
+  let configureError = '';
   const DB_DEFAULT_PORTS: Record<string, number> = {
     postgres: 5432,
     mysql: 3306,
@@ -72,6 +88,13 @@
   onMount(async () => {
     try {
       servers = await api.get('/servers') as Server[];
+      // Phase 4G: fetch the authoritative support matrix. If this fails we still
+      // plan (manual default), but cannot offer automatic — degrade honestly.
+      try {
+        policy = await pipelineApi.getPolicy();
+      } catch (e) {
+        policyError = e instanceof Error ? e.message : 'Failed to load support policy';
+      }
 
       const sourceParam = $page.url.searchParams.get('source');
       const targetParam = $page.url.searchParams.get('target');
@@ -92,6 +115,12 @@
       // handle error
     }
   });
+
+  // Prevent a stale opt-in: if the current engine+provider is not permitted for
+  // automatic cutover, clear the checkbox. The backend still enforces at the
+  // configure boundary; this is honest UI feedback, not authorization.
+  $: autoCutoverAllowed = canAutoCutover(dbEngine, trafficProvider, policy).allowed;
+  $: if (autoCutover && !autoCutoverAllowed) autoCutover = false;
 
   onDestroy(() => {
     ws?.close();
@@ -158,6 +187,21 @@
           // Extract migration ID from the message value (format: "migration_id:123")
           const match = msg.value?.match(/migration_id:(\d+)/);
           const newId = match ? match[1] : '';
+          if (newId) {
+            // Phase 4G 3A: persist the operator's provider + cutover choice.
+            // The backend enforces the support matrix at this boundary and returns
+            // 400 with an honest reason if the combination is not permitted —
+            // surface that verbatim rather than suppressing it.
+            configureError = '';
+            pipelineApi
+              .configure(Number(newId), {
+                trafficProvider: trafficProvider || undefined,
+                autoCutover: autoCutoverAllowed ? autoCutover : false,
+              })
+              .catch((e) => {
+                configureError = e instanceof Error ? e.message : 'Failed to apply cutover configuration';
+              });
+          }
           setTimeout(() => {
             if (newId) {
               goto(`/migrations/${newId}/pipeline`);
@@ -353,6 +397,55 @@
           {#if dbEngine === 'redis'}
             <p class="text-xs text-fg-subtle">Redis uses an RDB snapshot (no per-DB name/username); name/username are ignored.</p>
           {/if}
+
+          <!-- Phase 4G 3A: support matrix, derived from GET /api/pipeline/policy.
+               The backend enforces the decision; the UI reflects + gates on it. -->
+          <div class="mt-4 pt-4 border-t border-border space-y-3">
+            <div class="flex flex-wrap items-center gap-2">
+              <span class="text-sm font-medium text-fg">Engine support</span>
+              <SupportStatusBadge level={engineSupport(dbEngine, policy).level} label={engineSupport(dbEngine, policy).label} />
+            </div>
+            {#if policyError}
+              <p class="text-xs text-warning">Support policy unavailable ({policyError}); automatic cutover is disabled. You may still plan a manual migration.</p>
+            {/if}
+
+            <div>
+              <label for="trafficProvider" class="text-xs font-medium text-fg block mb-1">Traffic provider (cutover)</label>
+              <select
+                id="trafficProvider"
+                bind:value={trafficProvider}
+                class="w-full p-2 border border-border rounded text-sm bg-surface"
+              >
+                <option value="">Manual only (operator performs cutover)</option>
+                {#each policy?.supportedTrafficProviders ?? [] as p}
+                  <option value={p}>{p} (automatic, fenced)</option>
+                {/each}
+                {#each (policy?.supportedTrafficProviders ?? []).length ? ['traefik', 'cloudflare', 'docker', 'dns'] : [] as p}
+                  <option value={p} disabled>{p} (manual only — no fenced switcher)</option>
+                {/each}
+              </select>
+            </div>
+
+            <div class="flex flex-wrap items-center gap-2">
+              <span class="text-sm font-medium text-fg">Provider support</span>
+              <SupportStatusBadge level={trafficProviderSupport(trafficProvider, policy).level} label={trafficProviderSupport(trafficProvider, policy).label} />
+            </div>
+
+            <label class="flex items-start gap-2 cursor-pointer">
+              <input
+                type="checkbox"
+                bind:checked={autoCutover}
+                disabled={!autoCutoverAllowed}
+                class="mt-1"
+              />
+              <span class="text-sm text-fg">
+                Automatic cutover (fenced)
+                {#if !autoCutoverAllowed}
+                  <span class="block text-xs text-fg-subtle">{canAutoCutover(dbEngine, trafficProvider, policy).reason}</span>
+                {/if}
+              </span>
+            </label>
+          </div>
         </div>
       {/if}
     </div>
@@ -392,7 +485,21 @@
             </p>
           </div>
         {/if}
+        <div>
+          <p class="text-sm text-fg-subtle">Cutover</p>
+          <p class="font-mono text-xs text-fg-muted">
+            {trafficProvider
+              ? `${trafficProvider}${autoCutoverAllowed && autoCutover ? ' (automatic, fenced)' : ' (manual)'}`
+              : 'Manual — operator performs cutover'}
+          </p>
+        </div>
       </div>
+
+      {#if configureError}
+        <div class="bg-warning/10 border border-warning/30 text-warning rounded-lg p-3 text-sm">
+          Cutover configuration was not applied: {configureError}
+        </div>
+      {/if}
 
       {#if planMessages.length > 0}
         <div class="bg-surface-muted text-fg rounded-lg p-4 max-h-60 overflow-auto">

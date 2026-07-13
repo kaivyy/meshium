@@ -298,6 +298,37 @@ ambiguity; no weakening of the Phase 1–3 safety contract.** Sequencing:
   (previously only failed closed at switch). No expansion weakened the Phase 1–3
   safety contract.
 
+#### 4G — UI truthfulness, operator UX & release-parity audit (IN PROGRESS)
+- **Mandate:** UI is NOT the source of truth. Backend stays authoritative for
+  authz, fencing, legal transitions, action gating, idempotency, cutover/rollback
+  legality. The UI only *reflects* or *guides*; it never re-derives a safety
+  decision the server makes. Immutable rules: never show a stronger capability
+  than backend evidence supports; show support status + why + upgrade + next step;
+  surface ambiguity rather than optimistic success; never imply rollback is safe
+  after target writes; never present stale live data as realtime; never expose
+  secrets; never make destructive actions too easy/ambiguous. Wording default
+  "minimal-downtime migration" — no universal "zero downtime".
+- **Slice 3A — support matrix & truthfulness (DONE):**
+  - Consumes the existing `GET /api/pipeline/policy` (`PolicyMatrix`) — the
+    frontend previously ignored it entirely.
+  - Adds `autoCutover` to the `MigrationConfig` TS type + wizard; after a plan
+    succeeds the wizard calls `configure()` and surfaces any 400 verbatim
+    (backend `validateConfigSupport` is authoritative).
+  - New canonical model `lib/support-status.ts` + shared
+    `SupportStatusBadge.svelte` (color **+ text + icon**, never color alone)
+    classifying automatic / manual / degraded / blocked / deferred / unknown from
+    the policy — and degrading to `unknown` (not `deferred`) when policy is
+    unloaded, so the UI never over-claims.
+  - Wizard gains a traffic-provider `<select>` (nginx/haproxy/caddy = automatic
+    fenced; traefik/cloudflare/docker/dns = manual-only, disabled) and a gated
+    automatic-cutover checkbox that shows the exact policy reason when disabled.
+  - Fixes `MigrationHeader` hard-coded "No automatic cutover": the `awaiting_cutover`
+    copy is now derived from the migration's own `autoCutover` config flag.
+  - Fixes the migrations list badge/dot to cover all 20 states
+    (`awaiting_cutover`, `needs_manual_intervention`, `rollback_degraded`,
+    `interrupted`) instead of silently de-emphasizing them.
+  - `npm run check` clean; 22 unit assertions on the support-status model pass.
+
 ### Phase 2C — additional cutover engines & traffic providers
 
 Extends the Phase 2A fenced PostgreSQL cutover to **MySQL (seeded)** and

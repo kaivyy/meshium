@@ -69,6 +69,10 @@
       case 'running': return 'bg-info/15 text-info';
       case 'planned': return 'bg-surface-muted text-fg-muted';
       case 'rolled_back': return 'bg-warning/15 text-warning';
+      case 'awaiting_cutover': return 'bg-accent/15 text-accent';
+      case 'needs_manual_intervention': return 'bg-error/15 text-error';
+      case 'rollback_degraded': return 'bg-warning/15 text-warning';
+      case 'interrupted': return 'bg-error/15 text-error';
       default: return 'bg-surface-muted text-fg-muted';
     }
   }
@@ -80,6 +84,10 @@
       case 'running': return 'bg-info animate-pulse';
       case 'planned': return 'bg-fg-subtle';
       case 'rolled_back': return 'bg-warning';
+      case 'awaiting_cutover': return 'bg-accent animate-pulse';
+      case 'needs_manual_intervention': return 'bg-error';
+      case 'rollback_degraded': return 'bg-warning';
+      case 'interrupted': return 'bg-error animate-pulse';
       default: return 'bg-fg-subtle';
     }
   }

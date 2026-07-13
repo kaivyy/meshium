@@ -1014,6 +1014,7 @@
     {pipelineRunning}
     {pipelinePaused}
     {wsConnectionState}
+    autoCutoverConfigured={config?.autoCutover ?? false}
   />
 
   <!-- ═══ PIPELINE STEPPER ═══ -->
