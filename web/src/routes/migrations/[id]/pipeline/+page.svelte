@@ -21,6 +21,7 @@
   import CutoverChecklist from '$lib/components/CutoverChecklist.svelte';
   import ObservationPanel from '$lib/components/ObservationPanel.svelte';
   import BottomTabs from '$lib/components/BottomTabs.svelte';
+  import CompatibilityChecklist from '$lib/components/CompatibilityChecklist.svelte';
 
   const migrationId = parseInt($page.params.id ?? '0', 10);
 
@@ -957,15 +958,6 @@
     }
   }
 
-  function severityColor(sev: string): string {
-    switch (sev) {
-      case 'critical': return 'bg-error/15 text-error border-error/30';
-      case 'high': return 'bg-warning/15 text-warning border-warning/30';
-      case 'warning': return 'bg-warning/15 text-warning border-warning/30';
-      default: return 'bg-info/15 text-info border-info/30';
-    }
-  }
-
   const availableCategories = ['packages', 'configs', 'services', 'users', 'docker'];
 
   function toggleCategory(cat: string) {
@@ -1178,19 +1170,7 @@
             </button>
           </div>
           {#if compatibilityResults.length > 0}
-            <div class="space-y-2">
-              {#each compatibilityResults as result}
-                <div class="bg-surface-muted rounded-lg p-3 flex items-center gap-4">
-                  <div class="px-2 py-1 rounded text-xs font-medium border {severityColor(result.severity)}">{result.severity.toUpperCase()}</div>
-                  <div class="flex-1"><div class="font-medium text-sm">{result.checkName}</div><div class="text-xs text-fg-subtle">{result.message}</div></div>
-                  {#if result.passed}
-                    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" class="text-success"><path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"/><polyline points="22 4 12 14.01 9 11.01"/></svg>
-                  {:else}
-                    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" class="text-error"><circle cx="12" cy="12" r="10"/><line x1="15" y1="9" x2="9" y2="15"/><line x1="9" y1="9" x2="15" y2="15"/></svg>
-                  {/if}
-                </div>
-              {/each}
-            </div>
+            <CompatibilityChecklist results={compatibilityResults} />
           {:else if actionLoading || compatProgress.length}
             <!-- LIVE PROGRESS: per-check checklist built from the WS stream -->
             <div class="space-y-2 mb-3">
