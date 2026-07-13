@@ -113,6 +113,59 @@ operator-safe, and release-gate ready**. Immutable baselines (Phase 1, 2A, 2B,
   `docs/known-limitations.md`; operator recovery scope in
   `docs/runbooks/operator-recovery.md`.
 
+### Phase 3 — cross-engine cutover certification (3A PostgreSQL, 3B MySQL, 3C Redis, 3D MongoDB)
+
+Certifies the cutover capability, honestly and with real local Docker evidence,
+one engine at a time. Immutable baselines preserved. Full report:
+`docs/superpowers/specs/phase-3-final-report.md`; live matrix:
+`docs/superpowers/specs/phase-3-compatibility-matrix.md`.
+
+- **PostgreSQL — `automatic` (VERIFIED, 3A).** Physical replication (slot +
+  `pg_basebackup` seed); `WaitForCatchUp` from `pg_stat_replication`; promote via
+  `pg_promote()`; source freeze (`default_transaction_read_only=on`, verified —
+  non-super writes rejected post-freeze, closing the dual-writer window);
+  `AssertHolds` fails closed on expired/conflicting fence. 4 live integration
+  tests.
+- **MySQL — `automatic` (VERIFIED, 3B).** Seeded replication (dump *before*
+  `CHANGE REPLICATION SOURCE TO`); source freeze `read_only=ON` +
+  `super_read_only=ON` held; non-SUPER `appuser` write rejected post-freeze in a
+  full fenced orchestrator run. Three real MySQL 8.4 production bugs surfaced
+  and fixed during certification: `SHOW MASTER STATUS`→`SHOW BINARY LOG STATUS`,
+  `SHOW SLAVE STATUS`→`SHOW REPLICA STATUS` (`Seconds_Behind_Master`→
+  `Seconds_Behind_Source`), and a `CutoverPreflight` self-contradiction on the
+  post-freeze re-check (fixed with a stage-aware `sourceFrozen` param). 3 live
+  integration tests.
+- **Redis — `degraded` (VERIFIED, 3C).** Live master/replica proves
+  preflight→`REPLICAOF NO ONE`→`role:master` with seeded data intact. No source
+  freeze primitive exists → `CutoverFreezeSource` returns `ErrNoSourceFreeze`;
+  RPO is *minimal*, never *zero*. Never selectable as `automatic` (rule #11). 1
+  live integration test.
+- **MongoDB — `blocked` (automatic) / `manual` (VERIFIED, 3D).** `mongoDBLag`
+  now measures replica-set lag via `rs.status()` `optimeDate` (B4 closed);
+  `preflightMongoDB` re-queries roles at the gate and returns a manual-eligible
+  verdict; `promoteMongoDB` hardened to **fail closed** — never issues
+  `rs.stepDown`/`rs.remove` against the live source (no freeze primitive;
+  promotion would reconfigure the source set, out-of-bounds per rules #3/#8). 1
+  live integration test + 3 unit.
+- **Immutable guards verified not regressed:** `AutoCutoverDefault=false`;
+  `AssertHolds` before every mutation; no `ForceTransition(Committed)`; no global
+  "zero downtime" claim; central redaction; idempotency keys; audit + correlation
+  IDs; ownership = read-after-write, never provider success alone; unsupported
+  engine/provider/topology not selectable as `automatic`.
+
+### Phase 4 — production expansion & certification (IN PROGRESS, starts with investigation)
+
+Program to make Meshium production-grade for broader use: topology expansion
+(host / Docker container / Docker Compose / bastion), traffic-provider expansion
+(one provider per increment), WAN/large-scale transfer, advanced database
+scenarios, enterprise operations/policy, and final release certification.
+**Controlled, one compatibility axis per increment; every support claim backed
+by real local integration + failure-injection evidence; fail-closed on
+ambiguity; no weakening of the Phase 1–3 safety contract.** Sequencing:
+4A topology → 4B provider → 4C WAN/transfer → 4D advanced DB → 4E enterprise →
+4F certification. Investigation doc:
+`docs/superpowers/specs/phase-4-investigation.md` (pending).
+
 ### Phase 2C — additional cutover engines & traffic providers
 
 Extends the Phase 2A fenced PostgreSQL cutover to **MySQL (seeded)** and
