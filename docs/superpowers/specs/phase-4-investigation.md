@@ -67,7 +67,7 @@ correlation IDs; ownership = read-after-write. (See phase-3-final-report.md §3.
 | host→host (SSH) | direct SSH | proven (3A) | proven (3B) | proven (3C) | proven (3D) | none for host mode itself |
 | Docker container pair | `docker exec` | unit only | **live (3B)** | **live (3C)** | **live (3D)** | PG container pair has no live test yet |
 | Docker Compose pair | `docker compose exec -T` | **automatic (VERIFIED 4A)** | unverified | unverified | unverified | `compose exec` quoting + service-discovery now verified for PG via `TestPGComposeCutoverLive` |
-| bastion/jump-host | `ssh -J` / `dialBastion` | implemented, unverified | implemented, unverified | implemented, unverified | implemented, unverified | no cutover integration test through bastion |
+| bastion/jump-host | `ssh -J` / `dialBastion` | implemented, unverified | implemented, unverified | implemented, unverified | implemented, unverified | **4A follow-on:** `dialBastion` transport implemented; no live cutover integration test through a jump host yet (per-host executer via multi-hop ProxyJump not wired to cutover primitives) |
 
 **Assumptions common to all modes:** source→target direct connectivity (or via
 SSH/bastion); DB client binaries present on the execution surface; credentials
