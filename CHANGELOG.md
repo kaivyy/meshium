@@ -243,6 +243,30 @@ ambiguity; no weakening of the Phase 1–3 safety contract.** Sequencing:
   machine), so logical cutover is documented as `degraded`/scoped, not claimed
   `automatic`. Wiring it to the fenced traffic switcher is a follow-on.
 
+#### 4E — enterprise operations / policy controls (server-side policy engine)
+- **Single source-of-truth support/guardrail engine** (`internal/mod/migration/policy.go`).
+  The support decisions were scattered across three package-level maps
+  (`supportedTrafficProviders`, `supportedReplicationModes`, `supportedExecutionModes`)
+  plus the `cutoverEngineType()` switch — enforced only at API validation time,
+  with a *different* re-derivation at the cutover stage. `PolicyEngine` unifies
+  them into one surface consulted at BOTH boundaries: `validateConfigSupport`
+  (API) and `CheckAutoCutover` (execution, inside `runAutoCutover` before the
+  lease is acquired). A config that passes POST can no longer reach a divergent
+  decision at cutover — the honesty contract (directive rules #4/#8) is now
+  enforced where the mutation actually happens, fail-closed with an explicit,
+  actionable error.
+- **Operator introspection endpoint** `GET /api/pipeline/policy` returns the full
+  `PolicyMatrix` (supported engines, traffic providers, replication modes,
+  execution modes, `autoCutoverDefault`, and honest caveats: mongodb has no safe
+  automatic cutover contract; redis has no source-freeze → degraded; automatic
+  cutover is opt-in). Auditable, no surprises.
+- **No fence/state-machine change.** 4E only centralizes the *support decision*;
+  the fenced orchestrator, lease, idempotency, and fail-closed behavior are
+  untouched. Unit-tested (`policy_test.go`): guardrail unification matches the
+  legacy maps, engine/provider execution-time gates, config-support mirrors
+  validate, and the policy endpoint serves the matrix.
+
+
 ### Phase 2C — additional cutover engines & traffic providers
 
 Extends the Phase 2A fenced PostgreSQL cutover to **MySQL (seeded)** and

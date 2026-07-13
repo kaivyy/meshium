@@ -134,6 +134,7 @@ func (h *PipelineHandler) RegisterRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("/api/pipeline/audit/", withRequestID(h.handleAudit))
 	mux.HandleFunc("/api/pipeline/diagnostics/", withRequestID(h.handleDiagnostics))
 	mux.HandleFunc("/api/pipeline/recovery/", withRequestID(h.handleRecovery))
+	mux.HandleFunc("/api/pipeline/policy", withRequestID(h.handlePolicy))
 
 	// WebSocket endpoints (id minted at the command boundary, not here)
 	mux.HandleFunc("/ws/pipeline/", h.handlePipelineWS)
@@ -655,18 +656,11 @@ var supportedReplicationModes = map[ReplicationMode]bool{
 
 // validateConfigSupport rejects config that selects an unsupported
 // provider/replication engine at the API boundary, so a client is told up
-// front instead of discovering it via a fail-closed cutover mid-migration.
+// front instead of discovering it via a fail-closed cutover mid-migration. It
+// delegates to the single PolicyEngine surface (DefaultPolicy) so the API
+// boundary and execution time cannot drift (Phase 4E).
 func validateConfigSupport(config *MigrationConfig) error {
-	if config == nil {
-		return nil
-	}
-	if config.TrafficProvider != "" && !supportedTrafficProviders[config.TrafficProvider] {
-		return fmt.Errorf("unsupported traffic provider %q: must be one of the supported providers", config.TrafficProvider)
-	}
-	if config.ReplicationMode != "" && !supportedReplicationModes[config.ReplicationMode] {
-		return fmt.Errorf("unsupported replication mode %q: must be one of the supported modes", config.ReplicationMode)
-	}
-	return nil
+	return DefaultPolicy.CheckConfigSupport(config)
 }
 
 func (h *PipelineHandler) handleConfigByID(w http.ResponseWriter, r *http.Request, id int) {
@@ -1338,6 +1332,19 @@ func (h *PipelineHandler) handleRecovery(w http.ResponseWriter, r *http.Request)
 	}
 
 	shared.WriteJSON(w, http.StatusOK, recoveryGuidance(state))
+}
+
+// handlePolicy exposes the current support/guardrail policy (Phase 4E) as an
+// introspectable snapshot. Operators and tooling can audit exactly what the
+// server will permit for automatic cutover — the same single source of truth
+// enforced at the API boundary (validateConfigSupport) and at execution time
+// (runAutoCutover via CheckAutoCutover).
+func (h *PipelineHandler) handlePolicy(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		shared.WriteError(w, http.StatusMethodNotAllowed, "method not allowed", "METHOD_NOT_ALLOWED")
+		return
+	}
+	shared.WriteJSON(w, http.StatusOK, DefaultPolicy.Matrix())
 }
 
 func (h *PipelineHandler) handleQueueByID(w http.ResponseWriter, r *http.Request, id int) {

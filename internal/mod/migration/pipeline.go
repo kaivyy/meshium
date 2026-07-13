@@ -138,7 +138,7 @@ func (p *Pipeline) registerDefaultStages() {
 		&liveReplicationStage{repo: p.repo},
 		&healthVerificationStage{repo: p.repo},
 		&preCutoverValidationStage{repo: p.repo},
-		&trafficSwitchStage{repo: p.repo},
+		&trafficSwitchStage{repo: p.repo, policy: DefaultPolicy},
 		&postCutoverObservationStage{repo: p.repo},
 		&finalizationStage{repo: p.repo, registry: p.registry},
 		&archiveStage{repo: p.repo},
@@ -1931,7 +1931,19 @@ func (s *preCutoverValidationStage) Rollback(ctx context.Context, pc *PipelineCo
 // never moved any traffic, this stage records the checkpoint as manual_required
 // and tells the operator to perform the cutover themselves.
 type trafficSwitchStage struct {
-	repo PipelineRepo
+	repo   PipelineRepo
+	policy *PolicyEngine
+}
+
+// policy returns the active policy engine, defaulting to the process-wide
+// DefaultPolicy when the stage was constructed without one (the unit tests build
+// the stage with only `repo`). This keeps the API-boundary decision and the
+// execution-time decision on the same surface.
+func (s *trafficSwitchStage) policyEngine() *PolicyEngine {
+	if s.policy != nil {
+		return s.policy
+	}
+	return DefaultPolicy
 }
 
 // trafficSwitchManualState is the switch_state persisted for the traffic switch
@@ -2046,6 +2058,14 @@ func (s *trafficSwitchStage) runAutoCutover(ctx context.Context, pc *PipelineCon
 	dc := pc.Config.DatabaseConfig
 	if dc == nil {
 		return s.failAutoCutover(ctx, pc, nil, fmt.Errorf("autoCutover requires a DatabaseConfig"))
+	}
+	// Execution-time policy gate: enforce the engine/provider support decision
+	// where the cutover actually happens — not only at POST time. This is the
+	// single-source-of-truth check (CheckAutoCutover) shared with the API
+	// boundary, so a config that sneaks past validation still fails closed here,
+	// before any lease is acquired or mutation attempted.
+	if err := s.policyEngine().CheckAutoCutover(dc.Engine, pc.Config.TrafficProvider); err != nil {
+		return s.failAutoCutover(ctx, pc, nil, err)
 	}
 	dbType, ok := cutoverEngineType(dc.Engine)
 	if !ok {

@@ -166,7 +166,12 @@ prevent dual-writer ambiguity safely).
 gating which engine/provider/topology/automatic-cutover is allowed (reusing the
 existing `supported*` maps as enforcement, not just validation), because it
 directly extends the honesty contract without touching the fence/state machine.
-RBAC/external-secret-manager are larger and can follow.
+RBAC/external-secret-manager are larger and can follow. **RESOLVED (4E):** the
+four scattered guardrails are now unified in `PolicyEngine` (`policy.go`),
+enforced at both the API boundary (`validateConfigSupport`) and execution time
+(`CheckAutoCutover` inside `runAutoCutover`, before lease acquire). An operator
+endpoint `GET /api/pipeline/policy` exposes the full matrix. The fenced
+orchestrator/lease/idempotency are untouched.
 
 ## G. Test environment inventory
 
