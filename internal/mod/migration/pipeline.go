@@ -2221,8 +2221,10 @@ func newTrafficSwitcher(provider TrafficProvider, ssh SSHExecuter) (trafficSwitc
 		return NewNginxSwitcher(ssh, nil), nil
 	case TrafficProviderHAProxy:
 		return NewHAProxySwitcher(ssh, nil), nil
+	case TrafficProviderCaddy:
+		return NewCaddySwitcher(ssh, nil), nil
 	default:
-		return nil, fmt.Errorf("autoCutover: traffic provider %q has no fenced switcher (supported: nginx, haproxy)", provider)
+		return nil, fmt.Errorf("autoCutover: traffic provider %q has no fenced switcher (supported: nginx, haproxy, caddy)", provider)
 	}
 }
 

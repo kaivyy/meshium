@@ -184,6 +184,25 @@ ambiguity; no weakening of the Phase 1–3 safety contract.** Sequencing:
   certifies topology for restart reconciliation. PostgreSQL Compose pair is now
   `automatic` (was `possible`/unverified).
 
+#### 4B — traffic-provider expansion + guardrail tightening
+- **Caddy fenced traffic switcher** (`internal/mod/migration/caddy_switch.go`).
+  Third provider with a real fenced switcher mirroring `NginxSwitcher`/
+  `HAProxySwitcher`: idempotent full-replacement upload, `caddy validate`,
+  `caddy reload --config … --adapter caddyfile`, read-after-write ownership
+  verification via VerifyURL/VerifyHeader/VerifyValue, and sanitized
+  (secret-redacted) persistence. Wired into `newTrafficSwitcher` (pipeline.go).
+  Live-verified by `TestCaddySwitcherLive` against a real `caddy:2-alpine`
+  container: config swap, reload, and a real GET proving the traffic marker moved
+  from `source` to `target`.
+- **API guardrail tightened (finding A.2-1).** `supportedTrafficProviders` now
+  lists ONLY providers with a real fenced switcher (nginx, haproxy, caddy). The
+  other 4 (traefik, cloudflare, docker, dns) are no longer selectable as
+  automatic switches — `validateConfigSupport` rejects them at the API boundary
+  instead of failing closed mid-cutover at `newTrafficSwitcher`. They remain
+  selectable only as manual switches via the legacy `TrafficSwitchEngine`.
+  Unit-tested: `guardrail_test.go` (`TestSupportedProviderGuardrail`),
+  `phase2c_dispatch_test.go` (`TestNewTrafficSwitcherSupported`).
+
 ### Phase 2C — additional cutover engines & traffic providers
 
 Extends the Phase 2A fenced PostgreSQL cutover to **MySQL (seeded)** and

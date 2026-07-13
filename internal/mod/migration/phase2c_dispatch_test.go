@@ -31,16 +31,16 @@ func TestCutoverEngineTypeSupported(t *testing.T) {
 	}
 }
 
-// TestNewTrafficSwitcherSupported: only nginx and haproxy have fenced
-// switchers; any other provider fails closed.
+// TestNewTrafficSwitcherSupported: nginx, haproxy, and caddy (Phase 4B) have
+// real fenced switchers; any other provider fails closed.
 func TestNewTrafficSwitcherSupported(t *testing.T) {
-	for _, p := range []TrafficProvider{TrafficProviderNginx, TrafficProviderHAProxy} {
+	for _, p := range []TrafficProvider{TrafficProviderNginx, TrafficProviderHAProxy, TrafficProviderCaddy} {
 		s, err := newTrafficSwitcher(p, nil)
 		if err != nil || s == nil {
 			t.Fatalf("provider %q should be supported: err=%v", p, err)
 		}
 	}
-	for _, p := range []TrafficProvider{TrafficProviderCloudflare, TrafficProviderTraefik, TrafficProviderCaddy, TrafficProviderDocker, TrafficProviderDNS, ""} {
+	for _, p := range []TrafficProvider{TrafficProviderCloudflare, TrafficProviderTraefik, TrafficProviderDocker, TrafficProviderDNS, ""} {
 		_, err := newTrafficSwitcher(p, nil)
 		if err == nil {
 			t.Fatalf("provider %q should be unsupported (fail closed)", p)

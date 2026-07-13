@@ -4,14 +4,15 @@ import (
 	"testing"
 )
 
-// TestSupportedProviderGuardrail asserts the API guardrail accepts the supported
-// traffic providers and rejects anything outside the proven fail-closed set, so
-// a client cannot select a provider with no fenced switcher.
+// TestSupportedProviderGuardrail asserts the API guardrail accepts ONLY the
+// providers that have a real fenced switcher with read-after-write ownership
+// verification (nginx, haproxy, caddy — Phase 4B). Everything else is rejected
+// at the API boundary (finding A.2-1): traefik/cloudflare/caddy/docker/dns were
+// once selectable but had no switcher and failed closed only at cutover runtime.
+// The empty provider ("") is permitted (means "no traffic switch configured").
 func TestSupportedProviderGuardrail(t *testing.T) {
 	ok := []TrafficProvider{
-		TrafficProviderNginx, TrafficProviderHAProxy, TrafficProviderTraefik,
-		TrafficProviderCloudflare, TrafficProviderCaddy, TrafficProviderDocker,
-		TrafficProviderDNS, "",
+		TrafficProviderNginx, TrafficProviderHAProxy, TrafficProviderCaddy, "",
 	}
 	for _, p := range ok {
 		if err := validateConfigSupport(&MigrationConfig{TrafficProvider: p}); err != nil {
@@ -19,7 +20,11 @@ func TestSupportedProviderGuardrail(t *testing.T) {
 		}
 	}
 
-	bad := []TrafficProvider{"aws-alb", "istio", "magic-wand"}
+	// Providers with no fenced switcher: rejected at the API boundary, fail closed.
+	bad := []TrafficProvider{
+		TrafficProviderTraefik, TrafficProviderCloudflare, TrafficProviderDocker,
+		TrafficProviderDNS, "aws-alb", "istio", "magic-wand",
+	}
 	for _, p := range bad {
 		if err := validateConfigSupport(&MigrationConfig{TrafficProvider: p}); err == nil {
 			t.Fatalf("provider %q must be rejected at the API boundary", p)

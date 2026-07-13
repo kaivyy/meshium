@@ -26,13 +26,16 @@
 | docker | no | no | **selectable but fails closed** ⚠️ |
 | dns | no | no | **selectable but fails closed** ⚠️ |
 
-**Finding (A.2‑1):** `supportedTrafficProviders` (pipeline_handler.go:634) lists 7
-providers as selectable, but only nginx/haproxvy have fenced switchers. The other
-5 are accepted by the API then rejected at `newTrafficSwitcher`. This is a
-**documentation/UX honesty gap**, not a safety hole (it fails closed). Phase 4B
-must either (a) implement one new provider with a real switcher, or (b) tighten
-the API guardrail so unsupported providers are blocked at validation, not at
-runtime. Default 4B choice: implement one locally-verifiable provider.
+**Finding (A.2‑1):** `supportedTrafficProviders` (pipeline_handler.go) listed 7
+providers as selectable, but only nginx/haproxy had fenced switchers; the other
+5 were accepted by the API then rejected at `newTrafficSwitcher`. This was a
+**documentation/UX honesty gap** (it failed closed, so not unsafe). Phase 4B
+RESOLVED it by doing BOTH: (a) added a real fenced switcher for **caddy** with
+read-after-write ownership proof (`NewCaddySwitcher`, live-tested via
+`TestCaddySwitcherLive`), and (b) tightened the guardrail so only providers with
+a real switcher (nginx, haproxy, caddy) are selectable as automatic switches;
+traefik/cloudflare/docker/dns are now rejected at API validation
+(`validateConfigSupport`), not at cutover runtime.
 
 ### A.3 Replication modes (`supportedReplicationModes`, pipeline_handler.go)
 none / streaming / logical / replica / dump — all "supported" as a strategy set;
@@ -187,11 +190,12 @@ chosen from the findings above:
    (VERIFIED 4A, `TestPGComposeCutoverLive`). Next: bastion (via
    `ssh -J` / `dialBastion`), then expand the container pair to MySQL/Redis/Mongo.
    One execution mode at a time.
-2. **4B provider** — first increment: **one locally-verifiable provider**
-   (application-config switch or second reverse-proxy adapter) with
-   read-after-write ownership; ALSO tighten the API guardrail so the 5
-   unsupported providers are blocked at validation (finding A.2‑1). External
-   providers stay blocked without staging creds.
+2. **4B provider** — first increment: **Caddy** added as a real fenced provider
+   with read-after-write ownership (`NewCaddySwitcher`, `TestCaddySwitcherLive`);
+   ALSO tightened the API guardrail so only nginx/haproxy/caddy are selectable as
+   automatic switches and the 4 unsupported providers are blocked at validation
+   (finding A.2‑1, VERIFIED 4B). External providers (cloudflare/dns) stay blocked
+   without staging creds.
 3. **4C WAN/transfer** — first increment: **prove resume/integrity under
    killed-process + SSH-drop + large synthetic tree**, add persisted progress;
    do NOT replace rsync.

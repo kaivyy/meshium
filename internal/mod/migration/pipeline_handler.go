@@ -627,18 +627,20 @@ func warnTransferLimitsHonesty(ctx context.Context, config *MigrationConfig) {
 }
 
 // supportedTrafficProviders is the runtime guardrail consulted at API
-// validation. Selectable providers are exactly those Phase 2C proved fail
-// closed for unsupported switches — the UI/API cannot select one that lacks a
-// fenced switcher or an honest enforcement path. Empty provider is permitted
-// (means "no traffic switch configured yet").
+// validation. It lists ONLY providers that have a real fenced switcher with
+// read-after-write ownership verification (newTrafficSwitcher in pipeline.go)
+// — nginx, haproxy, and (from Phase 4B) caddy. Every other provider once
+// selectable here had NO switcher and failed closed only at cutover runtime
+// (finding A.2-1); that is a documentation/UX honesty gap. We now block them at
+// the API boundary so a client is told up front, not mid-migration.
+//
+// The legacy TrafficSwitchEngine.Switch in traffic.go still references the
+// other provider constants for the MANUAL switch path; they remain defined as
+// enum values but are not selectable as automatic switches.
 var supportedTrafficProviders = map[TrafficProvider]bool{
-	TrafficProviderNginx:      true,
-	TrafficProviderHAProxy:    true,
-	TrafficProviderTraefik:    true,
-	TrafficProviderCloudflare: true,
-	TrafficProviderCaddy:      true,
-	TrafficProviderDocker:     true,
-	TrafficProviderDNS:        true,
+	TrafficProviderNginx:   true,
+	TrafficProviderHAProxy: true,
+	TrafficProviderCaddy:   true,
 }
 
 // supportedReplicationModes is the runtime guardrail for the replication

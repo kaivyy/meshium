@@ -59,15 +59,18 @@ shipped default is always `manual` — this is the immutable baseline.
 |---|---|---|---|---|
 | nginx | `degraded`/`blocked` (3A) | `automatic` (3B) | `degraded` (3C) | blocked |
 | haproxy | `degraded`/`blocked` (3A) | `automatic` (3B) | `degraded` (3C) | blocked |
+| caddy | `degraded`/`blocked` (4B) | `degraded`/`blocked` (4B) | `degraded`/`blocked` (4B) | blocked |
 | traefik | blocked | blocked | blocked | blocked |
-| caddy | blocked | blocked | blocked | blocked |
 | cloudflare | blocked | blocked | blocked | blocked |
 | docker | blocked | blocked | blocked | blocked |
 | dns | blocked | blocked | blocked | blocked |
 
-Only nginx + haproxy dispatch in `newTrafficSwitcher`. All others fail closed
-at pipeline.go:2225. Ownership is proven only by read-after-write, never by
-provider success alone (directive rule #4).
+Only nginx, haproxy, and caddy have real fenced switchers with read-after-write
+ownership verification (`newTrafficSwitcher`, pipeline.go). traefik/cloudflare/
+docker/dns are selectable only as MANUAL switches (legacy TrafficSwitchEngine) —
+they are **not** selectable as automatic switches (blocked at API validation,
+finding A.2-1 / Phase 4B guardrail). Ownership is proven only by read-after-write,
+never by provider success alone (directive rule #4).
 
 ## 5. Per-engine acceptance criteria (must hold before a cell becomes `automatic`)
 
