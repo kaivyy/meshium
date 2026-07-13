@@ -378,3 +378,94 @@ func TestFencedCutoverWithRealPG(t *testing.T) {
 		t.Fatalf("target not promoted after orchestrated cutover: recovery=%q", strings.TrimSpace(r))
 	}
 }
+
+// TestPGSourceFreezeClosesWrites proves Phase 3A / B1: the fenced cutover now
+// physically freezes the PostgreSQL source (default_transaction_read_only=on,
+// verified) and an application (non-superuser) role can no longer write. The
+// Superuser bypass is documented explicitly — the freeze targets app writes,
+// not operators holding the lease.
+//
+// It drives the real orchestrator (real FencingAuthority + ReplicationEngine)
+// against a live pair; traffic switching is faked. After the run, it asserts the
+// source read_only GUC is on and that a non-superuser INSERT is rejected.
+func TestPGSourceFreezeClosesWrites(t *testing.T) {
+	pair := setupPGPair(t)
+
+	// Create an application role that is NOT a superuser and grant it write
+	// access to the probe table. This models a real app connection. The seed
+	// table cutover_probe lives in the postgres superuser's default database
+	// (runSQL uses no -d), so we target that DB. We connect appuser over TCP
+	// with a trust rule (mirroring how seedSource opens the replicator).
+	runSQL(t, pair.srcExec, "CREATE ROLE appuser LOGIN PASSWORD 'app' CONNECTION LIMIT 5;")
+	runSQL(t, pair.srcExec, "GRANT CONNECT ON DATABASE postgres TO appuser;")
+	runSQL(t, pair.srcExec, "GRANT USAGE ON SCHEMA public TO appuser;")
+	runSQL(t, pair.srcExec, "GRANT SELECT, INSERT, UPDATE, DELETE ON cutover_probe TO appuser;")
+	appendHBA(t, pair.srcExec, "host all appuser all trust")
+	runSQL(t, pair.srcExec, "SELECT pg_reload_conf();")
+
+	// Baseline: appuser CAN write before the cutover fence is applied.
+	appWrite := func() (string, int) {
+		out, _, rc, _ := pair.srcExec.ExecContext(context.Background(),
+			"psql -h 127.0.0.1 -U appuser -d postgres -tAc " +
+				shQuote("INSERT INTO cutover_probe VALUES (100, 'pre-freeze') ON CONFLICT DO NOTHING; SELECT 'ok';"))
+		return out, rc
+	}
+	if out, rc := appWrite(); rc != 0 || !strings.Contains(out, "ok") {
+		t.Fatalf("appuser should be able to write before freeze (rc=%d): %s", rc, out)
+	}
+
+	database, _ := newTestDB(t)
+	repo := NewRepo(database).(*sqliteRepo)
+	for _, sid := range []int{1, 2} {
+		if _, err := database.Exec(
+			`INSERT INTO servers (id, name, host, port, username) VALUES (?, ?, ?, ?, ?)`,
+			sid, "srv", "127.0.0.1", 22, "u"); err != nil {
+			t.Fatalf("seed server %d: %v", sid, err)
+		}
+	}
+	if _, err := database.Exec(
+		`INSERT INTO migrations (id, source_id, target_id, categories, status) VALUES (1, 1, 2, ?, ?)`,
+		"postgres", "planned"); err != nil {
+		t.Fatalf("seed migration: %v", err)
+	}
+	if _, err := repo.CreateStage(context.Background(), 1, string(StageTrafficSwitch), 0); err != nil {
+		t.Fatalf("create stage: %v", err)
+	}
+
+	auth := &FencingAuthority{repo: repo, clock: realClock{}, ttl: FenceTTL}
+	machine := newCutoverMachine(repo, auth, 1)
+	eng := NewReplicationEngine(pair.srcExec, pair.tgtExec, repo)
+	o := NewCutoverOrchestrator(machine, auth, eng, &fakeTrafficSwitch{})
+
+	out, err := o.Run(context.Background(), CutoverRequest{
+		MigrationID:   1,
+		Holder:        "meshium-freeze",
+		Replication:    pgReplConfig(),
+		TrafficRequest: nginxSwitchReq("http://verify/health"),
+		MaxLagSeconds:  1,
+		ObserveFor:     200 * time.Millisecond,
+	})
+	if err != nil {
+		t.Fatalf("orchestrator run: %v (out=%+v)", err, out)
+	}
+	if !out.Completed {
+		t.Fatalf("cutover not completed: %+v", out)
+	}
+
+	// The source read_only GUC must now be ON (the freeze primitive verified it).
+	guc, _, _, _ := pair.srcExec.ExecContext(context.Background(),
+		"psql -tAc 'SHOW default_transaction_read_only;'")
+	if strings.TrimSpace(guc) != "on" {
+		t.Fatalf("source default_transaction_read_only=%q, expected on after freeze", strings.TrimSpace(guc))
+	}
+
+	// appuser (non-superuser) must now be REJECTED on write — the dual-writer
+	// window is closed for application traffic.
+	wo, wrc := appWrite()
+	if wrc == 0 {
+		t.Fatalf("appuser still able to write after freeze (dual-writer window open): %s", wo)
+	}
+	if !strings.Contains(wo, "cannot execute") && !strings.Contains(wo, "read-only") {
+		t.Fatalf("appuser write not rejected as read-only (rc=%d): %s", wrc, wo)
+	}
+}

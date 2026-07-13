@@ -121,6 +121,59 @@ func (e *ReplicationEngine) CutoverPromote(ctx context.Context, config Replicati
 	}
 }
 
+// ErrNoSourceFreeze is returned by CutoverFreezeSource for engines that cannot
+// physically enforce a write-freeze on the source (Redis, MySQL today). It is
+// NOT fatal: the orchestrator records it as a degraded-but-continuable condition
+// (manual freeze required) so it never silently claims RPO=0 for an engine whose
+// source can still accept writes during the cutover window.
+var ErrNoSourceFreeze = fmt.Errorf("source write-freeze not supported for engine")
+
+// CutoverFreezeSource closes the dual-writer window by freezing writes on the
+// SOURCE before the target is promoted. It is the physical complement to the
+// lease (which serializes the cutover): the lease forbids proceeding without a
+// held fence; the freeze physically stops app writes on the source. It runs
+// behind the orchestrator's AssertHolds gate. Engines that cannot enforce a
+// freeze return ErrNoSourceFreeze (honest degraded, not fatal). MongoDB has no
+// cutover contract and fails closed.
+func (e *ReplicationEngine) CutoverFreezeSource(ctx context.Context, config ReplicationConfig) error {
+	switch config.DatabaseType {
+	case "postgres", "postgresql":
+		return e.freezePostgresSource(ctx, config)
+	case "mysql", "mariadb", "redis":
+		// No source freeze exists for these engines yet (B1/B3). Report it
+		// honestly so the orchestrator can downgrade to degraded rather than
+		// claim a closed dual-writer window.
+		return ErrNoSourceFreeze
+	case "mongodb":
+		return fmt.Errorf("%w: mongodb cutover not supported", ErrCutoverPreflight)
+	default:
+		return fmt.Errorf("unsupported engine for source freeze: %s", config.DatabaseType)
+	}
+}
+
+// freezePostgresSource sets default_transaction_read_only=on on the source via
+// ALTER SYSTEM + reload, then verifies the GUC is on. This rejects writes from
+// non-superuser app roles (the lease already serialized the cutover). Superusers
+// bypass the GUC, which the live integration test documents explicitly.
+func (e *ReplicationEngine) freezePostgresSource(ctx context.Context, config ReplicationConfig) error {
+	set := `sudo -u postgres psql -c "ALTER SYSTEM SET default_transaction_read_only = on;" 2>&1`
+	if _, _, _, err := e.sourceSSH.ExecContext(ctx, set); err != nil {
+		return fmt.Errorf("freeze source: set read_only: %w", err)
+	}
+	reload := `sudo -u postgres psql -c "SELECT pg_reload_conf();" 2>&1`
+	if _, _, _, err := e.sourceSSH.ExecContext(ctx, reload); err != nil {
+		return fmt.Errorf("freeze source: reload conf: %w", err)
+	}
+	out, _, _, err := e.sourceSSH.ExecContext(ctx, `sudo -u postgres psql -tAc "SHOW default_transaction_read_only;" 2>&1`)
+	if err != nil {
+		return fmt.Errorf("freeze source: verify read_only: %w", err)
+	}
+	if strings.TrimSpace(out) != "on" {
+		return fmt.Errorf("freeze source: default_transaction_read_only=%q, expected on", strings.TrimSpace(out))
+	}
+	return nil
+}
+
 // mysqlVersionProbe returns the source and target @@version numeric (major*10000
 // + minor) for same-major comparison. A non-numeric/unprobeable side returns 0
 // and a note; the caller decides whether 0 blocks (it does for cross-major).

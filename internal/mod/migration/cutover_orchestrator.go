@@ -81,17 +81,19 @@ type CutoverOutcome struct {
 	Steps       map[string]string   `json:"steps"` // subState -> result
 	Preflight   CutoverPreflightResult `json:"preflight,omitempty"`
 	Switch      *TrafficSwitchResult   `json:"switch,omitempty"`
+	Degraded    []string            `json:"degraded,omitempty"` // honest downscopes (e.g. source freeze unsupported)
 	Failure     string              `json:"failure,omitempty"` // sanitized
 }
 
 // cutoverDriver is the narrow surface of ReplicationEngine the orchestrator
-// uses. It is engine-agnostic (Phase 2C): the same three primitives drive
+// uses. It is engine-agnostic (Phase 2C/3A): the same primitives drive
 // PostgreSQL, MySQL, and Redis cutovers. Kept as an interface so tests inject a
 // fake without building the full engine. *ReplicationEngine satisfies it via
-// CutoverPreflight / WaitForCatchUp / CutoverPromote.
+// CutoverPreflight / WaitForCatchUp / CutoverFreezeSource / CutoverPromote.
 type cutoverDriver interface {
 	CutoverPreflight(ctx context.Context, config ReplicationConfig) (CutoverPreflightResult, error)
 	WaitForCatchUp(ctx context.Context, config ReplicationConfig, maxLagSeconds int64) error
+	CutoverFreezeSource(ctx context.Context, config ReplicationConfig) error
 	CutoverPromote(ctx context.Context, config ReplicationConfig) error
 }
 
@@ -357,12 +359,24 @@ func (o *CutoverOrchestrator) stepAwaitingCutover(cfg CutoverRequest, out *Cutov
 	}
 }
 
-// stepFencingSource: acquire the durable fence. The lease was already acquired
-// at Run start; this step records that the hard fence is in force before the
-// source stops accepting writes. AssertHolds (in advance) is the actual fence.
+// stepFencingSource: with the durable fence already held (AssertHolds in
+// advance), physically freeze the source so the dual-writer window closes.
+// PostgreSQL enforces default_transaction_read_only=on and verifies it. Engines
+// that cannot enforce a freeze (MySQL/Redis) return ErrNoSourceFreeze: that is
+// NOT fatal — we record it as a degraded condition (manual freeze required) and
+// continue, so we never silently claim RPO=0 for an engine whose source can
+// still accept writes. Any other error fails closed.
 func (o *CutoverOrchestrator) stepFencingSource(cfg CutoverRequest, out *CutoverOutcome) stepAction {
 	return func(ctx context.Context, lease *FenceLease) (string, error) {
-		return fmt.Sprintf("ok fenced holder=%s token=%d", lease.Holder, lease.FenceToken), nil
+		if err := o.driver.CutoverFreezeSource(ctx, cfg.Replication); err != nil {
+			if errors.Is(err, ErrNoSourceFreeze) {
+				out.Degraded = append(out.Degraded, "source_freeze_not_supported:"+cfg.Replication.DatabaseType)
+				return fmt.Sprintf("degraded: source freeze unsupported for %s (manual freeze required) holder=%s token=%d",
+					cfg.Replication.DatabaseType, lease.Holder, lease.FenceToken), nil
+			}
+			return "", fmt.Errorf("fencing source: %w", err)
+		}
+		return fmt.Sprintf("ok frozen holder=%s token=%d", lease.Holder, lease.FenceToken), nil
 	}
 }
 

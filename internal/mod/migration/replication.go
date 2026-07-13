@@ -512,18 +512,49 @@ func (e *ReplicationEngine) setupPostgreSQL(ctx context.Context, config Replicat
 }
 
 func (e *ReplicationEngine) postgresLag(ctx context.Context, config ReplicationConfig) (int64, error) {
-	output, _, _, err := e.targetSSH.ExecContext(ctx,
-		`sudo -u postgres psql -t -c "SELECT COALESCE(EXTRACT(EPOCH FROM now() - pg_last_xact_replay_timestamp())::bigint, 0);" 2>&1`)
+	// Primary-side current WAL position. On a fully caught-up standby the
+	// standby's replay LSN equals this; comparing LSNs (rather than the replay
+	// *timestamp*) is the only correct catch-up signal on a QUIET primary — the
+	// replay timestamp is the time of the last replayed transaction and goes
+	// stale when there is no new write traffic, which would otherwise report an
+	// ever-growing lag and make WaitForCatchUp hang until timeout.
+	curOut, _, _, err := e.sourceSSH.ExecContext(ctx,
+		`sudo -u postgres psql -tAc "SELECT pg_current_wal_lsn();" 2>&1`)
 	if err != nil {
 		return -1, err
 	}
-	lag, err := strconv.ParseInt(strings.TrimSpace(output), 10, 64)
+	cur := strings.TrimSpace(curOut)
+	if cur == "" {
+		return -1, fmt.Errorf("postgres replication lag: empty primary LSN")
+	}
+	// Standby-side: bytes of WAL not yet replayed. <=0 means fully caught up.
+	diffOut, _, _, err := e.targetSSH.ExecContext(ctx,
+		fmt.Sprintf(`sudo -u postgres psql -tAc %s 2>&1`,
+			shared.ShellQuote(fmt.Sprintf("SELECT pg_wal_lsn_diff('%s', pg_last_wal_replay_lsn());", cur))))
 	if err != nil {
-		// A non-numeric result means the lag query failed (e.g. the psql
-		// command emitted an error). Do NOT report 0 here: callers such as
-		// WaitForCatchUp treat 0 as "caught up" and would proceed to promote
-		// on un-replicated data. Surface the failure instead.
-		return -1, fmt.Errorf("parse postgres replication lag %q: %w", strings.TrimSpace(output), err)
+		return -1, err
+	}
+	diff, err := strconv.ParseInt(strings.TrimSpace(diffOut), 10, 64)
+	if err != nil {
+		// A non-numeric result means the lag query failed. Do NOT report 0:
+		// callers (WaitForCatchUp) treat 0 as "caught up" and would promote on
+		// un-replicated data. Surface the failure.
+		return -1, fmt.Errorf("parse postgres replication lag diff %q: %w", strings.TrimSpace(diffOut), err)
+	}
+	if diff <= 0 {
+		// Fully caught up — report 0 regardless of replay-timestamp staleness.
+		return 0, nil
+	}
+	// Not yet caught up. Fall back to the replay-timestamp estimate, which
+	// shrinks as transactions replay and is fine while we are behind.
+	tsOut, _, _, err := e.targetSSH.ExecContext(ctx,
+		`sudo -u postgres psql -tAc "SELECT COALESCE(EXTRACT(EPOCH FROM now() - pg_last_xact_replay_timestamp())::bigint, 0);" 2>&1`)
+	if err != nil {
+		return -1, err
+	}
+	lag, err := strconv.ParseInt(strings.TrimSpace(tsOut), 10, 64)
+	if err != nil {
+		return -1, fmt.Errorf("parse postgres replication lag %q: %w", strings.TrimSpace(tsOut), err)
 	}
 	return lag, nil
 }

@@ -24,6 +24,7 @@ type fakePGDriver struct {
 	promotes     int
 	preflightErr error
 	catchupErr   error
+	freezeErr    error
 	promoteErr   error
 	// targetInRecovery is returned as CutoverPreflightResult.TargetInRecovery.
 	targetInRecovery bool
@@ -47,6 +48,13 @@ func (f *fakePGDriver) CutoverPreflight(ctx context.Context, config ReplicationC
 func (f *fakePGDriver) WaitForCatchUp(ctx context.Context, config ReplicationConfig, maxLagSeconds int64) error {
 	f.catchups++
 	return f.catchupErr
+}
+
+func (f *fakePGDriver) CutoverFreezeSource(ctx context.Context, config ReplicationConfig) error {
+	if f.freezeErr != nil {
+		return f.freezeErr
+	}
+	return nil // PG supports source freeze
 }
 
 func (f *fakePGDriver) CutoverPromote(ctx context.Context, config ReplicationConfig) error {
@@ -152,6 +160,52 @@ func TestCutoverOrchestratorHappyPath(t *testing.T) {
 	}
 }
 
+// TestCutoverOrchestratorDegradesWhenSourceFreezeUnsupported: when the engine
+// cannot physically freeze the source (MySQL/Redis today, ErrNoSourceFreeze),
+// the cutover must still complete but record the degraded condition rather than
+// silently claiming a closed dual-writer window. Any other freeze error still
+// fails closed.
+func TestCutoverOrchestratorDegradesWhenSourceFreezeUnsupported(t *testing.T) {
+	o, pg, traffic, _, _, _ := orchestratorHarness(t)
+	pg.freezeErr = ErrNoSourceFreeze
+	out, err := o.Run(context.Background(), cutoverReq())
+	if err != nil {
+		t.Fatalf("run: %v", err)
+	}
+	if !out.Completed {
+		t.Fatalf("should complete (degraded is continuable): %+v", out)
+	}
+	found := false
+	for _, d := range out.Degraded {
+		if strings.HasPrefix(d, "source_freeze_not_supported:") {
+			found = true
+		}
+	}
+	if !found {
+		t.Fatalf("degraded condition not recorded: %+v", out.Degraded)
+	}
+	if traffic.switches != 1 || pg.promotes != 1 {
+		t.Fatalf("switch/promote ran: switch=%d promote=%d", traffic.switches, pg.promotes)
+	}
+}
+
+// TestCutoverOrchestratorFailClosedOnFreezeError: a real freeze error (not the
+// "unsupported" class) fails closed — no switch, no promote.
+func TestCutoverOrchestratorFailClosedOnFreezeError(t *testing.T) {
+	o, pg, traffic, _, _, _ := orchestratorHarness(t)
+	pg.freezeErr = errors.New("ALTER SYSTEM rejected")
+	out, err := o.Run(context.Background(), cutoverReq())
+	if err == nil {
+		t.Fatal("freeze error returned no error; must fail closed")
+	}
+	if out.Completed {
+		t.Fatal("marked completed on freeze error")
+	}
+	if traffic.switches != 0 || pg.promotes != 0 {
+		t.Fatalf("switch/promote ran after freeze error: switch=%d promote=%d", traffic.switches, pg.promotes)
+	}
+}
+
 // TestCutoverOrchestratorNoDualWriterOrdering: switch (Switching) happens BEFORE
 // promote (Promoting). The sub-state order is the invariant: traffic moves to
 // the read-only standby first, then the standby is promoted. We assert this by
@@ -191,6 +245,9 @@ func (o *orderPGDriver) CutoverPreflight(ctx context.Context, config Replication
 }
 func (o *orderPGDriver) WaitForCatchUp(ctx context.Context, config ReplicationConfig, maxLagSeconds int64) error {
 	return o.inner.WaitForCatchUp(ctx, config, maxLagSeconds)
+}
+func (o *orderPGDriver) CutoverFreezeSource(ctx context.Context, config ReplicationConfig) error {
+	return o.inner.CutoverFreezeSource(ctx, config)
 }
 func (o *orderPGDriver) CutoverPromote(ctx context.Context, config ReplicationConfig) error {
 	o.switchCountAtPromote = o.traffic.switches
@@ -306,6 +363,9 @@ func (s *stalePGDriver) WaitForCatchUp(ctx context.Context, config ReplicationCo
 		s.clock.t = s.clock.t.Add(FenceTTL + time.Second)
 	}
 	return s.inner.WaitForCatchUp(ctx, config, maxLagSeconds)
+}
+func (s *stalePGDriver) CutoverFreezeSource(ctx context.Context, config ReplicationConfig) error {
+	return s.inner.CutoverFreezeSource(ctx, config)
 }
 func (s *stalePGDriver) CutoverPromote(ctx context.Context, config ReplicationConfig) error {
 	return s.inner.CutoverPromote(ctx, config)
