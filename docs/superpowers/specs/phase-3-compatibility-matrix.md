@@ -27,7 +27,7 @@ read-after-write (`NginxSwitcher.verify`, nginx_switch.go:193).
 
 | Engine | Mode | Status (today) | Phase 3 target | Evidence / notes |
 |---|---|---|---|---|
-| PostgreSQL | `automatic` | **deferred** (PG not wired to orchestrator switch) | `degraded` after 3A acceptance | replication live (`liveReplicationStage`); source freeze GUC missing (B1) |
+| PostgreSQL | `automatic` | **deferred** (PG not wired to orchestrator switch) | **`automatic` (VERIFIED, 3A)** | replication + fenced cutover live; source freeze GUC now enforced + verified (B1 closed, ca439c5) |
 | PostgreSQL | `manual` | supported | supported | operator publishes/promotes via runbook |
 | MySQL | `automatic` | **deferred** | `automatic` after 3B acceptance | seeded repl live + integration test exists |
 | MySQL | `manual` | supported | supported | |
