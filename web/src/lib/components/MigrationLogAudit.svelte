@@ -12,6 +12,10 @@
 
   let query = $state('');
   let levelFilter = $state<'all' | 'critical' | 'error' | 'warning' | 'info'>('all');
+  // Cap rendered rows; the audit can be very large. Only the matched window is
+  // built into DOM nodes, so search stays responsive on long trails (4G 3H).
+  let visibleCount = $state(200);
+  $effect(() => { if (query || levelFilter !== 'all') visibleCount = 1000; });
 
   type Row = {
     ts: string;
@@ -94,7 +98,7 @@
     {#if filtered.length === 0}
       <p class="text-center py-6 text-fg-subtle text-sm">No matching entries.</p>
     {:else}
-      {#each filtered as row (row.ts + row.kind + row.tag + row.text)}
+      {#each filtered.slice(0, visibleCount) as row (row.ts + row.kind + row.tag + row.text)}
         <div class="flex items-start gap-2 p-2 text-xs">
           <span class="text-fg-subtle shrink-0 w-16 font-mono">{new Date(row.ts).toLocaleTimeString()}</span>
           <span class="px-1.5 py-0.5 rounded shrink-0 {levelClass(row.level)}">{row.level}</span>
@@ -102,6 +106,11 @@
           <span class="text-fg-muted break-all">{row.text}</span>
         </div>
       {/each}
+      {#if filtered.length > visibleCount}
+        <p class="text-center py-3 text-fg-subtle text-xs">
+          Showing first {visibleCount} of {filtered.length} entries — refine the search to see more.
+        </p>
+      {/if}
     {/if}
   </div>
 </section>

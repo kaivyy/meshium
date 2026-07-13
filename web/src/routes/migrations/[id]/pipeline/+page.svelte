@@ -106,6 +106,13 @@
   // the WS is stale we refuse cutover/commit/rollback and force a fresh frame —
   // never let an operator act on a snapshot that may be out of date (4G 3G).
   $: staleData = wsConnectionState === 'stale';
+
+  // Accessibility: move focus into the dialog on open (legacy reactive form).
+  let confirmEl: HTMLDivElement | null = null;
+  $: if (confirmationAction && confirmEl) confirmEl.focus();
+  function onConfirmKeydown(e: KeyboardEvent) {
+    if (e.key === 'Escape' && !actionLoading) closeConfirmation();
+  }
   const trafficConfigPlaceholder = '{"configPath":"/etc/nginx/conf.d/app.conf","newServer":"10.0.0.2:80"}';
 
   onMount(async () => {
@@ -782,6 +789,7 @@
     if (staleData) { toast.error('Live data unavailable — wait for reconnection before acting'); return; }
     confirmationAction = action;
   }
+
   function closeConfirmation() { if (!actionLoading) confirmationAction = null; }
 
   async function runConfirmedAction() {
@@ -1645,8 +1653,8 @@
 </div>
 
 {#if confirmationAction}
-  <div class="fixed inset-0 z-50 flex items-center justify-center bg-black/70 px-4" role="presentation">
-    <div class="w-full max-w-md rounded-xl border border-border-strong bg-surface p-6 shadow-2xl" role="dialog" aria-modal="true" aria-labelledby="confirm-title" tabindex="-1">
+  <div class="fixed inset-0 z-50 flex items-center justify-center bg-black/70 px-4" role="presentation" on:keydown={onConfirmKeydown}>
+    <div bind:this={confirmEl} class="w-full max-w-md rounded-xl border border-border-strong bg-surface p-6 shadow-2xl" role="dialog" aria-modal="true" aria-labelledby="confirm-title" aria-describedby="confirm-body" tabindex="-1">
       <div class="flex items-start gap-3">
         <div class="mt-0.5 flex h-9 w-9 shrink-0 items-center justify-center rounded-lg {confirmationAction === 'rollback' ? 'bg-error/15 text-error' : confirmationAction === 'commit' ? 'bg-success/15 text-success' : 'bg-warning/15 text-warning'}">
           {#if confirmationAction === 'rollback'}
@@ -1661,7 +1669,7 @@
           <h2 id="confirm-title" class="text-lg font-semibold">
             {confirmationAction === 'commit' ? 'Confirm Commit' : confirmationAction === 'rollback' ? 'Confirm Rollback' : 'Confirm Cutover'}
           </h2>
-          <p class="mt-2 text-sm leading-6 text-fg-muted">
+          <p id="confirm-body" class="mt-2 text-sm leading-6 text-fg-muted">
             {#if confirmationAction === 'commit'}
               Committing finalizes the migration. After commit, target is the production system and rollback is <strong>no longer safe</strong> &mdash; the source is released and target has received writes. Only commit once the observation window has passed and health is stable.
             {:else if confirmationAction === 'rollback'}

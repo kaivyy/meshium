@@ -2,13 +2,14 @@ import { describe, it, expect } from 'vitest';
 import { render, screen, fireEvent } from '@testing-library/svelte';
 import CutoverChecklist from './CutoverChecklist.svelte';
 import ObservationPanel from './ObservationPanel.svelte';
+import type { ReplicationStatus, ContainerHealthInfo } from '$lib/api/pipeline';
 
 const baseCutover = {
   replicationLag: 2,
   healthScore: 90,
-  replicationStatus: [],
+  replicationStatus: [] as ReplicationStatus[],
   queueStates: [],
-  containerHealth: [],
+  containerHealth: [] as ContainerHealthInfo[],
   rollbackAvailable: true,
   actionLoading: false,
   onCutover: () => {},
@@ -45,7 +46,7 @@ describe('CutoverChecklist action safety', () => {
 
   it('fires onCutover only when enabled', async () => {
     let fired = 0;
-    render(CutoverChecklist, { props: { ...baseCutover, replicationStatus: [{ status: 'running' }], containerHealth: [{ name: 'worker', healthy: true }], onCutover: () => fired++ } });
+    render(CutoverChecklist, { props: { ...baseCutover, replicationStatus: [{ status: 'running' }] as ReplicationStatus[], containerHealth: [{ name: 'worker', healthy: true }] as ContainerHealthInfo[], onCutover: () => fired++ } });
     const btn = screen.getByRole('button', { name: /Start Cutover/i }) as HTMLButtonElement;
     expect(btn.disabled).toBe(false);
     await fireEvent.click(btn);
