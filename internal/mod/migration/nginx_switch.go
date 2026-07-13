@@ -10,6 +10,8 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	"meshium/internal/shared"
 )
 
 // Phase 2A-5: Nginx traffic-switch provider — idempotent switch + post-switch
@@ -155,10 +157,10 @@ func (s *NginxSwitcher) Switch(ctx context.Context, req NginxSwitchRequest) (*Ng
 func (s *NginxSwitcher) configTest(ctx context.Context, configPath string) error {
 	out, stderr, exit, err := s.ssh.ExecContext(ctx, "nginx -t 2>&1")
 	if err != nil {
-		return fmt.Errorf("nginx -t exec: %w (out=%s)", err, strings.TrimSpace(out))
+		return fmt.Errorf("nginx -t exec: %w (out=%s)", err, shared.SanitizeString(strings.TrimSpace(out)))
 	}
 	if exit != 0 {
-		return fmt.Errorf("exit %d: %s", exit, strings.TrimSpace(stderr))
+		return fmt.Errorf("exit %d: %s", exit, shared.SanitizeString(strings.TrimSpace(stderr)))
 	}
 	return nil
 }
@@ -179,7 +181,7 @@ func (s *NginxSwitcher) reloadWithRetry(ctx context.Context) error {
 		if err == nil && exit == 0 {
 			return nil
 		}
-		last = fmt.Errorf("exit %d err=%v out=%s", exit, err, strings.TrimSpace(out))
+		last = fmt.Errorf("exit %d err=%v out=%s", exit, err, shared.SanitizeString(strings.TrimSpace(out)))
 	}
 	return last
 }

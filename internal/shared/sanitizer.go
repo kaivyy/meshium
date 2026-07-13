@@ -12,6 +12,12 @@ import (
 var (
 	// Passwords in connection strings: password=xxx, pwd=xxx, pass=xxx
 	passwordPattern = regexp.MustCompile(`(?i)(password|passwd|pwd|pass|secret|token|api_key|apikey|access_key|private_key|credential)\s*[=:]\s*\S+`)
+	// MySQL/psql inline password flag: `mysql -pSECRET` or `mysql -p SECRET`.
+	// The lowercase `-p` form is the DB client password convention (ports use
+	// `-P`); redacting it is the only way to stop the most common raw-secret
+	// leak in command output / error strings. A false-positive redaction of a
+	// numeric port is harmless in an operator log.
+	inlinePasswordPattern = regexp.MustCompile(`(?i)-p\s*([^\s-][^\s]*)`)
 	// Bearer tokens
 	bearerPattern = regexp.MustCompile(`(?i)bearer\s+[A-Za-z0-9\-._~+/]+=*`)
 	// SSH private key blocks
@@ -24,6 +30,12 @@ var (
 
 // SanitizeString removes secrets from a string, replacing them with [REDACTED].
 func SanitizeString(s string) string {
+	// MySQL/psql inline password flag BEFORE other patterns: `mysql -uroot
+	// -pSECRET ...` is the most common raw-secret leak in command lines,
+	// error strings, and remote stderr. Run first so the replacement text
+	// cannot be re-matched by later patterns. A space after `-p` is left
+	// intact (that is an SSH/port flag, not a password).
+	s = inlinePasswordPattern.ReplaceAllString(s, "-p [REDACTED]")
 	s = privateKeyPattern.ReplaceAllString(s, "[REDACTED-PRIVATE-KEY]")
 	s = authHeaderPattern.ReplaceAllString(s, "Authorization: [REDACTED]")
 	s = bearerPattern.ReplaceAllString(s, "Bearer [REDACTED]")

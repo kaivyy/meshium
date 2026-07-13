@@ -48,6 +48,11 @@ func main() {
 		os.Exit(1)
 	}
 
+	// Phase2D-3: route stdlib logging through the redaction boundary and let
+	// structured logs carry correlation/migration identity.
+	shared.InitLogging()
+	migration.RegisterCorrelationLogging()
+
 	authRepo := auth.NewRepo(database)
 	authSvc := auth.NewService(authRepo)
 	authSvc.SetPersistence(cfg.DataDir)

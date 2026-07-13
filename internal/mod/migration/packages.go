@@ -5,6 +5,8 @@ import (
 	"encoding/json"
 	"fmt"
 	"strings"
+
+	"meshium/internal/shared"
 )
 
 // PackagesData holds the collected package list from the source server.
@@ -192,7 +194,8 @@ func (a *PackagesApplier) Apply(ctx context.Context, ssh SSHExecuter, data Categ
 		}
 		batch := packagesToInstall[i:end]
 		cmd := adapter.InstallPackages(batch)
-		_, stderr, exitCode, err := ssh.ExecContext(ctx, cmd)
+		_, stderrRaw, exitCode, err := ssh.ExecContext(ctx, cmd)
+		stderr := shared.SanitizeString(stderrRaw)
 		if err != nil || exitCode != 0 {
 			if onProgress != nil {
 				onProgress(WSMessage{

@@ -17,9 +17,13 @@ import (
 // status in exitCode, so callers must inspect both. The combined command
 // output (stdout+stderr) is included because commands here run with 2>&1.
 func execCommandError(err error, exitCode int, out, stderr string) string {
-	detail := strings.TrimSpace(stderr)
+	// Phase2D-3: remote command output (stdout/stderr) can contain connection
+	// strings, passwords, or tokens. Sanitize at the source so the error
+	// string — which flows into logs, events, and API error responses — never
+	// carries a raw secret.
+	detail := strings.TrimSpace(shared.SanitizeString(stderr))
 	if detail == "" {
-		detail = strings.TrimSpace(out)
+		detail = strings.TrimSpace(shared.SanitizeString(out))
 	}
 	if err != nil {
 		if detail != "" {

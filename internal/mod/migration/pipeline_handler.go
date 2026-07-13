@@ -819,7 +819,7 @@ func (h *PipelineHandler) handleCompatibilityWS(w http.ResponseWriter, r *http.R
 	}
 	conn, err := h.upgrader.Upgrade(w, r, responseHeader)
 	if err != nil {
-		log.Printf("websocket upgrade failed: %v", err)
+		shared.LogCtx(r.Context()).Error("websocket upgrade failed", "error", err)
 		return
 	}
 	defer conn.Close()
@@ -834,7 +834,7 @@ func (h *PipelineHandler) handleCompatibilityWS(w http.ResponseWriter, r *http.R
 
 	writeMsg := func(msg WSMessage) {
 		if writeErr := conn.WriteJSON(msg); writeErr != nil {
-			log.Printf("websocket write failed: %v", writeErr)
+			shared.LogCtx(r.Context()).Error("websocket write failed", "error", writeErr)
 		}
 	}
 
@@ -1292,7 +1292,7 @@ func (h *PipelineHandler) handlePipelineWS(w http.ResponseWriter, r *http.Reques
 	}
 	conn, err := h.upgrader.Upgrade(w, r, responseHeader)
 	if err != nil {
-		log.Printf("websocket upgrade failed: %v", err)
+		shared.LogCtx(r.Context()).Error("websocket upgrade failed", "error", err, "migration_id", migrationID)
 		return
 	}
 	defer conn.Close()
@@ -1330,7 +1330,7 @@ func (h *PipelineHandler) handlePipelineWS(w http.ResponseWriter, r *http.Reques
 			case <-ticker.C:
 				if time.Since(lastPong) > 40*time.Second {
 					// No pong received for too long — close connection
-					log.Printf("websocket heartbeat timeout for migration %d", migrationID)
+					shared.LogCtx(ctx).Warn("websocket heartbeat timeout", "migration_id", migrationID)
 					cancel()
 					return
 				}
@@ -1398,7 +1398,7 @@ func (h *PipelineHandler) handlePipelineWS(w http.ResponseWriter, r *http.Reques
 			wsSeq++
 			ext := h.extendWSMessage(migrationID, msg, wsSeq)
 			if writeErr := safeConn.WriteJSON(ext); writeErr != nil {
-				log.Printf("websocket write failed: %v", writeErr)
+				shared.LogCtx(ctx).Error("websocket write failed", "error", writeErr)
 				cancel()
 			}
 		})
@@ -1407,7 +1407,7 @@ func (h *PipelineHandler) handlePipelineWS(w http.ResponseWriter, r *http.Reques
 			wsSeq++
 			ext := h.extendWSMessage(migrationID, msg, wsSeq)
 			if writeErr := safeConn.WriteJSON(ext); writeErr != nil {
-				log.Printf("websocket write failed: %v", writeErr)
+				shared.LogCtx(ctx).Error("websocket write failed", "error", writeErr)
 				cancel()
 			}
 		})
@@ -1435,7 +1435,7 @@ func (h *PipelineHandler) handlePipelineWS(w http.ResponseWriter, r *http.Reques
 func (h *PipelineHandler) streamPipelineHistory(ctx context.Context, conn *wsConn, migrationID int, wsSeq *int64) {
 	events, err := h.repo.GetEvents(ctx, migrationID, 0, 1000)
 	if err != nil {
-		log.Printf("failed to load event history for migration %d: %v", migrationID, err)
+		shared.LogCtx(ctx).Error("failed to load event history", "migration_id", migrationID, "error", err)
 		return
 	}
 	for _, ev := range events {
@@ -1457,7 +1457,7 @@ func (h *PipelineHandler) streamPipelineHistory(ctx context.Context, conn *wsCon
 			Value:  ev.Message,
 		}, *wsSeq)
 		if writeErr := conn.WriteJSON(ext); writeErr != nil {
-			log.Printf("websocket history write failed for migration %d: %v", migrationID, writeErr)
+			shared.LogCtx(ctx).Error("websocket history write failed", "migration_id", migrationID, "error", writeErr)
 			return
 		}
 	}

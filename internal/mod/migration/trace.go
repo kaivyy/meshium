@@ -5,6 +5,8 @@ import (
 	"crypto/rand"
 	"encoding/hex"
 	"strconv"
+
+	"meshium/internal/shared"
 )
 
 // newID returns a short random hex id (n bytes). crypto/rand avoids weak
@@ -191,3 +193,18 @@ func parseID(s string) (int, error) {
 
 // String renders the correlation id for log/event fields.
 func (r RequestID) String() string { return string(r) }
+
+// RegisterCorrelationLogging wires the migration package's correlation/migration
+// identity into the shared structured logger so every LogCtx(ctx) line carries
+// the active operation. Called once at startup (from main). Idempotent.
+func RegisterCorrelationLogging() {
+	shared.SetCorrelationExtractor(func(ctx context.Context) (string, int) {
+		corr := CorrelationFrom(ctx)
+		if corr == "" {
+			if rid := RequestIDFrom(ctx); rid != "" {
+				corr = rid.String()
+			}
+		}
+		return corr, MigrationIDFrom(ctx)
+	})
+}
