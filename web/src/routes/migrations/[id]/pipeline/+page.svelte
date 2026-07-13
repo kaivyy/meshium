@@ -23,6 +23,7 @@
   import BottomTabs from '$lib/components/BottomTabs.svelte';
   import CompatibilityChecklist from '$lib/components/CompatibilityChecklist.svelte';
   import MigrationEvidencePanel from '$lib/components/MigrationEvidencePanel.svelte';
+  import SafetyStatePanel from '$lib/components/SafetyStatePanel.svelte';
 
   const migrationId = parseInt($page.params.id ?? '0', 10);
 
@@ -1068,6 +1069,21 @@
   <div class="flex-1 flex flex-col lg:flex-row overflow-hidden">
     <!-- Center Workspace -->
     <div class="flex-1 overflow-y-auto p-3 sm:p-4">
+      <!-- 4G 3D: safety-state banner (honest operator guidance). Self-guards:
+           renders only for active awaiting_cutover / observing /
+           needs_manual_intervention / rollback_degraded states, on any step. -->
+      <SafetyStatePanel
+        {currentState}
+        {healthScore}
+        {replicationLag}
+        {rollbackAvailable}
+        {riskReport}
+        {strategy}
+        autoCutoverConfigured={config?.autoCutover ?? false}
+        {observationRemaining}
+        runbookHref="/migrations/{migrationId}/diff"
+      />
+
       {#if loading}
         <div class="flex items-center justify-center h-64 text-fg-subtle">
           <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" class="animate-spin mr-3"><path d="M21 12a9 9 0 1 1-6.219-8.56"/></svg>
