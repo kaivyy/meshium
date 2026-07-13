@@ -99,3 +99,67 @@ func TestExecCommandErrorRedactsRemoteOutput(t *testing.T) {
 	}
 }
 
+
+// TestPreflightMongoDBEligible verifies the operator preflight reports an
+// actionable manual-cutover-eligible verdict for a same-major PRIMARY/SECONDARY
+// replica set with matching FCV and drained lag. This path is NOT wired into the
+// automatic CutoverPreflight dispatch (MongoDB stays BLOCKED for automatic) but
+// the structured probe must still resolve correctly for the manual runbook.
+func TestPreflightMongoDBEligible(t *testing.T) {
+	source := newMockSSH()
+	target := newMockSSH()
+	roleEval := `mongosh --quiet --eval 'var m=rs.status();var self=m.members.find(function(x){return x.self})||m.members[0];var ss=db.serverStatus();var fcv=db.getMongo().getDB("admin").runCommand({getParameter:1,featureCompatibilityVersion:1}).featureCompatibilityVersion.version;JSON.stringify({ok:1,kind:self.stateStr,primary:(self.stateStr==="PRIMARY"),replica:(self.stateStr==="SECONDARY"||self.stateStr==="PRIMARY"),sharded:!!(ss.sharding&&(ss.sharding.configsvr||ss.sharding.clusterRole)),ver:ss.version||"",fcv:fcv||""})'`
+	optimeEval := `mongosh --quiet --eval 'var s=rs.status();var m=s.members.find(function(x){return x.name===s.primary})||s.members[0];JSON.stringify({ok:1,optime:(m&&m.optimeDate)?new Date(m.optimeDate).getTime():null})'`
+	source.execOutput[roleEval] = `{"ok":1,"kind":"PRIMARY","primary":true,"replica":true,"sharded":false,"ver":"7.0.37","fcv":"7.0"}`
+	target.execOutput[roleEval] = `{"ok":1,"kind":"SECONDARY","primary":false,"replica":true,"sharded":false,"ver":"7.0.37","fcv":"7.0"}`
+	// optime probes (source frontier ~= target applied → drained lag)
+	source.execOutput[optimeEval] = `{"ok":1,"optime":1700000000000}`
+	target.execOutput[optimeEval] = `{"ok":1,"optime":1700000000000}`
+
+	e := NewReplicationEngine(source, target, nil)
+	r, err := e.preflightMongoDB(context.Background(), ReplicationConfig{DatabaseType: "mongodb"})
+	if err != nil {
+		t.Fatalf("preflightMongoDB: %v (notes=%q)", err, r.Notes)
+	}
+	if !r.ReplicatorOK {
+		t.Fatalf("expected ReplicatorOK=true: %+v", r)
+	}
+	if !strings.Contains(r.Notes, "manual-cutover-eligible") {
+		t.Fatalf("expected manual-cutover-eligible verdict, got notes=%q", r.Notes)
+	}
+}
+
+// TestPreflightMongoDBNotPrimary confirms the probe fails closed when the source
+// is not a PRIMARY (e.g. already stepped down or a secondary).
+func TestPreflightMongoDBNotPrimary(t *testing.T) {
+	source := newMockSSH()
+	target := newMockSSH()
+	roleEval := `mongosh --quiet --eval 'var m=rs.status();var self=m.members.find(function(x){return x.self})||m.members[0];var ss=db.serverStatus();var fcv=db.getMongo().getDB("admin").runCommand({getParameter:1,featureCompatibilityVersion:1}).featureCompatibilityVersion.version;JSON.stringify({ok:1,kind:self.stateStr,primary:(self.stateStr==="PRIMARY"),replica:(self.stateStr==="SECONDARY"||self.stateStr==="PRIMARY"),sharded:!!(ss.sharding&&(ss.sharding.configsvr||ss.sharding.clusterRole)),ver:ss.version||"",fcv:fcv||""})'`
+	source.execOutput[roleEval] = `{"ok":1,"kind":"SECONDARY","primary":false,"replica":true,"sharded":false,"ver":"7.0.37","fcv":"7.0"}`
+	target.execOutput[roleEval] = `{"ok":1,"kind":"SECONDARY","primary":false,"replica":true,"sharded":false,"ver":"7.0.37","fcv":"7.0"}`
+
+	e := NewReplicationEngine(source, target, nil)
+	r, err := e.preflightMongoDB(context.Background(), ReplicationConfig{DatabaseType: "mongodb"})
+	if err == nil || r.Notes == "" {
+		t.Fatalf("non-primary source must fail preflight: %+v", r)
+	}
+}
+
+// TestMongoDBLagParsesDrained verifies mongoDBLag computes a non-negative,
+// near-zero lag when source frontier and target applied optime match.
+func TestMongoDBLagParsesDrained(t *testing.T) {
+	source := newMockSSH()
+	target := newMockSSH()
+	optimeEval := `mongosh --quiet --eval 'var s=rs.status();var m=s.members.find(function(x){return x.name===s.primary})||s.members[0];JSON.stringify({ok:1,optime:(m&&m.optimeDate)?new Date(m.optimeDate).getTime():null})'`
+	source.execOutput[optimeEval] = `{"ok":1,"optime":1700000000000}`
+	target.execOutput[optimeEval] = `{"ok":1,"optime":1700000000000}`
+
+	e := NewReplicationEngine(source, target, nil)
+	lag, err := e.mongoDBLag(context.Background(), ReplicationConfig{DatabaseType: "mongodb"})
+	if err != nil {
+		t.Fatalf("mongoDBLag: %v", err)
+	}
+	if lag < 0 || lag > 1 {
+		t.Fatalf("expected drained lag in [0,1], got %d", lag)
+	}
+}

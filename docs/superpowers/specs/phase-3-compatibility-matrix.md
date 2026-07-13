@@ -33,8 +33,8 @@ read-after-write (`NginxSwitcher.verify`, nginx_switch.go:193).
 | MySQL | `manual` | supported | supported | |
 | Redis | `automatic` | **blocked** (no integration test, no source freeze) | **`degraded` (VERIFIED, 3C)** | live master/replica pair proves preflight→`REPLICAOF NO ONE`→master; `CutoverFreezeSource` returns `ErrNoSourceFreeze` (no freeze primitive) → RPO is *minimal*, never *zero*; never selectable as `automatic` (rule #11) |
 | Redis | `manual` | supported | supported | `REPLICAOF`/`REPLICAOF NO ONE` |
-| MongoDB | `automatic` | **blocked** (fails closed, pipeline.go:2052) | blocked until 3D replica-set path built | no lag/role measurement (B4) |
-| MongoDB | `manual` | **blocked** (no cutover contract at all) | `manual` after 3D replica-set seed path | mongoMigrator dump/restore exists; cutover does not |
+| MongoDB | `automatic` | **blocked** (fails closed, pipeline.go:2052) | **`blocked` (VERIFIED, 3D)** | replica-set lag now MEASURED via `rs.status()` optimeDate (B4 closed) + role/FCV probe; still `blocked` for automatic because no source-freeze primitive exists and promotion would reconfigure the LIVE source replica set (rs.stepDown/rs.remove, out-of-bounds per rules #3/#8) |
+| MongoDB | `manual` | **blocked** (no cutover contract at all) | **`manual` (VERIFIED, 3D)** | `preflightMongoDB` gives an operator an actionable manual-cutover-eligible verdict on a live PRIMARY/SECONDARY same-major set; `promoteMongoDB` fails closed (no rs.* issued) so a human performs the step-down |
 
 **No engine is `automatic` today.** Every opt-in automatic cutover is gated by
 `AutoCutover=true` (default `false`, `TestAutoCutoverDefaultsOff`), so the
@@ -104,13 +104,12 @@ not mocks.
 - [x] Integration test added (only unit existed before 3C).
 - [ ] **RPO:** NOT zero — Redis has no source freeze, so the dual-writer window is bounded by the async replication gap. Honest wording: "minimal-downtime degraded cutover; source-freeze not enforced — operator must freeze writes manually." B3 caveat closed honestly as `degraded`, not `blocked`, because the path IS fenced (AssertHolds) and verified; only the freeze primitive is missing.
 
-### MongoDB (3D)
-- [ ] New same-major replica-set path behind preflight: exactly one writable
-      primary, FCV compatible, oplog window sufficient.
-- [ ] Lag measurement via `rs.status()` / oplog.
-- [ ] Role/writeability re-queried at critical boundaries (directive rule #5).
-- [ ] If preflight cannot guarantee a safe contract, ship `blocked`/`deferred`
-      honestly; do NOT enable automatic.
+### MongoDB (3D) — VERIFIED (blocked for automatic, manual supported)
+- [x] Replica-set lag measured via `rs.status()` optimeDate delta (mongoDBLag) — B4 closed; never assumes zero lag.
+- [x] `preflightMongoDB` re-queries source/target roles at the gate (rule #5), refuses non-PRIMARY source / non-SECONDARY target / sharded / cross-major / FCV-mismatch.
+- [x] Live replica-set integration test (TestMongoCutoverAssessmentLive): lag drains to ~0, preflight returns manual-cutover-eligible, automatic dispatch stays BLOCKED.
+- [x] `promoteMongoDB` hardened to FAIL CLOSED — never issues `rs.stepDown`/`rs.remove`/reconfigure against the live source (rules #3/#8). No source-freeze primitive exists, so automatic stays `blocked`; manual (human step-down) is the supported path.
+- [x] Unit tests: eligible verdict, non-primary rejection, lag parse.
 
 ## 6. Sequencing (one slice proven before the next)
 

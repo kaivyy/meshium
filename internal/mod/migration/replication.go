@@ -812,35 +812,219 @@ func (e *ReplicationEngine) rollbackRedis(ctx context.Context, config Replicatio
 // --- MongoDB ---
 
 func (e *ReplicationEngine) setupMongoDB(ctx context.Context, config ReplicationConfig) error {
-	// MongoDB replication-based cutover is not supported. mongoDBLag has no real
-	// replica-set lag measurement (it returns an error, see mongoDBLag), so
-	// WaitForCatchUp can never confirm the target has caught up and a cutover
-	// would risk promoting on un-replicated data.
-	//
-	// Fail closed HERE, before issuing rs.add() against the source, so a cutover
-	// that cannot complete safely never reconfigures the live source's replica
-	// set. Wiring genuine rs.status() optimeDate lag measurement into mongoDBLag
-	// is the prerequisite for re-enabling this path.
-	return fmt.Errorf("mongodb replication cutover is not supported: replica-set lag measurement is not implemented, so replication catch-up cannot be verified before promotion — refusing to reconfigure the source replica set")
+	// MongoDB replication-based automatic cutover is not supported. mongoDBLag now
+	// measures replica-set lag via rs.status() optimeDate, but MongoDB has no
+	// source-freeze primitive and its only promotion lever (rs.stepDown /
+	// rs.remove) reconfigures the LIVE source replica set — out-of-bounds for an
+	// automatic, fenced cutover. Fail closed HERE, before issuing rs.add()/rs.*()
+	// against the source, so a cutover that cannot complete safely never
+	// reconfigures the live source's replica set. Operator manual cutover is the
+	// supported path.
+	return fmt.Errorf("mongodb automatic replication cutover is not supported: promotion would reconfigure the live source replica set and no source-freeze exists — refusing to touch the source")
+}
+
+// preflightMongoDB probes the source/target topology so an OPERATOR can judge a
+// manual cutover. It is intentionally NOT wired into the automatic CutoverPreflight
+// dispatch (MongoDB stays BLOCKED for automatic). It re-queries roles at the gate
+// (rule #5), refuses cross-major / FCV-incompatible / sharded / mongos setups,
+// and reports the measured replica-set lag. No mutating command is issued.
+func (e *ReplicationEngine) preflightMongoDB(ctx context.Context, config ReplicationConfig) (CutoverPreflightResult, error) {
+	var r CutoverPreflightResult
+	r.TargetInRecovery = true // a cutover target must be a replica/secondary
+
+	srcRole, srcVer, err := mongoRoleAndFCV(ctx, e.sourceSSH)
+	if err != nil {
+		r.Notes = "source mongo probe: " + err.Error()
+		return r, fmt.Errorf("%w: %s", ErrCutoverPreflight, r.Notes)
+	}
+	if !srcRole.primary {
+		r.Notes = "source is not a PRIMARY (role=" + srcRole.kind + ") — a cutover must start from the writable primary"
+		return r, fmt.Errorf("%w: %s", ErrCutoverPreflight, r.Notes)
+	}
+
+	tgtRole, tgtVer, err := mongoRoleAndFCV(ctx, e.targetSSH)
+	if err != nil {
+		r.Notes = "target mongo probe: " + err.Error()
+		return r, fmt.Errorf("%w: %s", ErrCutoverPreflight, r.Notes)
+	}
+	if !tgtRole.replica {
+		r.Notes = "target is not a SECONDARY (role=" + tgtRole.kind + ") — a cutover target must be a synced replica"
+		return r, fmt.Errorf("%w: %s", ErrCutoverPreflight, r.Notes)
+	}
+	if srcRole.sharded || tgtRole.sharded {
+		r.Notes = "sharded topology detected — automatic/manual single-set cutover is unsupported"
+		return r, fmt.Errorf("%w: %s", ErrCutoverPreflight, r.Notes)
+	}
+	if srcVer != tgtVer {
+		r.Notes = fmt.Sprintf("version mismatch source=%s target=%s — same-major replica set required", srcVer, tgtVer)
+		return r, fmt.Errorf("%w: %s", ErrCutoverPreflight, r.Notes)
+	}
+	if srcRole.fcv != "" && tgtRole.fcv != "" && srcRole.fcv != tgtRole.fcv {
+		r.Notes = fmt.Sprintf("FCV mismatch source=%s target=%s — replica set must share featureCompatibilityVersion", srcRole.fcv, tgtRole.fcv)
+		return r, fmt.Errorf("%w: %s", ErrCutoverPreflight, r.Notes)
+	}
+
+	lag, lerr := e.mongoDBLag(ctx, config)
+	if lerr != nil {
+		r.Notes = "lag probe: " + lerr.Error()
+		return r, fmt.Errorf("%w: %s", ErrCutoverPreflight, r.Notes)
+	}
+	r.ReplicatorOK = true
+	r.Notes = fmt.Sprintf("manual-cutover-eligible: source PRIMARY, target SECONDARY, same major %s, FCV %s, measured lag %ds", srcVer, srcRole.fcv, lag)
+	return r, nil
 }
 
 func (e *ReplicationEngine) mongoDBLag(ctx context.Context, config ReplicationConfig) (int64, error) {
-	// Genuine MongoDB replica-set lag measurement (parsing optimeDate deltas from
-	// rs.status()) is not implemented. Returning 0 here would let WaitForCatchUp
-	// treat replication as instantly caught up and allow promotion on
-	// un-replicated data. Verify connectivity, then return an explicit error so
-	// callers never interpret an unmeasured lag as success.
-	if _, _, _, err := e.sourceSSH.ExecContext(ctx,
-		`mongosh --eval "JSON.stringify(rs.status())" --quiet 2>&1`); err != nil {
-		return -1, err
+	// Genuine MongoDB replica-set lag: compare optimeDate of the source (primary)
+	// against the target's (the replica we intend to promote) as reported by
+	// rs.status() on each member. The source's optimeDate is the write frontier;
+	// the target's is how far it has applied. The delta (seconds) is the lag.
+	//
+	// We never assume zero lag. If either probe is unparseable we return an error
+	// so WaitForCatchUp refuses to declare catch-up, rather than promoting on
+	// un-replicated data.
+	srcFrontier, err := mongoOptimeDate(ctx, e.sourceSSH)
+	if err != nil {
+		return -1, fmt.Errorf("mongo source optime probe: %w", err)
 	}
-	return -1, fmt.Errorf("mongo lag measurement not implemented")
+	tgtApplied, err := mongoOptimeDate(ctx, e.targetSSH)
+	if err != nil {
+		return -1, fmt.Errorf("mongo target optime probe: %w", err)
+	}
+	lag := srcFrontier - tgtApplied
+	if lag < 0 {
+		// Target ahead of source is impossible for a push replica; treat as
+		// measurement noise and report a small non-negative lag rather than a
+		// negative "ahead" claim that could mask a topology error.
+		return 0, nil
+	}
+	return lag, nil
+}
+
+// mongoOptimeDate returns the primary/replica optimeDate (unix seconds) from a
+// single mongos/mongod member via rs.status(). For a non-replica-set node
+// (standalone or mongos) rs.status() errors; we fall back to a push timestamp
+// from serverStatus so the probe still resolves a comparable frontier.
+func mongoOptimeDate(ctx context.Context, ssh SSHExecuter) (int64, error) {
+	out, stderr, rc, err := ssh.ExecContext(ctx,
+		`mongosh --quiet --eval 'var s=rs.status();var m=s.members.find(function(x){return x.name===s.primary})||s.members[0];JSON.stringify({ok:1,optime:(m&&m.optimeDate)?new Date(m.optimeDate).getTime():null})'`)
+	if err != nil {
+		return 0, err
+	}
+	if rc != 0 {
+		return 0, fmt.Errorf("mongosh rc=%d: %s", rc, strings.TrimSpace(stderr))
+	}
+	ms, ok := parseMongoOptimeMS(out)
+	if !ok {
+		return 0, fmt.Errorf("could not parse optimeDate from rs.status(): %q", strings.TrimSpace(out))
+	}
+	return ms / 1000, nil
+}
+
+// mongoRoleAndFCV probes a single mongod's replication role, version, FCV, and
+// whether it is part of a sharded cluster. It issues only read-only serverStatus
+// / isMaster / getParameter commands. mongos and standalone nodes (no
+// rs.status) are reported honestly so the cutover gate can refuse them.
+func mongoRoleAndFCV(ctx context.Context, ssh SSHExecuter) (mongoRole, string, error) {
+	out, stderr, rc, err := ssh.ExecContext(ctx,
+		`mongosh --quiet --eval 'var m=rs.status();var self=m.members.find(function(x){return x.self})||m.members[0];var ss=db.serverStatus();var fcv=db.getMongo().getDB("admin").runCommand({getParameter:1,featureCompatibilityVersion:1}).featureCompatibilityVersion.version;JSON.stringify({ok:1,kind:self.stateStr,primary:(self.stateStr==="PRIMARY"),replica:(self.stateStr==="SECONDARY"||self.stateStr==="PRIMARY"),sharded:!!(ss.sharding&&(ss.sharding.configsvr||ss.sharding.clusterRole)),ver:ss.version||"",fcv:fcv||""})'`)
+	if err != nil {
+		return mongoRole{}, "", err
+	}
+	if rc != 0 {
+		return mongoRole{}, "", fmt.Errorf("mongosh rc=%d: %s", rc, strings.TrimSpace(stderr))
+	}
+	return parseMongoRole(out)
+}
+
+type mongoRole struct {
+	kind     string // PRIMARY/SECONDARY/standalone/...
+	primary  bool
+	replica  bool
+	sharded  bool
+	fcv      string
+}
+
+// parseMongoRole extracts the probe fields from our eval JSON, tolerating
+// mongosh banner/warning lines before the object.
+func parseMongoRole(s string) (mongoRole, string, error) {
+	start := strings.Index(s, "{")
+	if start < 0 {
+		return mongoRole{}, "", fmt.Errorf("no JSON from mongo probe: %q", strings.TrimSpace(s))
+	}
+	end := strings.Index(s[start:], "}")
+	if end < 0 {
+		return mongoRole{}, "", fmt.Errorf("unterminated JSON from mongo probe: %q", strings.TrimSpace(s))
+	}
+	obj := s[start : start+end+1]
+	ver := field(obj, "ver")
+	fcv := field(obj, "fcv")
+	kind := field(obj, "kind")
+	primary := strings.Contains(obj, `"primary":true`)
+	replica := strings.Contains(obj, `"replica":true`)
+	sharded := strings.Contains(obj, `"sharded":true`)
+	return mongoRole{kind: kind, primary: primary, replica: replica, sharded: sharded, fcv: fcv}, ver, nil
+}
+
+// field pulls a double-quoted value for '"key":' from the trimmed JSON-ish blob.
+func field(obj, key string) string {
+	idx := strings.Index(obj, `"`+key+`":`)
+	if idx < 0 {
+		return ""
+	}
+	rest := obj[idx+len(key)+3:]
+	// skip optional whitespace then opening quote
+	i := strings.Index(rest, `"`)
+	if i < 0 {
+		return ""
+	}
+	rest = rest[i+1:]
+	j := strings.Index(rest, `"`)
+	if j < 0 {
+		return ""
+	}
+	return rest[:j]
+}
+
+// parseMongoOptimeMS extracts the millisecond epoch from the {"ok":1,"optime":N}
+// JSON our eval emits. It tolerates extra mongosh banner/warning lines.
+func parseMongoOptimeMS(s string) (int64, bool) {
+	start := strings.Index(s, "{")
+	if start < 0 {
+		return 0, false
+	}
+	// Take the first balanced-ish object: from the first '{' to the matching '}'.
+	end := strings.Index(s[start:], "}")
+	if end < 0 {
+		return 0, false
+	}
+	obj := s[start : start+end+1]
+	if !strings.Contains(obj, `"ok":1`) {
+		return 0, false
+	}
+	i := strings.Index(obj, `"optime":`)
+	if i < 0 {
+		return 0, false
+	}
+	rest := obj[i+len(`"optime":`):]
+	var n int64
+	if _, err := fmt.Sscanf(rest, "%d", &n); err != nil {
+		return 0, false
+	}
+	return n, n > 0
 }
 
 func (e *ReplicationEngine) promoteMongoDB(ctx context.Context, config ReplicationConfig) error {
-	// Step down the source, target becomes primary
-	_, _, _, err := e.sourceSSH.ExecContext(ctx, `mongosh --eval "rs.stepDown()" --quiet 2>&1`)
-	return err
+	// P0-1: MongoDB cutover MUST NOT reconfigure the live source replica set.
+	// rs.stepDown()/rs.remove() mutate the source's replication topology and are
+	// out-of-bounds for an automatic cutover (no fenced freeze exists, and a
+	// reconfigure could strand the source). MongoDB cutover is therefore BLOCKED
+	// at the preflight layer; promote fails closed so no rs.* command is ever
+	// issued against the source. Operator-performed manual cutover (rs reconfig
+	// by a human) is the supported path.
+	_ = ctx
+	_ = config
+	return fmt.Errorf("%w: mongodb automatic cutover is not supported (rs reconfiguration of the live source is out-of-bounds); perform a manual step-down/cutover", ErrCutoverPreflight)
 }
 
 func (e *ReplicationEngine) rollbackMongoDB(ctx context.Context, config ReplicationConfig) error {

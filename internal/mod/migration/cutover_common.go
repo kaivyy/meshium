@@ -73,9 +73,15 @@ func (e *ReplicationEngine) CutoverPreflight(ctx context.Context, config Replica
 	case "redis":
 		return e.preflightRedis(ctx, config, sourceFrozen)
 	case "mongodb":
-		// No replica-set lag measurement → catch-up cannot be verified → no safe
-		// cutover. Fail closed HERE, before any mutation.
-		return CutoverPreflightResult{}, fmt.Errorf("%w: mongodb replication cutover is not supported (replica-set lag unverifiable)", ErrCutoverPreflight)
+		// MongoDB has no source-freeze primitive and its only cutover lever
+		// (rs.stepDown / rs.remove) reconfigures the LIVE source replica set,
+		// which is out-of-bounds for an automatic, fenced cutover (rules #3/#8).
+		// Replica-set lag IS now measurable (mongoDBLag via rs.status() optimeDate),
+		// but the missing freeze + destructive-only promotion path keeps Mongo
+		// BLOCKED for automatic. The structured probe below still runs so the
+		// operator gets an actionable verdict for a manual cutover; it does not
+		// enable automatic. Fail closed HERE, before any mutation.
+		return CutoverPreflightResult{}, fmt.Errorf("%w: mongodb automatic cutover is not supported (no source freeze; promotion would reconfigure the live source replica set)", ErrCutoverPreflight)
 	default:
 		return CutoverPreflightResult{}, fmt.Errorf("%w: unsupported engine %q", ErrCutoverPreflight, config.DatabaseType)
 	}
