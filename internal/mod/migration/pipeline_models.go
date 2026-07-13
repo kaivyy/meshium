@@ -147,7 +147,7 @@ type FenceLease struct {
 	AcquiredAt  string `json:"acquiredAt"`
 	ExpiresAt   string `json:"expiresAt"`
 	RenewedAt   string `json:"renewedAt,omitempty"`
-	ReleasedAt  string `json:"releasedAt,omitempty"`
+	ReleasedAt   string `json:"releasedAt,omitempty"`
 }
 
 // --- Health Check Models ---
@@ -348,7 +348,7 @@ type AuditEntry struct {
 	Result               string `json:"result,omitempty"` // success | rejected | failed | degraded | manual_intervention
 }
 
-// --- Metrics Models ---
+// --- Diagnostic Bundle (Phase2D-4) ---
 
 // DiagnosticBundle is an operator-exportable snapshot of a migration's full
 // state for incident recovery and post-mortem. It aggregates the durable
@@ -358,18 +358,18 @@ type AuditEntry struct {
 // ticket or hand to a third party. It never returns a false-success: if a
 // sub-query fails the bundle surfaces the error rather than fabricating state.
 type DiagnosticBundle struct {
-	GeneratedAt  string                 `json:"generatedAt"`
-	MigrationID  int                    `json:"migrationId"`
-	Migration    *Migration             `json:"migration,omitempty"`
-	Config       map[string]interface{} `json:"config,omitempty"` // redacted
-	Stages       []PipelineStage        `json:"stages,omitempty"`
-	AuditTrail   []AuditEntry           `json:"auditTrail,omitempty"`
-	Events       []MigrationEvent       `json:"events,omitempty"`
-	Fence        *FenceLease            `json:"fence,omitempty"`
-	Traffic      *TrafficSwitchConfig   `json:"traffic,omitempty"`
-	Cutover      []CutoverRecord        `json:"cutover,omitempty"`
-	Rollback     []RollbackRecord       `json:"rollback,omitempty"`
-	SyncSessions []SyncSession          `json:"syncSessions,omitempty"`
+	GeneratedAt   string                 `json:"generatedAt"`
+	MigrationID   int                    `json:"migrationId"`
+	Migration     *Migration             `json:"migration,omitempty"`
+	Config        map[string]interface{} `json:"config,omitempty"` // redacted
+	Stages        []PipelineStage        `json:"stages,omitempty"`
+	AuditTrail    []AuditEntry           `json:"auditTrail,omitempty"`
+	Events        []MigrationEvent       `json:"events,omitempty"`
+	Fence         *FenceLease            `json:"fence,omitempty"`
+	Traffic       *TrafficSwitchConfig   `json:"traffic,omitempty"`
+	Cutover       []CutoverRecord        `json:"cutover,omitempty"`
+	Rollback      []RollbackRecord       `json:"rollback,omitempty"`
+	SyncSessions  []SyncSession          `json:"syncSessions,omitempty"`
 }
 
 // --- Metrics Models ---

@@ -132,6 +132,8 @@ func (h *PipelineHandler) RegisterRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("/api/pipeline/traffic/", withRequestID(h.handleTraffic))
 	mux.HandleFunc("/api/pipeline/metrics/", withRequestID(h.handleMetrics))
 	mux.HandleFunc("/api/pipeline/audit/", withRequestID(h.handleAudit))
+	mux.HandleFunc("/api/pipeline/diagnostics/", withRequestID(h.handleDiagnostics))
+	mux.HandleFunc("/api/pipeline/recovery/", withRequestID(h.handleRecovery))
 
 	// WebSocket endpoints (id minted at the command boundary, not here)
 	mux.HandleFunc("/ws/pipeline/", h.handlePipelineWS)
@@ -1207,6 +1209,53 @@ func (h *PipelineHandler) handleAuditByID(w http.ResponseWriter, r *http.Request
 		return
 	}
 	shared.WriteJSON(w, http.StatusOK, trail)
+}
+
+// handleDiagnostics returns the redacted diagnostic bundle for a migration
+// (Phase2D-4) — an operator-exportable snapshot for incident recovery.
+func (h *PipelineHandler) handleDiagnostics(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		shared.WriteError(w, http.StatusMethodNotAllowed, "method not allowed", "METHOD_NOT_ALLOWED")
+		return
+	}
+	path := strings.TrimPrefix(r.URL.Path, "/api/pipeline/diagnostics/")
+	id, err := strconv.Atoi(strings.TrimSpace(path))
+	if err != nil {
+		shared.WriteError(w, http.StatusBadRequest, "invalid migration ID", "VALIDATION_ERROR")
+		return
+	}
+
+	bundle, err := h.repo.BuildDiagnosticBundle(r.Context(), id)
+	if err != nil {
+		shared.LogCtx(r.Context()).Error("build diagnostic bundle failed", "migration_id", id, "error", err)
+		shared.WriteError(w, http.StatusInternalServerError, "failed to build diagnostic bundle", "INTERNAL")
+		return
+	}
+	shared.WriteJSON(w, http.StatusOK, bundle)
+}
+
+// handleRecovery returns operator-facing recovery guidance for a migration's
+// current state (Phase2D-6). The guidance is derived from the honest fail-closed
+// state machine; it never implies an automatic recovery that does not exist.
+func (h *PipelineHandler) handleRecovery(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		shared.WriteError(w, http.StatusMethodNotAllowed, "method not allowed", "METHOD_NOT_ALLOWED")
+		return
+	}
+	path := strings.TrimPrefix(r.URL.Path, "/api/pipeline/recovery/")
+	id, err := strconv.Atoi(strings.TrimSpace(path))
+	if err != nil {
+		shared.WriteError(w, http.StatusBadRequest, "invalid migration ID", "VALIDATION_ERROR")
+		return
+	}
+
+	state, ok := h.currentMigrationState(id)
+	if !ok {
+		shared.WriteError(w, http.StatusNotFound, "migration not found", "NOT_FOUND")
+		return
+	}
+
+	shared.WriteJSON(w, http.StatusOK, recoveryGuidance(state))
 }
 
 func (h *PipelineHandler) handleQueueByID(w http.ResponseWriter, r *http.Request, id int) {

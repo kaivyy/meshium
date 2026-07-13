@@ -1286,8 +1286,6 @@ func (r *sqliteRepo) BuildDiagnosticBundle(ctx context.Context, migrationID int)
 
 	b := &DiagnosticBundle{GeneratedAt: time.Now().UTC().Format(time.RFC3339), MigrationID: migrationID}
 
-	// Best-effort aggregation: a missing record is not an error (e.g. a
-	// migration that never started replication), but a transport/query error is.
 	if m, err := r.GetMigration(migrationID); err != nil {
 		return nil, fmt.Errorf("diagnostic: load migration: %w", err)
 	} else {
