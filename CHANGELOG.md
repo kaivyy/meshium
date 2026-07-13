@@ -5,6 +5,31 @@ All notable changes to Meshium are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased] Phase 2D — operability, auditability, observability, release readiness
+
+Makes the Phase 1 / 2A / 2B / 2C results **operable, auditable, observable,
+operator-safe, and release-gate ready**. Hard out-of-scope: new replication
+engines, new traffic-switch providers, changes to the proven safety contract,
+weakening the single-tenant/fencing model, or "zero downtime" claims. Immutable
+baselines (Phase 1, 2A, 2B, 2C) are preserved. Full report + gap matrix:
+`docs/superpowers/specs/2026-07-13-phase2d-operability-audit-release.md`.
+
+### Added (Phase 2D, slice 1–2: correlation identity)
+- **Correlation / identity propagation** (`trace.go`): one request correlation
+  id minted at every external boundary (REST `withRequestID` honoring
+  `X-Request-ID`, WebSocket command loop) and propagated via `context.Context`
+  through handler → pipeline → stages → remote executor → transfer/replication
+  → fencing → traffic → persistence → events → audit. Distinct identity kinds:
+  request id, migration id, operator-action id, actor type, fence generation.
+  No secret is ever placed in a trace field.
+- **Durable audit identity.** `AuditEntry` gained additive evidence fields
+  (`correlation_id`, `idempotency_key`, `actor_type`, `fence_generation`,
+  `fence_status`, `topology_summary`, `traffic_verify_summary`, `approval_ref`,
+  `result`); `sqliteRepo.CreateAuditEntry` and `EventBus.Emit` inherit the
+  propagated correlation id when the caller did not set one, so every
+  operator-visible operation leaves a reconstruction trace across events and
+  audit rows. Backfilled for existing deployments via idempotent `ALTER TABLE`.
+
 ## [Unreleased] Phase 2C — additional cutover engines & traffic providers
 
 Extends the Phase 2A fenced PostgreSQL cutover to **MySQL (seeded)** and

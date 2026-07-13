@@ -320,6 +320,12 @@ type RiskReport struct {
 // --- Audit Models ---
 
 // AuditEntry records a significant event in the migration lifecycle.
+//
+// Phase2D-2: additive identity fields (correlation_id, idempotency_key,
+// actor_type, fence_generation, fence_status, topology_summary,
+// traffic_verify_summary, approval_ref, result) let any audit row be
+// reconstructed into its full operation context. All appended; the original
+// columns are unchanged. A zero AuditEntry still persists as before.
 type AuditEntry struct {
 	ID            int64  `json:"id"`
 	MigrationID   int    `json:"migrationId"`
@@ -329,6 +335,17 @@ type AuditEntry struct {
 	NewState      string `json:"newState,omitempty"`
 	Actor         string `json:"actor,omitempty"`
 	CreatedAt     string `json:"createdAt"`
+
+	// Phase2D-2 identity/evidence fields.
+	CorrelationID        string `json:"correlationId,omitempty"`
+	IdempotencyKey      string `json:"idempotencyKey,omitempty"`
+	ActorType            string `json:"actorType,omitempty"` // operator | api_client | system_reconciler
+	FenceGeneration      int    `json:"fenceGeneration,omitempty"`
+	FenceStatus          string `json:"fenceStatus,omitempty"`
+	TopologySummary      string `json:"topologySummary,omitempty"`
+	TrafficVerifySummary string `json:"trafficVerifySummary,omitempty"`
+	ApprovalRef          string `json:"approvalRef,omitempty"`
+	Result               string `json:"result,omitempty"` // success | rejected | failed | degraded | manual_intervention
 }
 
 // --- Metrics Models ---

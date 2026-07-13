@@ -1,6 +1,9 @@
 package db
 
-import "database/sql"
+import (
+	"database/sql"
+	"strings"
+)
 
 // Migrate runs all database migrations.
 func Migrate(db *sql.DB) error {
@@ -417,6 +420,8 @@ func Migrate(db *sql.DB) error {
 		);`,
 
 		// audit_trail records all state transitions and significant events.
+		// Phase2D-2 added the identity/evidence columns; existing deployments
+		// gain them via the idempotent ALTERs in Migrate().
 		`CREATE TABLE IF NOT EXISTS audit_trail (
 			id              INTEGER PRIMARY KEY AUTOINCREMENT,
 			migration_id    INTEGER REFERENCES migrations(id) ON DELETE CASCADE,
@@ -425,7 +430,16 @@ func Migrate(db *sql.DB) error {
 			previous_state  TEXT,
 			new_state       TEXT,
 			actor           TEXT,
-			created_at      DATETIME DEFAULT CURRENT_TIMESTAMP
+			created_at      DATETIME DEFAULT CURRENT_TIMESTAMP,
+			correlation_id       TEXT DEFAULT '',
+			idempotency_key     TEXT DEFAULT '',
+			actor_type           TEXT DEFAULT '',
+			fence_generation     INTEGER DEFAULT 0,
+			fence_status         TEXT DEFAULT '',
+			topology_summary     TEXT DEFAULT '',
+			traffic_verify_summary TEXT DEFAULT '',
+			approval_ref         TEXT DEFAULT '',
+			result               TEXT DEFAULT ''
 		);`,
 
 		// migration_metrics stores time-series metrics for a migration.
@@ -592,6 +606,27 @@ func Migrate(db *sql.DB) error {
 
 	for _, stmt := range indexStatements {
 		if _, err := tx.Exec(stmt); err != nil {
+			return err
+		}
+	}
+
+	// Phase2D-2: idempotent schema extensions for existing deployments.
+	// ALTER ADD COLUMN is a no-op once the column exists; sqlite reports
+	// "duplicate column" — we ignore that specific error so re-running Migrate
+	// is safe. Any other error still fails the migration.
+	alterPhase2D := []string{
+		`ALTER TABLE audit_trail ADD COLUMN correlation_id        TEXT DEFAULT ''`,
+		`ALTER TABLE audit_trail ADD COLUMN idempotency_key      TEXT DEFAULT ''`,
+		`ALTER TABLE audit_trail ADD COLUMN actor_type            TEXT DEFAULT ''`,
+		`ALTER TABLE audit_trail ADD COLUMN fence_generation      INTEGER DEFAULT 0`,
+		`ALTER TABLE audit_trail ADD COLUMN fence_status          TEXT DEFAULT ''`,
+		`ALTER TABLE audit_trail ADD COLUMN topology_summary      TEXT DEFAULT ''`,
+		`ALTER TABLE audit_trail ADD COLUMN traffic_verify_summary TEXT DEFAULT ''`,
+		`ALTER TABLE audit_trail ADD COLUMN approval_ref          TEXT DEFAULT ''`,
+		`ALTER TABLE audit_trail ADD COLUMN result                TEXT DEFAULT ''`,
+	}
+	for _, stmt := range alterPhase2D {
+		if _, err := tx.Exec(stmt); err != nil && !strings.Contains(err.Error(), "duplicate column") {
 			return err
 		}
 	}

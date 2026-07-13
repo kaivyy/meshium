@@ -122,6 +122,15 @@ func (b *EventBus) Emit(ctx context.Context, event MigrationEvent) error {
 	event.Source = shared.SanitizeString(event.Source)
 	event.Details = shared.SanitizeJSONRawMessage(event.Details)
 
+	// Phase2D-2: if the caller did not set a correlation id, inherit the one
+	// propagated on the context so every event in an operation shares it. One
+	// externally-initiated request → one correlation id across all its events.
+	if event.CorrelationID == "" {
+		if rid := CorrelationFrom(ctx); rid != "" {
+			event.CorrelationID = rid
+		}
+	}
+
 	seq := atomic.AddInt64(b.sequenceCounter(event.MigrationID), 1)
 	event.Sequence = seq
 

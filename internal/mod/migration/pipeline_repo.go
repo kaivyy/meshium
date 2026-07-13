@@ -1094,10 +1094,22 @@ func (r *sqliteRepo) CreateAuditEntry(ctx context.Context, e AuditEntry) (int64,
 	if err := ctx.Err(); err != nil {
 		return 0, err
 	}
+	// Phase2D-2: inherit the propagated correlation id when the caller did
+	// not set one. One externally-initiated operation → one correlation id
+	// across all its audit rows. Covers every CreateAuditEntry call site.
+	if e.CorrelationID == "" {
+		if rid := CorrelationFrom(ctx); rid != "" {
+			e.CorrelationID = rid
+		}
+	}
 	res, err := r.db.Exec(
-		`INSERT INTO audit_trail (migration_id, event_type, event_data, previous_state, new_state, actor)
-		 VALUES (?, ?, ?, ?, ?, ?)`,
+		`INSERT INTO audit_trail (migration_id, event_type, event_data, previous_state, new_state, actor,
+			correlation_id, idempotency_key, actor_type, fence_generation, fence_status,
+			topology_summary, traffic_verify_summary, approval_ref, result)
+		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 		e.MigrationID, e.EventType, e.EventData, e.PreviousState, e.NewState, e.Actor,
+		e.CorrelationID, e.IdempotencyKey, e.ActorType, e.FenceGeneration, e.FenceStatus,
+		e.TopologySummary, e.TrafficVerifySummary, e.ApprovalRef, e.Result,
 	)
 	if err != nil {
 		return 0, err
@@ -1111,7 +1123,9 @@ func (r *sqliteRepo) GetAuditTrail(migrationID int, limit int) ([]AuditEntry, er
 		limit = 100
 	}
 	rows, err := r.db.Query(
-		`SELECT id, migration_id, event_type, event_data, previous_state, new_state, actor, created_at
+		`SELECT id, migration_id, event_type, event_data, previous_state, new_state, actor, created_at,
+			correlation_id, idempotency_key, actor_type, fence_generation, fence_status,
+			topology_summary, traffic_verify_summary, approval_ref, result
 		 FROM audit_trail WHERE migration_id = ? ORDER BY created_at DESC LIMIT ?`,
 		migrationID, limit,
 	)
@@ -1124,8 +1138,12 @@ func (r *sqliteRepo) GetAuditTrail(migrationID int, limit int) ([]AuditEntry, er
 	for rows.Next() {
 		var e AuditEntry
 		var eventData, previousState, newState, actor sql.NullString
+		var correlationID, idempotencyKey, actorType, fenceStatus, topologySummary, trafficVerifySummary, approvalRef, result sql.NullString
+		var fenceGeneration sql.NullInt64
 		if err := rows.Scan(
 			&e.ID, &e.MigrationID, &e.EventType, &eventData, &previousState, &newState, &actor, &e.CreatedAt,
+			&correlationID, &idempotencyKey, &actorType, &fenceGeneration, &fenceStatus,
+			&topologySummary, &trafficVerifySummary, &approvalRef, &result,
 		); err != nil {
 			return nil, err
 		}
@@ -1140,6 +1158,33 @@ func (r *sqliteRepo) GetAuditTrail(migrationID int, limit int) ([]AuditEntry, er
 		}
 		if actor.Valid {
 			e.Actor = actor.String
+		}
+		if correlationID.Valid {
+			e.CorrelationID = correlationID.String
+		}
+		if idempotencyKey.Valid {
+			e.IdempotencyKey = idempotencyKey.String
+		}
+		if actorType.Valid {
+			e.ActorType = actorType.String
+		}
+		if fenceGeneration.Valid {
+			e.FenceGeneration = int(fenceGeneration.Int64)
+		}
+		if fenceStatus.Valid {
+			e.FenceStatus = fenceStatus.String
+		}
+		if topologySummary.Valid {
+			e.TopologySummary = topologySummary.String
+		}
+		if trafficVerifySummary.Valid {
+			e.TrafficVerifySummary = trafficVerifySummary.String
+		}
+		if approvalRef.Valid {
+			e.ApprovalRef = approvalRef.String
+		}
+		if result.Valid {
+			e.Result = result.String
 		}
 		results = append(results, e)
 	}

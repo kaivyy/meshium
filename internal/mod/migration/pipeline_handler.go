@@ -116,21 +116,44 @@ func (h *PipelineHandler) redactDBConfig(cfg *MigrationConfig) {
 }
 
 // RegisterRoutes registers all pipeline routes on the mux.
+//
+// Phase2D-2: every REST handler is wrapped with withRequestID so a single
+// externally-initiated operation carries one correlation id through the whole
+// call chain (handler → pipeline → stage → executor → events → audit → logs).
+// WebSocket endpoints mint the id at the command boundary inside the handler.
 func (h *PipelineHandler) RegisterRoutes(mux *http.ServeMux) {
 	// REST endpoints
-	mux.HandleFunc("/api/pipeline/migrations", h.handleCreatePipelineMigration)
-	mux.HandleFunc("/api/pipeline/migrations/", h.handlePipelineMigrationByID)
-	mux.HandleFunc("/api/pipeline/risk/", h.handleRisk)
-	mux.HandleFunc("/api/pipeline/compatibility/", h.handleCompatibility)
-	mux.HandleFunc("/api/pipeline/health/", h.handleHealth)
-	mux.HandleFunc("/api/pipeline/replication/", h.handleReplication)
-	mux.HandleFunc("/api/pipeline/traffic/", h.handleTraffic)
-	mux.HandleFunc("/api/pipeline/metrics/", h.handleMetrics)
-	mux.HandleFunc("/api/pipeline/audit/", h.handleAudit)
+	mux.HandleFunc("/api/pipeline/migrations", withRequestID(h.handleCreatePipelineMigration))
+	mux.HandleFunc("/api/pipeline/migrations/", withRequestID(h.handlePipelineMigrationByID))
+	mux.HandleFunc("/api/pipeline/risk/", withRequestID(h.handleRisk))
+	mux.HandleFunc("/api/pipeline/compatibility/", withRequestID(h.handleCompatibility))
+	mux.HandleFunc("/api/pipeline/health/", withRequestID(h.handleHealth))
+	mux.HandleFunc("/api/pipeline/replication/", withRequestID(h.handleReplication))
+	mux.HandleFunc("/api/pipeline/traffic/", withRequestID(h.handleTraffic))
+	mux.HandleFunc("/api/pipeline/metrics/", withRequestID(h.handleMetrics))
+	mux.HandleFunc("/api/pipeline/audit/", withRequestID(h.handleAudit))
 
-	// WebSocket endpoints
+	// WebSocket endpoints (id minted at the command boundary, not here)
 	mux.HandleFunc("/ws/pipeline/", h.handlePipelineWS)
 	mux.HandleFunc("/ws/compatibility/", h.handleCompatibilityWS)
+}
+
+// withRequestID ensures an incoming request has a correlation id: honor a
+// client-supplied X-Request-ID (so downstream retries/traces align), else
+// mint a fresh one. The value is treated as an opaque label only.
+// withRequestID ensures an incoming request has correlation identity: honor a
+// client-supplied X-Request-ID (so downstream retries/traces align), else
+// mint a fresh per-request id. WithCorrelation also derives a stable
+// boundary CorrelationID when none is present. The values are opaque labels.
+func withRequestID(next func(http.ResponseWriter, *http.Request)) func(http.ResponseWriter, *http.Request) {
+	return func(w http.ResponseWriter, r *http.Request) {
+		reqID := r.Header.Get("X-Request-ID")
+		ctx := WithCorrelation(r.Context(), "", reqID, "", "", "")
+		if got := RequestIDFrom(ctx); got != "" {
+			w.Header().Set("X-Request-ID", string(got)) // echo so callers can correlate
+		}
+		next(w, r.WithContext(ctx))
+	}
 }
 
 // --- REST: Create Pipeline Migration ---
@@ -336,6 +359,10 @@ func (h *PipelineHandler) handlePipelineMigrationByID(w http.ResponseWriter, r *
 		shared.WriteError(w, http.StatusBadRequest, "invalid migration ID", "VALIDATION_ERROR")
 		return
 	}
+
+	// Phase2D-2: thread the migration identity onto the context so every
+	// sub-handler (and the audit rows it writes) carries the migration id.
+	r = r.WithContext(WithMigrationID(r.Context(), id))
 
 	if len(parts) == 1 {
 		if r.Method != http.MethodGet {
@@ -1277,6 +1304,15 @@ func (h *PipelineHandler) handlePipelineWS(w http.ResponseWriter, r *http.Reques
 
 	ctx, cancel := context.WithCancel(r.Context())
 	defer cancel()
+
+	// Phase2D-2: thread the migration + operator-action identity onto the WS
+	// context so commands issued over the socket (pause/cancel/resume and the
+	// execute/rollback runs) carry correlation through to logs, events, and
+	// audit rows. Reconnects mint a fresh operator-action id so two sessions
+	// for the same migration are distinguishable.
+	ctx = WithMigrationID(ctx, migrationID)
+	ctx = WithOperatorActionID(ctx, NewOperatorActionIDStr())
+	ctx = context.WithValue(ctx, keyActorType, "operator")
 
 	// Heartbeat: send ping every 30s, close if no pong within 10s
 	heartbeatDone := make(chan struct{})
