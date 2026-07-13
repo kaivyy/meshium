@@ -5,13 +5,20 @@ All notable changes to Meshium are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [Unreleased] Phase 2D — operability, auditability, observability, release readiness
+## [Unreleased]
+
+Consolidated unreleased work for Phase 1 (P0 safety baseline) through Phase 2D
+(operability, auditability, observability, release-readiness). Hard out-of-scope:
+new replication engines, new traffic-switch providers, weakening the
+single-tenant/fencing model, or any "zero downtime" claim. Immutable baselines
+are preserved. Full reports: `docs/phase2d-release-report.md`,
+`docs/known-limitations.md`.
+
+### Phase 2D — operability, auditability, observability, release readiness
 
 Makes the Phase 1 / 2A / 2B / 2C results **operable, auditable, observable,
-operator-safe, and release-gate ready**. Hard out-of-scope: new replication
-engines, new traffic-switch providers, changes to the proven safety contract,
-weakening the single-tenant/fencing model, or "zero downtime" claims. Immutable
-baselines (Phase 1, 2A, 2B, 2C) are preserved. Full report + gap matrix:
+operator-safe, and release-gate ready**. Immutable baselines (Phase 1, 2A, 2B,
+2C) are preserved. Full report + gap matrix:
 `docs/superpowers/specs/2026-07-13-phase2d-operability-audit-release.md`.
 
 ### Added (Phase 2D, slice 1–2: correlation identity)
@@ -106,7 +113,7 @@ baselines (Phase 1, 2A, 2B, 2C) are preserved. Full report + gap matrix:
   `docs/known-limitations.md`; operator recovery scope in
   `docs/runbooks/operator-recovery.md`.
 
-## [Unreleased] Phase 2C — additional cutover engines & traffic providers
+### Phase 2C — additional cutover engines & traffic providers
 
 Extends the Phase 2A fenced PostgreSQL cutover to **MySQL (seeded)** and
 **Redis**, and adds the **HAProxy** traffic provider. MongoDB remains
@@ -156,7 +163,7 @@ baselines (Phase 1, Phase 2A, Phase 2B) are preserved. Full report:
   `phase2c_dispatch_test.go` (4). Integration (build tag `integration`):
   `mysql_cutover_integration_test.go` drives a live MySQL 8 seeded pair.
 
-## [1.5.0-rc.1] — 2026-07-11
+### Phase 1 — P0 safety baseline (1.5.0-rc.1)
 
 Phase 1 P0 safety baseline. **Release candidate — NO-GO for ship** pending
 one remediation item (see `docs/release-readiness-rc1.md`).
@@ -221,7 +228,7 @@ rsync/direct host-to-host transfer, checksum verification, and byte-level
 resume. Phase 2 begins only after the release-readiness report is reviewed and
 approved, starting with a separate design gate.
 
-## [1.5.0-beta.9] — 2026-07-10
+### Phase 2 — database category (1.5.0-beta.9)
 
 Real database migration — the `database` category now moves actual DB data
 (dump → restore), not just server metadata. Supports PostgreSQL, MySQL/MariaDB,
@@ -266,7 +273,7 @@ replication + cutover is Phase 2, infra already present, deferred).
 - **Injection-safe commands.** All shell args go through `shared.ShellQuote`; SQL
   identifiers use `pqIdent`/`backtickIdent`; SQL values use `sqlEscapeSingleQuotes`.
 
-## [1.5.0-beta.7] — 2026-07-10
+### Phase 2 — DB bloat + plan-recovery robustness (1.5.0-beta.7)
 
 DB bloat + plan-recovery robustness. This release stops the database from
 ballooning ~100MB per plan, fixes the root cause that left orphaned rows after
@@ -331,7 +338,7 @@ claim is made.
   (`rollbackAvailable`), so it only appears once the pipeline has reached the
   apply phase.
 
-## [1.5.0-beta.8] — 2026-07-10
+### Phase 2 — UX polish on create-migration wizard (1.5.0-beta.8)
 
 UX polish on the create-migration wizard. It is still a **pre-release / beta**
 — not production-ready or enterprise-grade, and no such claim is made.
@@ -344,7 +351,7 @@ UX polish on the create-migration wizard. It is still a **pre-release / beta**
   complete/close/error. Not persisted — the create wizard resets on refresh, so
   cross-reload doesn't apply (`web/src/routes/migrations/new/+page.svelte`).
 
-## [1.5.0-beta.6] — 2026-07-09
+### Phase 2 — dry-run speed + pipeline-wizard UX (1.5.0-beta.6)
 
 Dry-run speed + pipeline-wizard UX. This release makes the Dry Run step fast,
 keeps progress and previews across a page refresh / browser close, and adds
@@ -425,7 +432,7 @@ production-ready or enterprise-grade, and no such claim is made.
 - **Step 7 replication lag** is inherently live and not persisted as truth; the
   snapshot is a refresh convenience, with an honest "reconnecting" stale state.
 
-## [1.5.0-beta.5] — 2026-07-08
+### Phase 2 — host-key trust fix (1.5.0-beta.5)
 
 Host-key trust fix. This release repairs first-connection trust, which was
 broken in beta.4: clicking **Trust host key & retry** trusted the host, but the
@@ -572,7 +579,7 @@ enterprise-grade, and no such claim is made.
 
 ---
 
-## [1.5.0-beta.4] — 2026-07-08
+### Phase 2 — migration-correctness beta (1.5.0-beta.4)
 
 Migration-correctness beta. This release does not add migration features — it
 makes the migration paths **stop claiming or reporting work the live pipeline
@@ -676,7 +683,7 @@ more honest at this tag, not complete.
 
 ---
 
-## [1.5.0-beta.3] — 2026-07-08
+### Phase 2 — build-fix release (1.5.0-beta.3)
 
 Build-fix release. **v1.5.0-beta.1 and v1.5.0-beta.2 do not compile from a
 fresh clone** — two source files under `internal/mod/server/` were silently
@@ -725,7 +732,7 @@ feature or runtime-behavior changes versus beta.2.
 
 ---
 
-## [1.5.0-beta.2] — 2026-07-07
+### Phase 2 — second beta: connection fixes + frontend redesign (1.5.0-beta.2)
 
 Second beta on the v1.5.0 line. Builds on v1.5.0-beta.1 by adding two
 connection-breaking backend fixes (WebSocket origin rejection behind a reverse
