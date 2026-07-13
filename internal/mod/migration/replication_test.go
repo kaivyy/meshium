@@ -2,6 +2,7 @@ package migration
 
 import (
 	"context"
+	"strings"
 	"testing"
 )
 
@@ -77,3 +78,24 @@ func TestSetupMongoDBFailsClosedWithoutTouchingSource(t *testing.T) {
 		t.Fatalf("setupMongoDB issued %d command(s) against the source before failing closed: %v", len(source.commands), source.commands)
 	}
 }
+
+// TestExecCommandErrorRedactsRemoteOutput proves the diagnostic built from
+// remote command stdout/stderr (which can contain connection strings,
+// -pPASSWORD, or tokens) is redacted before it becomes an error string
+// that flows into logs, events, and API responses. This is the highest-risk
+// secret sink in the replication path.
+func TestExecCommandErrorRedactsRemoteOutput(t *testing.T) {
+	const raw = "mysql -uroot -pS3cretPass! -h10.0.0.5 'FLUSH TABLES WITH READ LOCK' exited 1: Access denied"
+	got := execCommandError(nil, 1, raw, "")
+
+	if got == "" {
+		t.Fatal("empty diagnostic")
+	}
+	if strings.Contains(got, "S3cretPass!") {
+		t.Fatalf("secret leaked into command-error diagnostic: %s", got)
+	}
+	if !strings.Contains(got, "[REDACTED]") {
+		t.Fatalf("expected redaction marker in diagnostic: %s", got)
+	}
+}
+

@@ -30,6 +30,32 @@ baselines (Phase 1, 2A, 2B, 2C) are preserved. Full report + gap matrix:
   operator-visible operation leaves a reconstruction trace across events and
   audit rows. Backfilled for existing deployments via idempotent `ALTER TABLE`.
 
+### Added (Phase 2D, slice 3: structured logging + central redaction)
+- **Central redaction boundary at the emit layer.** `shared.Log` (existing
+  structured JSON logger) was the only safe sink; the ~80 `log.Printf`
+  call sites (many echo command lines / remote `stderr` that can carry
+  credentials) now route through `shared.InitLogging()`'s redacting
+  `redactWriter`, so a raw secret can never reach `stderr`/an aggregator
+  at any site. No per-call redaction required.
+- **Identity-threaded structured logs.** `shared.LogCtx(ctx)` carries the
+  active correlation id + migration id (registered via
+  `migration.RegisterCorrelationLogging()`); the migration package's new
+  structured log lines are reconstructable to their operation.
+- **Source-level sanitization of remote command output.** `execCommandError`
+  (replication) and the nginx / package install error paths now
+  `SanitizeString` the raw `stdout`/`stderr` *before* it enters an error
+  string — so secrets cannot ride those strings into logs, events,
+  WebSocket `Error` frames, or API responses.
+- **Strengthened `SanitizeString`.** Added explicit redaction of the
+  MySQL/psql inline `-pPASSWORD` flag form (the most common raw-secret
+  leak in command output), applied before other patterns to avoid
+  double-matching.
+- **Secret-scan test suite** (`internal/shared/logger_test.go`,
+  `replication_test.go`): structured message + attribute redaction,
+  writer reroute redaction, correlation threading, and a cross-sink
+  secret-scan guard. `TestExecCommandErrorRedactsRemoteOutput` locks the
+  highest-risk replication sink.
+
 ## [Unreleased] Phase 2C — additional cutover engines & traffic providers
 
 Extends the Phase 2A fenced PostgreSQL cutover to **MySQL (seeded)** and
