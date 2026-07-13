@@ -21,8 +21,9 @@ slice, with one commit per slice.
 | 4 — Durable audit trail + diagnostic bundle | `c414f8a` | `BuildDiagnosticBundle` + `/api/pipeline/diagnostics`; 3 tests |
 | 5 — REST idempotency + WS replay | `def2f22` | `Idempotency-Key` dedup; 2 tests |
 | 6 — Operator recovery API/UX + runbooks | `b6c1bec` | `recoveryGuidance` + `/api/pipeline/recovery` + runbook; 2 tests |
-| 7 — Concurrency caps + transfer-limit wiring | `3247d45` | global sem + per-server resource locks + rsync wiring; 9 tests |
-| 8 — Dead-code cleanup + feature gating + docs | `0ebed66` | removed orphan `parseCategories`; gate test + CHANGELOG |
+| 7 — Concurrency caps + transfer-limit wiring | `3247d45` | global sem + per-server `(source,target)` resource lock (atomic claim) + bandwidth honesty warn; 8 tests |
+| 8 — Dead-code cleanup + feature gating + docs | `0ebed66` | removed orphan `parseCategories`; API guardrail map for unsupported provider/replication; gate test + docs |
+| 9 — Release suite + secret-leak gate | `HEAD` | audit-boundary sanitization + JSON key-aware redaction; consolidated release-gate secret test; this report |
 
 ## Tests per slice (migration package, non-integration)
 
@@ -34,9 +35,10 @@ slice, with one commit per slice.
 | 5 | `idempotency_test.go` | 2 | key round-trips, audit inherits idempotency key |
 | 6 | `recovery_guidance_test.go` | 2 | fail-closed NOT safe-to-resume; every state answered |
 | 7 | `concurrency_test.go`, `concurrency_resource_test.go` | 8 | global cap blocks at N+1; resource lock excludes shared host; rsync `--parallel` |
-| 8 | `feature_gate_test.go` | 1 | `AutoCutoverDefault == false` |
+| 8 | `feature_gate_test.go`, `guardrail_test.go` | 2 | `AutoCutoverDefault == false`; unsupported provider/mode rejected at API |
+| 9 | `release_gate_test.go` | 1 | consolidated no-secret-in-any-sink gate (log + audit + bundle) |
 
-Total: 56 test files in `internal/mod/migration/`; 2 integration-tagged
+Total: 58 test files in `internal/mod/migration/`; 2 integration-tagged
 (`pg_cutover`, `mysql_cutover`, `//go:build integration`, require live Docker).
 
 ## Full release gate (all green)
@@ -57,8 +59,14 @@ new claims. Specifically preserved:
 - Fail-closed states (`needs_manual_intervention`, `awaiting_cutover`) are
   **never** auto-forwarded or auto-rolled-back; recovery guidance marks them
   `safeToResume: false`.
-- No secret reaches logs / events / API / audit / exports (central redaction
-  at the emit layer + source sanitization of remote command output).
+- No secret reaches logs / events / API / audit / exports. `#9` closed two
+  concrete leaks the consolidated release-gate test surfaced: (a) `CreateAuditEntry`
+  persisted raw free-text fields (`event_data`, `actor`, evidence summaries)
+  without sanitizing — now sanitized at the persistence boundary; (b) a bare
+  password value under a credential key (e.g. `databaseConfig.password`) leaked
+  through `SanitizeJSONRawMessage` because the string patterns only matched
+  `key=value`/`-p`/base64 shapes — now key-aware: any value under a secret-key
+  name is redacted wholesale. Both verified by `TestReleaseGateNoSecretInAnySink`.
 - No global "zero downtime" claim anywhere.
 
 ## Residual risks (carried, not introduced)
@@ -93,3 +101,18 @@ new claims. Specifically preserved:
 correlation-traceable, audit-durable, centrally redacted, idempotent,
 recovery-guided, concurrency-bounded, and release-gate green — without
 touching any immutable safety baseline.
+
+## Ship / no-ship recommendation
+
+**SHIP** Phase 2D for the documented scope. All release gates are green
+(`go build ./...`, `go vet ./...`, full `./internal/...` test suite, migration
+`-race` suite, and `svelte-check`). No immutable Phase 1/2A/2B/2C baseline
+regressed; the safety contract (manual cutover default, fail-closed states,
+fencing, traffic-ownership verification, integrity-checked transfer, restricted
+`ForceTransition`, honest product wording) is intact. The two secret-leak
+findings in slice 9 were **closed before ship**, not deferred.
+
+Carry, do not block: residual risks #1–#4 (rsync not driven on the active
+path, source-freeze deferred, single fence lifetime) are pre-existing Phase
+2A/2B limitations, honestly documented in `known-limitations.md`, and outside
+this slice's scope.

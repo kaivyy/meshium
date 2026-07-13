@@ -26,6 +26,11 @@ var (
 	longBase64Pattern = regexp.MustCompile(`[A-Za-z0-9+/]{40,}={0,2}`)
 	// Authorization headers
 	authHeaderPattern = regexp.MustCompile(`(?i)authorization\s*:\s*.*`)
+	// JSON object keys whose values are credentials regardless of value shape.
+	// A bare password (e.g. "S3cretPass!-in-RC-2026") is not caught by the
+	// key=value/-p/base64 string patterns, so JSON values under these key names
+	// are redacted wholesale in sanitizeJSONValue.
+	secretKeyPattern = regexp.MustCompile(`(?i)^(password|passwd|pwd|pass|secret|token|api_?key|access_?key|private_?key|secret_?key|credential|auth)$`)
 )
 
 // SanitizeString removes secrets from a string, replacing them with [REDACTED].
@@ -96,6 +101,15 @@ func sanitizeJSONValue(v any) any {
 		return SanitizeString(value)
 	case map[string]any:
 		for k, item := range value {
+			// Redact values whose KEY names a credential, regardless of value
+			// shape — a bare password string is not caught by the string
+			// patterns. Keys themselves are kept so structure stays readable.
+			if secretKeyPattern.MatchString(k) {
+				if s, ok := item.(string); ok && s != "" {
+					value[k] = "[REDACTED]"
+					continue
+				}
+			}
 			value[k] = sanitizeJSONValue(item)
 		}
 		return value

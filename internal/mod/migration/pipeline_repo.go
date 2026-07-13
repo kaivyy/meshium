@@ -1113,6 +1113,19 @@ func (r *sqliteRepo) CreateAuditEntry(ctx context.Context, e AuditEntry) (int64,
 			e.IdempotencyKey = key
 		}
 	}
+	// Phase2D-9 (release gate): sanitize every free-text audit field at the
+	// persistence boundary. Callers pass raw error/detail strings that can embed
+	// a secret (e.g. "mysql -uroot -pS3cret" in EventData). Persisting them
+	// would leak into an operator-readable column. SanitizeString redacts
+	// connection strings, bearer tokens, private keys, and inline passwords.
+	e.EventData = shared.SanitizeString(e.EventData)
+	e.PreviousState = shared.SanitizeString(e.PreviousState)
+	e.NewState = shared.SanitizeString(e.NewState)
+	e.Actor = shared.SanitizeString(e.Actor)
+	e.FenceStatus = shared.SanitizeString(e.FenceStatus)
+	e.TopologySummary = shared.SanitizeString(e.TopologySummary)
+	e.TrafficVerifySummary = shared.SanitizeString(e.TrafficVerifySummary)
+	e.ApprovalRef = shared.SanitizeString(e.ApprovalRef)
 	res, err := r.db.Exec(
 		`INSERT INTO audit_trail (migration_id, event_type, event_data, previous_state, new_state, actor,
 			correlation_id, idempotency_key, actor_type, fence_generation, fence_status,
