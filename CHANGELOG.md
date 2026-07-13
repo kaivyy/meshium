@@ -56,6 +56,56 @@ baselines (Phase 1, 2A, 2B, 2C) are preserved. Full report + gap matrix:
   secret-scan guard. `TestExecCommandErrorRedactsRemoteOutput` locks the
   highest-risk replication sink.
 
+### Added (Phase 2D, slice 4–5: durable audit trail + idempotency)
+- **Diagnostic bundle endpoint.** `GET /api/pipeline/diagnostics/{id}` returns
+  a redacted, durable snapshot (config, stages, audit, events, fence, traffic,
+  cutover, rollback, transfers) aggregated from the repo; it never fabricates
+  missing data and redacts secrets at the source.
+- **Idempotent operator actions.** Mutating API requests accept an
+  `Idempotency-Key` header; a retried request with the same key is answered
+  from the original audit outcome instead of re-executing. The key is
+  propagated into the audit row so one operation is reconstructable end-to-end.
+- **WebSocket replay/reconnect.** The pipeline WS command loop already
+  replays missed progress on reconnect; reconnect resumes from the last
+  checkpoint rather than restarting.
+
+### Added (Phase 2D, slice 6: operator recovery UX/API + runbooks)
+- **Recovery guidance API.** `GET /api/pipeline/recovery/{id}` returns
+  operator guidance for the migration's current state — summary, concrete
+  next actions, and `safeToResume`. Fail-closed states
+  (`needs_manual_intervention`, `awaiting_cutover`) are explicitly **not**
+  marked safe-to-resume; resumable states (`failed`, `interrupted`, `paused`)
+  are. A test proves every one of the 20 states yields guidance and that the
+  fail-closed states are never auto-forwarded.
+- **Operator recovery runbook** (`docs/runbooks/operator-recovery.md`):
+  per-state recovery procedure, API surface, and an explicit **Not Supported**
+  section (no global "zero downtime", no automatic cross-major PostgreSQL
+  cutover, no new traffic providers beyond the tested set).
+
+### Added (Phase 2D, slice 7: concurrency caps + transfer-limit wiring)
+- **Global concurrency cap.** A semaphore bounds how many migrations run at
+  once (`DefaultMaxConcurrentMigrations = 4`, overridable via
+  `SetMaxConcurrent`). This caps the *global* count — distinct from
+  `runningPipelines`, which only dedupes a single migration.
+- **Per-server resource locks.** Two distinct migrations can no longer mutate
+  the same host concurrently: `Pipeline` claims a refcounted lock on the
+  source and target server IDs; a busy server fails closed rather than racing.
+- **Transfer-limit wiring + honesty guard.** `BandwidthLimit` /
+  `ParallelTransfers` (declared on `MigrationConfig`) now reach `SyncConfig`
+  and emit rsync `--bwlimit` / `--parallel`. Because the active applier-replay
+  path does not drive the rsync engine, a warning is emitted when those limits
+  are set so an operator is never silently misled into expecting throttled
+  transfers.
+
+### Changed (Phase 2D, slice 8: dead-code cleanup + feature gating + docs)
+- Removed the orphaned `parseCategories` helper in `repo.go` (zero callers).
+- Confirmed the fenced-cutover feature gate (`MigrationConfig.AutoCutover`,
+  default **false**) is the single opt-in for the Phase 2A/2C orchestrator;
+  the manual cutover path stays the default and is never silently upgraded.
+- Authoritative support matrix and honest-limitations remain in
+  `docs/known-limitations.md`; operator recovery scope in
+  `docs/runbooks/operator-recovery.md`.
+
 ## [Unreleased] Phase 2C — additional cutover engines & traffic providers
 
 Extends the Phase 2A fenced PostgreSQL cutover to **MySQL (seeded)** and

@@ -364,18 +364,6 @@ func (r *sqliteRepo) GetAppliedCategories(migrationID int) ([]string, error) {
 	return categories, nil
 }
 
-// Helper: parse categories from JSON string to slice
-func parseCategories(s string) ([]string, error) {
-	var cats []string
-	if err := json.Unmarshal([]byte(s), &cats); err != nil {
-		return nil, fmt.Errorf("parse categories: %w", err)
-	}
-	if cats == nil {
-		cats = []string{}
-	}
-	return cats, nil
-}
-
 // Helper: check if a string is in a slice
 func contains(slice []string, s string) bool {
 	for _, v := range slice {
