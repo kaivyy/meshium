@@ -116,7 +116,7 @@ credentials + propagation verification exists.
 | parallel transfers | **yes** (`--parallel`) | wired to `ParallelTransfers` |
 | very large trees | unverified | no chunk/sub-transfer state; one rsync process |
 | long-running remote checksum | unverified | `find -exec md5sum` can exceed timeouts on huge trees |
-| SSH drop & recovery | partial | resume re-runs; no byte-level resume proof |
+| SSH drop & recovery | **proven (4C)** | killed-process leaves partial tree; ResumeSync (`--partial --append-verify`) re-runs to completion; per-file md5 proves byte-identical target (`TestSyncResumeAfterKillLive`) |
 | tc/netem impairment | **none** | no impairment test exists |
 | sub-transfer chunking | **none** | no chunk state machine |
 | backpressure/fairness | none | no fairness between concurrent migrations |

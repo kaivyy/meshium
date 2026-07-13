@@ -203,6 +203,24 @@ ambiguity; no weakening of the Phase 1–3 safety contract.** Sequencing:
   Unit-tested: `guardrail_test.go` (`TestSupportedProviderGuardrail`),
   `phase2c_dispatch_test.go` (`TestNewTrafficSwitcherSupported`).
 
+#### 4C — WAN / large-scale transfer resilience (resume + integrity contract)
+- **Resume-after-kill proven with REAL local rsync**
+  (`sync_4c_integration_test.go`). `TestSyncResumeAfterKillLive` starts a
+  throttled (`--bwlimit`) `InitialSync`, cancels its context to **kill rsync
+  mid-transfer** (partial files remain on target), records the session as
+  errored (never `completed`), then `ResumeSync` re-runs the SAME resumable
+  command (`--partial --append-verify`) to completion; the target is then
+  proven **byte-identical** to the source by a per-file md5 map (0 corrupted,
+  0 lost). This is the exact WAN-impaired contract (killed process / SSH drop
+  shows the same partial-tree state), proven without mocks.
+- **Interruption→resume state machine proven** (`TestSyncResumeAfterInterruptionMock`):
+  a session left in `error` is resumed by `ResumeSync` to `completed`, and
+  `VerifyChecksums` confirms integrity (matching md5sums on source and target).
+- **No rsync replacement (finding D-1).** The rsync baseline already provides
+  `--partial --append-verify`, `--checksum`, `--bwlimit`, `--parallel`; 4C only
+  *proves* the resume/integrity contract end-to-end. A chunked engine remains a
+  deferred option, not an in-Phase-4 change.
+
 ### Phase 2C — additional cutover engines & traffic providers
 
 Extends the Phase 2A fenced PostgreSQL cutover to **MySQL (seeded)** and
