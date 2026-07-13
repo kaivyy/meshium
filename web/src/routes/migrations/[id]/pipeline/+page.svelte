@@ -22,6 +22,7 @@
   import ObservationPanel from '$lib/components/ObservationPanel.svelte';
   import BottomTabs from '$lib/components/BottomTabs.svelte';
   import CompatibilityChecklist from '$lib/components/CompatibilityChecklist.svelte';
+  import MigrationEvidencePanel from '$lib/components/MigrationEvidencePanel.svelte';
 
   const migrationId = parseInt($page.params.id ?? '0', 10);
 
@@ -1516,6 +1517,11 @@
                 {/each}
               </div>
             {/if}
+
+            <!-- 4G 3C: operator evidence — transfers, replication, fence/ownership -->
+            <div class="mt-4">
+              <MigrationEvidencePanel {syncSessions} {replicationStatus} {auditTrail} />
+            </div>
           </div>
 
         {:else if currentStep === 8}

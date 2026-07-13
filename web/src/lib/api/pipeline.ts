@@ -373,6 +373,17 @@ export interface AuditEntry {
   newState?: string;
   actor?: string;
   createdAt: string;
+  // Phase2D-2 operator-evidence fields, produced by the backend. The UI reflects
+  // them; it never invents fence/ownership proof the server did not record.
+  correlationId?: string;
+  idempotencyKey?: string;
+  actorType?: string;
+  fenceGeneration?: number;
+  fenceStatus?: string;
+  topologySummary?: string;
+  trafficVerifySummary?: string;
+  approvalRef?: string;
+  result?: string;
 }
 
 export interface VerificationResult {
