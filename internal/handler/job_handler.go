@@ -145,9 +145,11 @@ func (h *JobHandler) handleSubmit(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Validate type
+	// Validate type. The legacy migration job (driven by the deprecated
+	// planner) was removed in Phase 4H; canonical migrations run over the
+	// WebSocket pipeline, so only discovery and compat_check are accepted.
 	switch req.Type {
-	case jobengine.JobTypeMigration, jobengine.JobTypeDiscovery, jobengine.JobTypeCompatCheck:
+	case jobengine.JobTypeDiscovery, jobengine.JobTypeCompatCheck:
 		// valid
 	default:
 		shared.WriteError(w, http.StatusBadRequest, "invalid job type", "VALIDATION_ERROR")
@@ -156,11 +158,6 @@ func (h *JobHandler) handleSubmit(w http.ResponseWriter, r *http.Request) {
 
 	// Type-specific validation
 	switch req.Type {
-	case jobengine.JobTypeMigration:
-		if req.PlanID == "" {
-			shared.WriteError(w, http.StatusBadRequest, "planId is required for migration jobs", "VALIDATION_ERROR")
-			return
-		}
 	case jobengine.JobTypeDiscovery:
 		if req.SourceID == 0 {
 			shared.WriteError(w, http.StatusBadRequest, "sourceId is required for discovery jobs", "VALIDATION_ERROR")

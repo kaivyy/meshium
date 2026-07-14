@@ -429,7 +429,7 @@
   function buildMoreMenuItems(id: number) {
     return [
       { label: 'Compare with another server', href: `/servers/compare?source=${id}` },
-      { label: 'Create migration plan', href: `/plans/new?source=${id}` },
+      { label: 'Create migration plan', href: `/migrations/new?source=${id}` },
       { label: 'Edit server', href: `/servers/${id}/edit` },
       { label: '', divider: true },
       { label: 'Delete server', danger: true, onclick: () => void handleDeleteServer() },

@@ -20,7 +20,6 @@
       monitoring: 'Monitoring',
       alerts: 'Alerts',
       settings: 'Settings',
-      plans: 'Plans',
     };
     return map[parts[0]] ?? parts[0].charAt(0).toUpperCase() + parts[0].slice(1);
   })();

@@ -79,7 +79,7 @@
 
   function navigateToPlan() {
     if (!sourceID || !targetID) return;
-    goto(`/plans/new?source=${sourceID}&target=${targetID}`);
+    goto(`/migrations/new?source=${sourceID}&target=${targetID}`);
   }
 
 </script>

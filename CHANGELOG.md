@@ -16,6 +16,32 @@ Phase 5 delivers *minimal* downtime, measured by the live test matrix (see
 Phase 5 below). Immutable baselines are preserved. Full reports under
 `docs/superpowers/specs/`.
 
+### Phase 4H — Deprecate & Remove Legacy Planner (/plans)
+
+Removes the parallel legacy planner subsystem (`/plans` → `planner.NewDefaultPlanner` →
+REST `/api/plans` → `migration_plans` plan-store → `POST /api/plans/:id/execute` → jobengine
+migration-job → `bridge.go` → `migration.Engine.Run`) in favor of the canonical wizard
+(`/migrations/new` → live WS plan collect → `/migrations/:id/pipeline`). Pattern: deprecate →
+block execution → audit dependencies → remove code → stabilize canonical pipeline.
+
+- **Block first:** `POST /api/plans/:id/execute` now returns `410 Gone` with a
+  `planner_execution_deprecated` error pointing at `/migrations/new`.
+- **Removed:** `internal/mod/planner` package (15 files), `internal/handler/plan_handler.go`,
+  the `createMigrationHandler` factory branch + `JobTypeMigration` submit path, and the
+  `MigrationJobHandler` jobengine handler.
+- **KEPT by design:** the `migration_plans` table is shared with the canonical
+  `migration` package (`pipeline_repo.go` `GetPlan`/`SavePlan`, keyed by `migration_id`; read
+  by the pipeline detail handler). The deprecated planner's incompatible schema lost the
+  `IF NOT EXISTS` race in `db.Migrate`, so the table is canonical-owned and must not be dropped.
+  jobengine itself stays (discovery + compat-check jobs are canonical preflight). The shared
+  `migration.Engine.Run`/`BuildStepsFromCategories` and `recovery.go` canonical executors are
+  untouched.
+- **FE:** `/plans`, `/plans/new`, `/plans/:id` now redirect to `/migrations` (or
+  `/migrations/new`), nav "Plans" entry and compare-page CTA repointed to the canonical wizard;
+  `lib/api/planner.ts` deleted.
+- **Net:** one canonical migration path; no orphaned dead code; all entrypoints resolve to the
+  pipeline.
+
 ### Phase 4G.1 — Plan Wizard completion, recovery & truthfulness audit
 
 Fixes the New Migration → Step 4 "Review & Create Plan" flow that could hang on

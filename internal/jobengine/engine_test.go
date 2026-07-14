@@ -13,7 +13,6 @@ import (
 
 	"meshium/internal/db"
 	"meshium/internal/mod/discovery"
-	"meshium/internal/mod/planner"
 	"meshium/internal/mod/transport"
 )
 
@@ -1408,77 +1407,6 @@ func TestFileBasedDB(t *testing.T) {
 
 // --- Integration tests with real Phase 2-5 types ---
 
-func TestIntegration_PlannerPlanStoreJobEngine(t *testing.T) {
-	// This test verifies that the Job Engine can work with the planner
-	// package's PlanStore interface
-	database := newTestDB(t)
-
-	sqlitePlanStore := planner.NewSQLitePlanStore(database)
-	if err := sqlitePlanStore.EnsureTable(); err != nil {
-		t.Fatalf("ensure plan store table: %v", err)
-	}
-	var planStore planner.PlanStore = sqlitePlanStore
-
-	// Create a plan and save it
-	plan := &planner.MigrationPlan{
-		ID:        "plan-integration-1",
-		CreatedAt: time.Now().UTC(),
-		Source: planner.ServerSummary{
-			Hostname: "source-server",
-			OS:       "Ubuntu 22.04",
-		},
-		Target: planner.ServerSummary{
-			Hostname: "target-server",
-			OS:       "Ubuntu 24.04",
-		},
-		Steps:      []planner.PlannedStep{},
-		RiskLevel:  planner.RiskLow,
-	}
-	if err := planStore.SavePlan(context.Background(), plan); err != nil {
-		t.Fatalf("save plan: %v", err)
-	}
-
-	// Load the plan
-	loaded, err := planStore.LoadPlan(context.Background(), "plan-integration-1")
-	if err != nil {
-		t.Fatalf("load plan: %v", err)
-	}
-	if loaded.ID != "plan-integration-1" {
-		t.Fatalf("expected plan-integration-1, got %s", loaded.ID)
-	}
-
-	// Verify the plan can be used by a job
-	queue := NewSQLiteJobQueue(database)
-	if err := queue.EnsureTable(); err != nil {
-		t.Fatalf("ensure queue table: %v", err)
-	}
-
-	store := NewSQLiteJobStore(database)
-	if err := store.EnsureTable(); err != nil {
-		t.Fatalf("ensure store table: %v", err)
-	}
-
-	// Create a job referencing the plan
-	job := &Job{
-		ID:        "job-integration-1",
-		Type:      JobTypeMigration,
-		Status:    JobStatusQueued,
-		CreatedAt: time.Now().UTC(),
-		PlanID:    "plan-integration-1",
-	}
-	if err := store.SaveJob(context.Background(), job); err != nil {
-		t.Fatalf("save job: %v", err)
-	}
-
-	loadedJob, err := store.LoadJob(context.Background(), "job-integration-1")
-	if err != nil {
-		t.Fatalf("load job: %v", err)
-	}
-	if loadedJob.PlanID != "plan-integration-1" {
-		t.Fatalf("expected plan ID plan-integration-1, got %s", loadedJob.PlanID)
-	}
-}
-
 func TestIntegration_DiscoverySnapshotStore(t *testing.T) {
 	// Test that the Job Engine can work with the discovery package's
 	// SnapshotStore interface
@@ -1558,6 +1486,5 @@ var _ JobQueue = (*InMemoryJobQueue)(nil)
 var _ JobStore = (*SQLiteJobStore)(nil)
 var _ JobStore = (*NoopJobStore)(nil)
 var _ ProgressBroadcaster = (*DefaultProgressBroadcaster)(nil)
-var _ JobHandler = (*MigrationJobHandler)(nil)
 var _ JobHandler = (*DiscoveryJobHandler)(nil)
 var _ JobHandler = (*CompatCheckJobHandler)(nil)

@@ -22,7 +22,6 @@ import (
 	"meshium/internal/mod/middleware"
 	"meshium/internal/mod/migration"
 	"meshium/internal/mod/monitoring"
-	"meshium/internal/mod/planner"
 	"meshium/internal/mod/process"
 	"meshium/internal/mod/server"
 	"meshium/internal/mod/ssh"
@@ -91,21 +90,12 @@ func main() {
 	migrationRunner := migration.NewCompositeRunner(migrationPlanner, migrationExecutor, migrationRollback)
 	migrationHandler := migration.NewHandler(migrationRunner, migrationRepo)
 
-	// New typed-state Engine (Phase 2) for the job engine path
-	migrationEngine := migration.NewEngine(migrationRepo.(migration.JobRepository), serverRepo, poolAdapter, authSvc, knownHosts, migrationRegistry)
-
 	// --- Phase 8: Job Engine, Planner, Discovery REST handlers ---
 
 	// 1. Instantiate stores and ensure tables exist
 	snapshotStore := discovery.NewSQLiteSnapshotStore(database)
 	if err := snapshotStore.EnsureTable(); err != nil {
 		fmt.Fprintf(os.Stderr, "Failed to create discovery_snapshots table: %v\n", err)
-		os.Exit(1)
-	}
-
-	planStore := planner.NewSQLitePlanStore(database)
-	if err := planStore.EnsureTable(); err != nil {
-		fmt.Fprintf(os.Stderr, "Failed to create migration_plans table: %v\n", err)
 		os.Exit(1)
 	}
 
@@ -124,13 +114,11 @@ func main() {
 	// 2. Create handler factory for the job engine
 	handlerFactory := handler.NewHandlerFactory(
 		snapshotStore,
-		planStore,
 		serverRepo,
 		sshPool,
 		authSvc,
 		knownHosts,
 		migrationRepo,
-		migrationEngine,
 	)
 
 	// 3. Create and start the job engine
@@ -163,9 +151,7 @@ func main() {
 	}
 
 	// 4. Create HTTP handlers
-	defaultPlanner := planner.NewDefaultPlanner()
 	jobHTTPHandler := handler.NewJobHandler(engine, jobStore)
-	planHTTPHandler := handler.NewPlanHandler(defaultPlanner, planStore, snapshotStore, engine)
 	discoveryRESTHandler := handler.NewDiscoveryHandler(snapshotStore, engine)
 	terminalHandler := handler.NewTerminalHandler(handlerFactory, authSvc, serverRepo)
 
@@ -289,7 +275,6 @@ func main() {
 
 	// Register Phase 8 REST handlers
 	jobHTTPHandler.RegisterRoutes(mux)
-	planHTTPHandler.RegisterRoutes(mux)
 	discoveryRESTHandler.RegisterRoutes(mux)
 	aiHandler.RegisterRoutes(mux)
 	terminalHandler.RegisterRoutes(mux)

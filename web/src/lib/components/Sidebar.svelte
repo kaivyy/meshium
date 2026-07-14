@@ -46,7 +46,6 @@
     {
       label: 'Operations',
       items: [
-        { href: '/plans', label: 'Plans', icon: ClipboardList },
         { href: '/migrations', label: 'Migration', icon: ArrowRightLeft },
         { href: '/jobs', label: 'Jobs', icon: Briefcase },
       ]
