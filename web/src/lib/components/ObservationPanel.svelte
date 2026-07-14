@@ -5,9 +5,13 @@
   export let observationDuration: number;
   export let observationRemaining: number;
   export let observationProgress: number;
-  export let stepStatus: string;
+  export let stepStatus: 'pending' | 'running' | 'completed' | 'failed' | 'unknown' | 'paused' | 'interrupted' | 'resuming';
   export let actionLoading: boolean;
   export let staleData: boolean = false;
+  // Phase 4I.X fix 4: when provided, Commit is gated on backend-confirmed safe
+  // state + elapsed observation window (the parent computes this). When omitted,
+  // falls back to the prior timer-only rule so existing call sites keep working.
+  export let commitEnabled: boolean | undefined = undefined;
   export let onCommit: () => void;
   export let onRollback: () => void;
 
@@ -68,23 +72,29 @@
       <div class="text-2xl font-bold text-success">{replicationLag}s</div>
       <div class="text-xs text-fg-muted">Queue Lag</div>
     </div>
+    <!-- Phase 4I.X fix 5: error-rate / latency are simulated example values
+         (no backend metrics endpoint wires them yet) — labeled as such so an
+         operator never mistakes them for live measurements. -->
     <div class="bg-surface-muted rounded-lg p-3 text-center">
-      <div class="text-2xl font-bold text-info">0.1%</div>
-      <div class="text-xs text-fg-muted">Error Rate</div>
+      <div class="text-2xl font-bold text-info">0.1%<span class="text-[10px] align-top">*</span></div>
+      <div class="text-xs text-fg-muted">Error Rate (sim)</div>
     </div>
     <div class="bg-surface-muted rounded-lg p-3 text-center">
-      <div class="text-2xl font-bold text-info">120ms</div>
-      <div class="text-xs text-fg-muted">P95 Latency</div>
+      <div class="text-2xl font-bold text-info">120ms<span class="text-[10px] align-top">*</span></div>
+      <div class="text-xs text-fg-muted">P95 Latency (sim)</div>
     </div>
   </div>
+  <p class="text-[11px] text-fg-subtle mb-4">* Simulated example metrics — live error-rate and latency are not yet streamed by the backend.</p>
 
   <!-- Actions -->
   {#if stepStatus === 'completed'}
     <div class="flex items-center gap-3">
       <button
         on:click={onCommit}
-        disabled={actionLoading || staleData}
-        title={staleData ? 'Live data unavailable — wait for reconnection before committing' : 'Finalize migration. After commit, rollback is no longer safe.'}
+        disabled={actionLoading || staleData || (commitEnabled === false)}
+        title={commitEnabled === false
+          ? 'Waiting for backend to confirm a safe post-cutover state before commit'
+          : staleData ? 'Live data unavailable — wait for reconnection before committing' : 'Finalize migration. After commit, rollback is no longer safe.'}
         class="px-6 py-2.5 bg-success hover:bg-success/90 text-accent-fg disabled:opacity-40 disabled:cursor-not-allowed rounded-lg font-medium transition-colors"
       >
         {actionLoading ? 'Committing...' : 'Commit Migration'}

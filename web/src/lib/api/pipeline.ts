@@ -612,8 +612,9 @@ export type WSConnectionState = 'connecting' | 'connected' | 'disconnected' | 'r
 
 // RollbackState is the FE's truthful view of a rollback's progress, reconciled
 // from the authoritative backend migration state (4G.2). The backend tracks
-// rolling_back / rolled_back / rollback_degraded / rollback_failed; we surface
-// each distinctly so a destructive action's outcome is never a silent toast.
+// rolling_back / rolled_back / rollback_degraded; a rollback that fails is
+// reported as the generic terminal 'failed' state (the backend never emits a
+// distinct rollback_failed), which this helper surfaces as 'failed'.
 export type RollbackState = 'idle' | 'running' | 'completed' | 'degraded' | 'failed' | 'unknown' | 'manual';
 
 // reconcileRollbackState maps the backend migration `state` string to the FE
@@ -628,7 +629,10 @@ export function reconcileRollbackState(backendState: string | null | undefined, 
     case 'rolling_back': return 'running';
     case 'rolled_back': return 'completed';
     case 'rollback_degraded': return 'degraded';
-    case 'rollback_failed': return 'failed';
+    // A rollback that ended in failure is reported by the backend as a generic
+    // terminal 'failed' state (no distinct rollback_failed value exists) — surface
+    // it distinctly so a destructive action's outcome is never a silent toast.
+    case 'failed': return 'failed';
     // 4F.Y G1: a rollback the BE stopped as unsafe (ambiguous topology / unsafe
     // rollback / checkpoint-write failure) is terminal-ish and must be visible
     // distinctly — never collapsed into a silent 'idle' or a faked 'failed'.

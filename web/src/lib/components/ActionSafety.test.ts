@@ -26,7 +26,7 @@ const baseObservation = {
   actionLoading: false,
   onCommit: () => {},
   onRollback: () => {},
-};
+} as const;
 
 describe('CutoverChecklist action safety', () => {
   it('disables Start Cutover when live data is stale and explains why', async () => {

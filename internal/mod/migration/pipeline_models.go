@@ -548,7 +548,11 @@ func (m WSMessageExtended) ToWSMessage() WSMessage {
 type MigrationSession struct {
 	Migration            *Migration                 `json:"migration"`
 	Config               *MigrationConfig           `json:"config,omitempty"`
-	State                MigrationState             `json:"state"`
+	// State is the string form of the backend MigrationState (StateString()),
+	// e.g. "discovery", "live_replication", "committed". It is a string — not
+	// the raw MigrationState int — so the frontend can consume it directly
+	// without a numeric/string type mismatch (Phase 4I.X fix 1).
+	State                string                     `json:"state"`
 	Stages               []PipelineStage            `json:"stages,omitempty"`
 	ReplicationStatus    []ReplicationStatus        `json:"replicationStatus,omitempty"`
 	TrafficSwitch        *TrafficSwitchConfig       `json:"trafficSwitch,omitempty"`

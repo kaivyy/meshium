@@ -18,8 +18,18 @@ describe('reconcileRollbackState (truthful rollback vocabulary)', () => {
     expect(reconcileRollbackState('rollback_degraded', 'idle')).toBe('degraded');
   });
 
-  it('maps rollback_failed -> failed', () => {
-    expect(reconcileRollbackState('rollback_failed', 'idle')).toBe('failed');
+  // Phase 4I.X fix 5: the backend never emits a distinct `rollback_failed`;
+  // a rollback that ends in failure is reported as the generic terminal
+  // `failed` state. Reconcile it to 'failed' so the outcome is still distinct.
+  it('maps failed (rollback ended in failure) -> failed', () => {
+    expect(reconcileRollbackState('failed', 'idle')).toBe('failed');
+    expect(reconcileRollbackState('failed', 'running')).toBe('failed');
+  });
+
+  // Documents the removed vocabulary: `rollback_failed` no longer exists.
+  it('no longer maps a rollback_failed state (vocabulary removed)', () => {
+    // An unrecognized state falls through to the ambiguous default.
+    expect(reconcileRollbackState('rollback_failed', 'idle')).toBe('idle');
   });
 
   // 4F.Y G1: a rollback the BE stopped as unsafe (ambiguous topology / unsafe
@@ -52,7 +62,7 @@ describe('reconcileRollbackState (truthful rollback vocabulary)', () => {
       ['rolling_back', 'running'],
       ['rolled_back', 'completed'],
       ['rollback_degraded', 'degraded'],
-      ['rollback_failed', 'failed'],
+      ['failed', 'failed'],
       ['needs_manual_intervention', 'manual'],
     ];
     const seen = new Set(shapes.map(([, v]) => v));

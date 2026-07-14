@@ -16,6 +16,42 @@ Phase 5 delivers *minimal* downtime, measured by the live test matrix (see
 Phase 5 below). Immutable baselines are preserved. Full reports under
 `docs/superpowers/specs/`.
 
+### Phase 4I.X — Pipeline Stepper BE/FE Fix (state-type blocking bug + anomaly states)
+
+Resolves the Phase 4I.X audit: 1 BLOCKING bug, several FE/BE sync gaps, and
+cosmetic noise in the pipeline stepper. Pattern: fix blocking → sync FE/BE →
+tidy anomaly states → clean noise. Backend stays source of truth; FE only
+reflects backend state (no improvisation of unsupported states).
+
+- **BLOCKING — `session.state` int↔string mismatch:** the REST session loader now
+  carries `State` as the backend string form (`StateString()`, e.g. `"live_replication"`)
+  instead of the Go `MigrationState` integer. FE `loadSession`/`recoverStepFromState`
+  defensively `String()`-coerce the value and no longer call `.toLowerCase()` on a
+  number; cold load no longer falls back to the legacy branch except on real error.
+  WS `CurrentState` was already a string (BE already used `StateString()`).
+- **`needs_manual_intervention` terminality (sync):** confirmed already terminal in
+  BE (empty `transitionTable` successors + `IsTerminal()`). FE aligns its phrasing —
+  no pipeline action (retry/resume/cancel/rollback) is permitted from this state.
+- **Anomaly states get explicit stepper treatment:** `awaiting_cutover`, `failed`,
+  `paused`, `interrupted`, `resuming`, `rolling_back`, `rolled_back`,
+  `rollback_degraded` map to badges/status instead of a silent "running" step.
+  `markAnomaly`/`rollbackReconciled` drive the rendering; `PipelineStepper` colors
+  `paused`(warning)/`interrupted`(error)/`resuming`(info).
+- **Commit gate (backend-primary, not timer-only):** `commitEnabled` now requires a
+  backend state in `{observation, post_verification, committed, completed}` AND the
+  observation timer done — never triggers purely off the countdown. HTTP `409
+  cutover_not_confirmed` surfaces a specific, actionable error rather than a generic
+  failure.
+- **Noise removed:** dropped the dead `'archived'` branch (never emitted by BE),
+  `rollback_failed` vocabulary (BE reports rollback-in-failure as generic `failed`),
+  the fake ObservationPanel metrics (now labeled `* Simulated example`), the unused
+  Cancel-via-button path wired to a real `pipelineApi.cancel`, and the stale
+  localStorage step override.
+- **Single-sourced helpers:** new `web/src/lib/api/stepper.ts` (`isTerminalState`,
+  `stateToStep`, `isAnomalyState`) with `stepper.test.ts` (11 tests); `recoverStepFromState`
+  delegates to them so the page and the unit tests can't drift. `rollback-reconcile.test.ts`
+  updated to the current vocabulary.
+
 ### Phase 4H — Deprecate & Remove Legacy Planner (/plans)
 
 Removes the parallel legacy planner subsystem (`/plans` → `planner.NewDefaultPlanner` →

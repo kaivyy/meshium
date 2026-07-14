@@ -2,7 +2,7 @@
   import { WIZARD_STEPS } from '$lib/api/pipeline';
 
   export let currentStep: number;
-  export let stepStatuses: ('pending' | 'running' | 'completed' | 'failed' | 'unknown')[];
+  export let stepStatuses: ('pending' | 'running' | 'completed' | 'failed' | 'unknown' | 'paused' | 'interrupted' | 'resuming')[];
   export let pipelineRunning = false;
 
   function stepIndicatorColor(status: string): string {
@@ -11,6 +11,9 @@
       case 'running': return 'bg-accent text-accent-fg animate-pulse';
       case 'failed': return 'bg-error text-accent-fg';
       case 'unknown': return 'bg-warning text-accent-fg';
+      case 'paused': return 'bg-warning text-accent-fg';
+      case 'interrupted': return 'bg-error text-accent-fg';
+      case 'resuming': return 'bg-info text-accent-fg';
       default: return 'bg-surface-muted text-fg-subtle';
     }
   }
@@ -21,6 +24,9 @@
       case 'running': return 'bg-accent';
       case 'failed': return 'bg-error';
       case 'unknown': return 'bg-warning';
+      case 'paused': return 'bg-warning';
+      case 'interrupted': return 'bg-error';
+      case 'resuming': return 'bg-info';
       default: return 'bg-border';
     }
   }

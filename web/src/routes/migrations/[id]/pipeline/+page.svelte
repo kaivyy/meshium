@@ -12,6 +12,7 @@
     type MigrationEvent, type PlannerWarning, type DependencyGraph,
     type StrategySelection, type RollbackState
   } from '$lib/api/pipeline';
+  import { isTerminalState as isTerminalStatePure, stateToStep } from '$lib/api/stepper';
   import { APIError } from '$lib/api/client';
   import { migrationApi, type DryRunResult, wsDryRun, wsCompatibility, type WSMessage } from '$lib/api/migrations';
   import { toast } from '$lib/stores/toast';
@@ -33,7 +34,7 @@
   // 4G.2: added 'unknown' to the step-status union so a failed
   // reconcile (dry-run / compat) surfaces as explicit UNKNOWN rather than a
   // faked 'failed' (truthfulness rule: ambiguity shown as ambiguity).
-  let stepStatuses: ('pending' | 'running' | 'completed' | 'failed' | 'unknown')[] = Array(11).fill('pending');
+  let stepStatuses: ('pending' | 'running' | 'completed' | 'failed' | 'unknown' | 'paused' | 'interrupted' | 'resuming')[] = Array(11).fill('pending');
 
   // ── Session & Data ──
   let session: MigrationSession | null = null;
@@ -84,6 +85,14 @@
   // failed/unknown distinctly — never a false success or a hidden failure.
   let rollbackState: RollbackState = 'idle';
   let rollbackStateDetail = '';
+  // Phase 4I.X fix 3: non-running anomaly state currently in effect (so the
+  // stepper + a visible badge can show paused/interrupted/resuming/failed/
+  // awaiting_cutover distinctly instead of a normal "running" indicator). Empty
+  // when the migration is in a normal forward flow.
+  let anomalyState: '' | 'paused' | 'interrupted' | 'resuming' | 'failed' | 'awaiting_cutover' = '';
+  // True once a rollback is reconciled from the backend state — keeps the
+  // stepper from reading as a normal in-progress step during rollback.
+  let rollbackReconciled = false;
   let cpuUsagePercent = 0;
   let ramUsedBytes = 0;
   let ramTotalBytes = 0;
@@ -110,7 +119,7 @@
 
   // ── Step Action Loading ──
   let actionLoading = false;
-  type ConfirmationAction = 'cutover' | 'commit' | 'rollback';
+  type ConfirmationAction = 'cutover' | 'commit' | 'rollback' | 'cancel';
   let confirmationAction: ConfirmationAction | null = null;
 
   // Live data is required before any irreversible/state-changing action. When
@@ -172,7 +181,10 @@
       // persisted server-side (action='dryrun' step), so the change list and
       // step 4 completion survive a reload instead of resetting to memory-only.
       if (session?.dryRun) dryRunResult = session.dryRun;
-      currentState = session?.state || '';
+      // Backend sends MigrationSession.state as a string (StateString, e.g.
+      // "discovery", "live_replication") per Phase 4I.X fix 1. Coerce defensively
+      // in case an old cached payload ever arrives as a number/other.
+      currentState = session?.state != null ? String(session.state) : '';
       recoverStepFromState();
       recoverStepFromRecords();
       // Restore the last live-metrics snapshot so refresh doesn't flash zeros
@@ -236,8 +248,14 @@
 
   function recoverStepFromState() {
     if (!session) return;
-    const st = currentState.toLowerCase();
-    if (['completed', 'committed', 'archived', 'rolled_back', 'cancelled'].includes(st)) {
+    // currentState is a backend state string (e.g. "discovery"). Coerce to a
+    // string first so a non-string payload can never throw on .toLowerCase()
+    // (Phase 4I.X fix 1 — the REST loader previously threw on an integer state
+    // and fell back to the legacy endpoint).
+    const st = String(currentState ?? '').toLowerCase();
+    // Terminal states pin the stepper to Finish (step 10). Delegates to the
+    // extracted pure helper so the mapping stays single-sourced/tested.
+    if (stateToStep(st) === 10) {
       stopObservationTimer();
       clearStep(); // terminal: drop saved position so a fresh migration doesn't inherit it
       clearMetrics(); // terminal: live metrics no longer relevant
@@ -260,6 +278,49 @@
     // planning, otherwise a freshly planned migration falls through with no
     // step set and the Next button stays disabled.
     if (st === 'discovery' || st === 'planning' || st === 'created') { setStep(0); return; }
+
+    // ── Anomaly states (Phase 4I.X fix 3) ──
+    // These are not quiet "running" — give them a distinct stepper status so an
+    // operator can tell paused/failed/rolling-back apart from a normal run, and
+    // so the stepper and SafetyStatePanel tell the same story.
+    if (st === 'rolling_back' || st === 'rollback' || st === 'rollback_degraded') {
+      // Rollback is shown as an overlay (rollbackState) but the stepper must not
+      // read as a normal in-progress step: mark the active step as 'unknown'
+      // (amber) so its status is visibly not "running". rolled_back already
+      // handled above (terminal → step 10).
+      pipelineRunning = false;
+      if (stepStatuses[currentStep] === 'running') stepStatuses[currentStep] = 'unknown';
+      rollbackReconciled = true;
+      return;
+    }
+    if (st === 'awaiting_cutover') {
+      // Stays on cutover step (8); the dedicated status chip + SafetyStatePanel
+      // banner make it explicit (it is non-terminal — an operator commit leaves it).
+      setStep(8);
+      anomalyState = 'awaiting_cutover';
+      return;
+    }
+    if (st === 'paused') { markAnomaly(8, 'paused'); return; }
+    if (st === 'interrupted') { markAnomaly(8, 'interrupted'); return; }
+    if (st === 'resuming') { markAnomaly(8, 'resuming'); return; }
+    if (st === 'failed') {
+      // A failed run keeps its last active step but the stepper must show the
+      // failure distinctly (red) rather than looking "running". rollback may
+      // still be offered (handled by rollbackAvailable) if not terminal-ish yet.
+      if (stepStatuses[currentStep] === 'running') stepStatuses[currentStep] = 'failed';
+      anomalyState = 'failed';
+      return;
+    }
+  }
+
+  // markAnomaly pins the stepper at a step with a non-running status chip so the
+  // operator sees the true state (paused/interrupted/resuming) instead of a
+  // normal "running" indicator (Phase 4I.X fix 3).
+  function markAnomaly(step: number, status: 'paused' | 'interrupted' | 'resuming') {
+    currentStep = step;
+    if (stepStatuses[step] === 'running' || stepStatuses[step] === 'pending') stepStatuses[step] = status;
+    anomalyState = status;
+    pipelineRunning = false;
   }
 
   // 4G.2: set the explicit rollback state machine from the authoritative
@@ -317,7 +378,7 @@
     if (syncSessions.length > 0 || replicationStatus.length > 0) markCompleted(6);
     if (replicationStatus.length > 0 && replicationStatus.every(r => r.replicationLag <= 5 && r.status !== 'failed')) markCompleted(7);
     if (cutoverConfirmed || ['traffic_switch', 'post_verification', 'observation', 'committed', 'completed'].includes(currentState.toLowerCase())) markCompleted(8);
-    if (['committed', 'completed', 'archived'].includes(currentState.toLowerCase())) markCompleted(10);
+    if (['committed', 'completed'].includes(currentState.toLowerCase())) markCompleted(10);
 
     const stateStep = currentStep;
     stepStatuses = restoredStatuses.map((status, i) => {
@@ -770,6 +831,24 @@
           stepStatuses[9] = 'completed'; currentStep = 10; stepStatuses[10] = 'completed';
           pipelineRunning = false;
         }
+        // Phase 4I.X fix 3: rollback final states must jump the stepper to
+        // Finish live (not only on reload) so the operator never sees a stale
+        // cutover step while a rollback completes.
+        if (st === 'rolled_back' || st === 'rollback_degraded') {
+          stepStatuses[9] = 'completed'; currentStep = 10; stepStatuses[10] = 'completed';
+          pipelineRunning = false;
+          anomalyState = '';
+          rollbackReconciled = true;
+        }
+        if (st === 'rolling_back') {
+          pipelineRunning = false;
+          if (stepStatuses[currentStep] === 'running') stepStatuses[currentStep] = 'unknown';
+          rollbackReconciled = true;
+        }
+        if (st === 'awaiting_cutover') { setStep(8); anomalyState = 'awaiting_cutover'; }
+        if (st === 'paused' || st === 'interrupted' || st === 'resuming') {
+          markAnomaly(8, st as 'paused' | 'interrupted' | 'resuming');
+        }
       }
       if (msg.status === 'error') {
         pipelineRunning = false;
@@ -816,8 +895,10 @@
   // 4F.Y G2: must mirror BE IsTerminal() (state.go:164). Added rollback_degraded
   // and needs_manual_intervention so a terminal-ish rollback state no longer
   // wrongly offers a further rollback (rollbackAvailable depends on this).
+  // Mirrors backend IsTerminal() (state.go). Delegates to the extracted pure
+  // helper so the terminal set is single-sourced and unit-tested (stepper.ts).
   function isTerminalState(state: string): boolean {
-    return ['completed', 'committed', 'archived', 'rolled_back', 'rollback_degraded', 'needs_manual_intervention', 'cancelled'].includes(state.toLowerCase());
+    return isTerminalStatePure(state);
   }
 
   function canRetryState(state: string): boolean {
@@ -835,7 +916,8 @@
     if (actionLoading) return; // double-submit guard
     if (confirmationAction === 'rollback') { await rollbackPipeline(); return; }
     if (confirmationAction === 'cutover') { await confirmCutover(); return; }
-    if (confirmationAction === 'commit') { await commitMigration(); }
+    if (confirmationAction === 'commit') { await commitMigration(); return; }
+    if (confirmationAction === 'cancel') { await cancelPipeline(); }
   }
 
   async function confirmCutover() {
@@ -848,7 +930,14 @@
       confirmationAction = null;
     } catch (err) {
       cutoverConfirmed = false;
-      toast.error(actionErrorMessage(err, 'Cutover failed'));
+      // Phase 4I.X fix 4: surface the structured 409 distinctly so the operator
+      // knows the cutover was rejected because traffic was not confirmed moved
+      // (the checklist/runbook criteria were not satisfied) — not a generic error.
+      if (err instanceof APIError && err.code === 'cutover_not_confirmed') {
+        toast.error('Cutover not confirmed: move traffic to the target first, then confirm. Check the cutover checklist and traffic ownership before retrying.');
+      } else {
+        toast.error(actionErrorMessage(err, 'Cutover failed'));
+      }
     } finally { actionLoading = false; }
   }
 
@@ -989,6 +1078,17 @@
     finally { actionLoading = false; }
   }
 
+  async function cancelPipeline() {
+    actionLoading = true;
+    try {
+      await pipelineApi.cancel(migrationId);
+      await loadSession().catch(() => {});
+      toast.success('Migration cancelled');
+      confirmationAction = null;
+    } catch (err) { toast.error(actionErrorMessage(err, 'Cancel failed')); }
+    finally { actionLoading = false; }
+  }
+
   async function refreshAudit() {
     try { auditTrail = await pipelineApi.getAuditTrail(migrationId); } catch { /* ignore */ }
   }
@@ -1056,6 +1156,18 @@
   $: totalBandwidth = networkRxBytesSec + networkTxBytesSec;
   $: observationRemaining = Math.max(0, observationDuration - observationElapsed);
   $: observationProgress = observationDuration > 0 ? (observationElapsed / observationDuration) * 100 : 0;
+
+  // Phase 4I.X fix 4: Commit is gated primarily on the backend migration state.
+  // The observation timer alone must NOT open Commit — only when the backend
+  // reports the migration in a safe post-cutover state (observation /
+  // post_verification / committed / completed) AND the local observation window
+  // has elapsed. staleData independently blocks irreversible actions.
+  $: commitEnabled = (() => {
+    const st = String(currentState ?? '').toLowerCase();
+    const backendSafe = ['observation', 'post_verification', 'committed', 'completed'].includes(st);
+    const timerDone = stepStatuses[9] === 'completed';
+    return backendSafe && timerDone && !staleData;
+  })();
   $: sourceId = session?.migration?.sourceId ?? null;
   $: targetId = session?.migration?.targetId ?? null;
   $: rollbackAvailable = !isTerminalState(currentState) && currentStep >= 6;
@@ -1109,6 +1221,23 @@
   <!-- ═══ PIPELINE STEPPER ═══ -->
   <PipelineStepper {currentStep} {stepStatuses} {pipelineRunning} />
 
+  <!-- Phase 4I.X fix 3: explicit anomaly-state badge so paused / interrupted /
+       resuming / failed / awaiting_cutover read distinctly from a normal run,
+       and match whatever SafetyStatePanel banner is showing. -->
+  {#if anomalyState}
+    <div class="px-3 sm:px-4 py-1.5 text-xs font-medium
+      {anomalyState === 'failed' ? 'bg-error/10 text-error'
+        : anomalyState === 'awaiting_cutover' ? 'bg-info/10 text-info'
+        : 'bg-warning/10 text-warning'}"
+      role="status" aria-live="polite">
+      {#if anomalyState === 'paused'}Paused — pipeline halted by operator (resume to continue){/if}
+      {#if anomalyState === 'interrupted'}Interrupted — migration stopped unexpectedly; retry to resume{/if}
+      {#if anomalyState === 'resuming'}Resuming — restoring from last checkpoint{/if}
+      {#if anomalyState === 'failed'}Failed — step could not proceed; review errors, then retry or roll back{/if}
+      {#if anomalyState === 'awaiting_cutover'}Awaiting cutover — confirm traffic switch before committing{/if}
+    </div>
+  {/if}
+
   <!-- ═══ ACTION BAR ═══ -->
   <div class="border-b border-border px-3 sm:px-4 py-2 flex items-center justify-between shrink-0 gap-2 overflow-x-auto">
     <div class="flex items-center gap-2">
@@ -1142,6 +1271,17 @@
         <button on:click={retryPipeline} class="flex items-center gap-1.5 px-3 py-1.5 bg-info hover:bg-info/90 text-accent-fg rounded-lg text-xs font-medium transition-colors">
           <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 2v6h6"/><path d="M3 8a9 9 0 1 1 3.5 7"/></svg>
           Retry
+        </button>
+      {/if}
+      {#if pipelinePaused || canRetryState(currentState)}
+        <button
+          on:click={() => openConfirmation('cancel')}
+          disabled={actionLoading || staleData}
+          title="Abort the migration (only available while paused or interrupted)"
+          class="flex items-center gap-1.5 px-3 py-1.5 bg-surface-muted hover:bg-surface text-fg-muted rounded-lg text-xs font-medium transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
+        >
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M18 6 6 18"/><path d="m6 6 12 12"/></svg>
+          Cancel
         </button>
       {/if}
       {#if rollbackAvailable}
@@ -1700,6 +1840,7 @@
             stepStatus={stepStatuses[9]}
             {actionLoading}
             {staleData}
+            commitEnabled={commitEnabled}
             onCommit={() => openConfirmation('commit')}
             onRollback={() => openConfirmation('rollback')}
           />

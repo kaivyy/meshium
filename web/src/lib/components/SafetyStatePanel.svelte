@@ -103,7 +103,8 @@
             <li>• Known: backend persisted the failure evidence in the audit trail (see Logs &amp; Audit).</li>
             <li>• Unknown: the exact root cause — inspect target state and the failed step's evidence before acting.</li>
             <li>• Forbidden assumptions: do not assume the source is still the writer, or that the target is safe to promote, until verified.</li>
-            <li>• Recommended next step: open the runbook, then either retry the failed step or perform a manual cutover.</li>
+            <li>• State is terminal: no pipeline action (retry / resume / cancel / rollback) is permitted from here. Only manual intervention via the runbook can resolve it.</li>
+            <li>• Recommended next step: open the runbook and reconcile the target manually; the pipeline will not auto-proceed.</li>
           </ul>
           <div class="mt-3 flex flex-wrap gap-2">
             <a href={runbookHref} class="inline-flex items-center gap-1.5 px-3 py-1.5 bg-surface-muted hover:bg-surface rounded-lg text-xs font-medium transition-colors">

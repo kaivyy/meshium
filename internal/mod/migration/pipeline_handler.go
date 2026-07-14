@@ -1734,10 +1734,13 @@ func (h *PipelineHandler) buildSession(ctx context.Context, migrationID int) (*M
 		session.Config = config
 	}
 
-	// Get state from status string
+	// Get state from status string. State is the string form of the
+	// MigrationState (StateString), e.g. "live_replication", matching what the
+	// WS currentState carries and what the frontend expects (Phase 4I.X fix 1).
+	// migration.Status is itself the StateString form, so use it directly.
 	if migration.Status != "" {
-		state, _ := StateFromString(migration.Status)
-		session.State = state
+		_, _ = StateFromString(migration.Status) // validates the stored status
+		session.State = migration.Status
 	}
 
 	// Load related data
