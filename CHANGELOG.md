@@ -86,6 +86,36 @@ frames stay progress-only; ambiguity renders as `unknown`. Full report:
 - **No backend contract change** — all fixes render states the backend already held.
   Optional compatibility verification-row upsert (cosmetic) deferred.
 
+### Phase 5 — Minimal-Downtime Migration Realization (DB + Volume + Cutover/Rollback + Testing)
+
+Grounded in the real branch state (the 2026-07-11 audit was stale; most of the
+work was already implemented). Six workstreams specified in
+`docs/superpowers/specs/phase-5-*.md`. This session closed the last open code gap
+and corrected the docs' false "open" claims.
+
+#### Added (Phase 5)
+- **Container DB adapter (P1-1)** — `DatabaseConfig`/`DBCredentials` gain a
+  `Container` field; `dockerWrap` prefixes every engine command
+  (`postgres`/`mysql`/`mongodb`/`redis`) with `docker exec -i <quoted> --` when
+  set, pass-through otherwise. Container creds force loopback + engine default
+  port. Plan wizard exposes an optional "Container" input.
+- **Unit tests** — `TestDockerWrap`, `TestContainerCredentials`,
+  `TestContainerCommandPrefix` in `internal/mod/migration/database_test.go`.
+
+#### Verified done (docs previously mis-flagged OPEN)
+- **Fencing (P2-4)** — `FencingAuthority` (`Acquire`/`Renew`/`Release`/`AssertHolds`,
+  `ErrFenceLeaseStale` fail-closed); `CutoverOrchestrator` asserts the lease before
+  every mutation. ponytail: orchestrator uses a single `FenceTTL` ceiling, no
+  renewal loop yet for cutovers > 5m.
+- **Correlation (P3-1)** — request boundary (`withRequestID`) + WS/audit boundary
+  (`extendWSMessage` stamps `correlationId`).
+- **Redacting logger (P3-2)** — `redactWriter` (`shared/logger.go`) routes every
+  `log.Printf` through `SanitizeString` at the single emit boundary.
+
+#### Open (non-code, cannot run in this agent environment)
+- **Live test matrix (Workstream E)** — not executed (no Docker / engine hosts
+  available). The execution gate for Phase 5 sign-off; must not be faked.
+
 ### Phase 2D — operability, auditability, observability, release readiness
 
 Makes the Phase 1 / 2A / 2B / 2C results **operable, auditable, observable,

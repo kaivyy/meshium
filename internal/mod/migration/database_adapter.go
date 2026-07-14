@@ -63,12 +63,30 @@ type DatabaseMigrator interface {
 // Password is plaintext in memory and encrypted at rest (see
 // pipeline_handler.go / pipeline.go Execute). Host is usually "localhost"
 // because the dump runs over SSH on the server itself.
+//
+// Container is the name (or id) of the Docker container running the engine when
+// the database is NOT reachable on the host network (P1-1). When non-empty, every
+// engine command is wrapped in `docker exec -i <Container> -- …` so the dump/
+// restore/list/drop run inside the container instead of on the host. Empty means
+// run on the host directly. All values are shell-quoted by the wrap helper.
 type DBCredentials struct {
-	Engine   string `json:"engine"`
-	Username string `json:"username"`
-	Password string `json:"password,omitempty"`
-	Host     string `json:"host"`
-	Port     int    `json:"port"`
+	Engine    string `json:"engine"`
+	Username  string `json:"username"`
+	Password  string `json:"password,omitempty"`
+	Host      string `json:"host"`
+	Port      int    `json:"port"`
+	Container string `json:"container,omitempty"`
+}
+
+// dockerWrap runs cmd inside the named container via `docker exec -i`. The
+// container name is shell-quoted; cmd is emitted verbatim because it is already
+// fully quoted by the engine command builders (pgEnv/pgConnArgs/…). When
+// container is empty the command is returned unchanged (host-mode path).
+func dockerWrap(container, cmd string) string {
+	if container == "" {
+		return cmd
+	}
+	return fmt.Sprintf("docker exec -i %s -- %s", shared.ShellQuote(container), cmd)
 }
 
 // DatabaseConfig is the user-supplied plan/execute config carried on
@@ -80,6 +98,7 @@ type DatabaseConfig struct {
 	Password    string `json:"password,omitempty"` // encrypted at rest
 	Host        string `json:"host,omitempty"`
 	Port        int    `json:"port,omitempty"`
+	Container   string `json:"container,omitempty"` // Docker container running the engine (empty = host)
 }
 
 // ToCredentials builds in-memory creds with a localhost default.
@@ -92,12 +111,19 @@ func (d *DatabaseConfig) ToCredentials() DBCredentials {
 	if port == 0 {
 		port = defaultPort(d.Engine)
 	}
+	// When the engine runs inside a container, commands execute via
+	// `docker exec`, so connections target the container's own loopback.
+	if d.Container != "" {
+		host = "127.0.0.1"
+		port = defaultPort(d.Engine)
+	}
 	return DBCredentials{
 		Engine:   d.Engine,
 		Username: d.Username,
 		Password: d.Password,
 		Host:     host,
 		Port:     port,
+		Container: d.Container,
 	}
 }
 
@@ -189,8 +215,8 @@ func (postgresMigrator) ListDatabases(ctx context.Context, ssh SSHExecuter, c DB
 	// datname + size in MiB, excluding system DBs. Output: "name<TAB>size" lines.
 	q := "SELECT datname, pg_database_size(datname)/1048576 FROM pg_database " +
 		"WHERE datname NOT IN ('template0','template1','postgres') ORDER BY datname;"
-	cmd := fmt.Sprintf("%s psql %s -t -A -F '\t' -c %s 2>/dev/null",
-		pgEnv(c), pgConnArgs(c), shared.ShellQuote(q))
+	cmd := dockerWrap(c.Container, fmt.Sprintf("%s psql %s -t -A -F '\t' -c %s 2>/dev/null",
+		pgEnv(c), pgConnArgs(c), shared.ShellQuote(q)))
 	out, _, exit, err := ssh.ExecContext(ctx, cmd)
 	if err != nil || exit != 0 {
 		return nil, fmt.Errorf("postgres list databases: %v", err)
@@ -200,13 +226,13 @@ func (postgresMigrator) ListDatabases(ctx context.Context, ssh SSHExecuter, c DB
 
 func (postgresMigrator) DumpCommand(c DBCredentials, db, path string) string {
 	// -Fc custom format + -Z 1 gzip; --clean --if-exists makes restore idempotent.
-	return fmt.Sprintf("%s pg_dump %s -Fc --no-owner --clean --if-exists -Z 1 -f %s %s 2>/dev/null",
-		pgEnv(c), pgConnArgs(c), shared.ShellQuote(path), shared.ShellQuote(db))
+	return dockerWrap(c.Container, fmt.Sprintf("%s pg_dump %s -Fc --no-owner --clean --if-exists -Z 1 -f %s %s 2>/dev/null",
+		pgEnv(c), pgConnArgs(c), shared.ShellQuote(path), shared.ShellQuote(db)))
 }
 
 func (postgresMigrator) RestoreCommand(c DBCredentials, db, path string) string {
-	return fmt.Sprintf("%s pg_restore %s --no-owner --clean --if-exists -d %s %s 2>&1",
-		pgEnv(c), pgConnArgs(c), shared.ShellQuote(db), shared.ShellQuote(path))
+	return dockerWrap(c.Container, fmt.Sprintf("%s pg_restore %s --no-owner --clean --if-exists -d %s %s 2>&1",
+		pgEnv(c), pgConnArgs(c), shared.ShellQuote(db), shared.ShellQuote(path)))
 }
 
 func (postgresMigrator) StreamDumpCommand(c DBCredentials, db string) string {
@@ -220,7 +246,7 @@ func (postgresMigrator) StreamRestoreCommand(c DBCredentials, db string) string 
 
 func (postgresMigrator) DropDatabaseCommand(c DBCredentials, db string) string {
 	q := fmt.Sprintf("DROP DATABASE IF EXISTS %s;", pqIdent(db))
-	return fmt.Sprintf("%s psql %s -c %s 2>/dev/null", pgEnv(c), pgConnArgs(c), shared.ShellQuote(q))
+	return dockerWrap(c.Container, fmt.Sprintf("%s psql %s -c %s 2>/dev/null", pgEnv(c), pgConnArgs(c), shared.ShellQuote(q)))
 }
 
 // pqIdent double-quotes a Postgres identifier with embedded quotes doubled.
@@ -248,8 +274,8 @@ func (mysqlMigrator) ListDatabases(ctx context.Context, ssh SSHExecuter, c DBCre
 		"FROM information_schema.tables WHERE table_schema " +
 		"NOT IN ('mysql','sys','information_schema','performance_schema') " +
 		"GROUP BY table_schema ORDER BY table_schema;"
-	cmd := fmt.Sprintf("%s mysql %s -N -B -e %s 2>/dev/null",
-		mysqlEnv(c), mysqlConnArgs(c), shared.ShellQuote(q))
+	cmd := dockerWrap(c.Container, fmt.Sprintf("%s mysql %s -N -B -e %s 2>/dev/null",
+		mysqlEnv(c), mysqlConnArgs(c), shared.ShellQuote(q)))
 	out, _, exit, err := ssh.ExecContext(ctx, cmd)
 	if err != nil || exit != 0 {
 		return nil, fmt.Errorf("mysql list databases: %v", err)
@@ -268,20 +294,20 @@ func (mysqlMigrator) StreamRestoreCommand(c DBCredentials, db string) string {
 	// mysql reads the dump from stdin. The dump already contains
 	// CREATE/DROP DATABASE statements (--add-drop-database), so db here is the
 	// connection target, not a filter.
-	return fmt.Sprintf("%s mysql %s 2>&1", mysqlEnv(c), mysqlConnArgs(c))
+	return dockerWrap(c.Container, fmt.Sprintf("%s mysql %s 2>&1", mysqlEnv(c), mysqlConnArgs(c)))
 }
 
 func (mysqlMigrator) DumpCommand(c DBCredentials, db, path string) string {
-	return mysqlMigrator{}.StreamDumpCommand(c, db) + " | gzip > " + shared.ShellQuote(path)
+	return dockerWrap(c.Container, mysqlMigrator{}.StreamDumpCommand(c, db) + " | gzip > " + shared.ShellQuote(path))
 }
 
 func (mysqlMigrator) RestoreCommand(c DBCredentials, db, path string) string {
-	return fmt.Sprintf("gunzip -c %s | %s 2>&1", shared.ShellQuote(path), mysqlMigrator{}.StreamRestoreCommand(c, db))
+	return dockerWrap(c.Container, fmt.Sprintf("gunzip -c %s | %s 2>&1", shared.ShellQuote(path), mysqlMigrator{}.StreamRestoreCommand(c, db)))
 }
 
 func (mysqlMigrator) DropDatabaseCommand(c DBCredentials, db string) string {
 	q := fmt.Sprintf("DROP DATABASE IF EXISTS %s;", backtickIdent(db))
-	return fmt.Sprintf("%s mysql %s -e %s 2>/dev/null", mysqlEnv(c), mysqlConnArgs(c), shared.ShellQuote(q))
+	return dockerWrap(c.Container, fmt.Sprintf("%s mysql %s -e %s 2>/dev/null", mysqlEnv(c), mysqlConnArgs(c), shared.ShellQuote(q)))
 }
 
 // backtickIdent wraps a MySQL identifier in backticks with embedded backticks
@@ -308,7 +334,7 @@ func (mongoMigrator) ListDatabases(ctx context.Context, ssh SSHExecuter, c DBCre
 	// sizeOnDisk (bytes→MiB) and excludes admin/config/local.
 	shell, _ := mongoShell(ctx, ssh)
 	eval := "db.adminCommand({listDatabases:1})"
-	listCmd := fmt.Sprintf("%s %s --quiet --eval %s 2>/dev/null", shell, mongoConnArgs(c), shared.ShellQuote(eval))
+	listCmd := dockerWrap(c.Container, fmt.Sprintf("%s %s --quiet --eval %s 2>/dev/null", shell, mongoConnArgs(c), shared.ShellQuote(eval)))
 	out, _, exit, err := ssh.ExecContext(ctx, listCmd)
 	if err != nil || exit != 0 {
 		return nil, fmt.Errorf("mongo list databases: %v", err)
@@ -330,23 +356,23 @@ func mongoShell(ctx context.Context, ssh SSHExecuter) (shell string, warning str
 
 func (mongoMigrator) StreamDumpCommand(c DBCredentials, db string) string {
 	// --archive streams a single archive to stdout; --gzip compresses in flight.
-	return fmt.Sprintf("mongodump %s --db %s --archive --gzip 2>/dev/null",
-		mongoConnArgs(c), shared.ShellQuote(db))
+	return dockerWrap(c.Container, fmt.Sprintf("mongodump %s --db %s --archive --gzip 2>/dev/null",
+		mongoConnArgs(c), shared.ShellQuote(db)))
 }
 
 func (mongoMigrator) StreamRestoreCommand(c DBCredentials, db string) string {
 	// --drop makes restore idempotent. --nsInclude targets the streamed db.
-	return fmt.Sprintf("mongorestore %s --archive --gzip --drop --nsInclude %s.* 2>&1",
-		mongoConnArgs(c), shared.ShellQuote(db))
+	return dockerWrap(c.Container, fmt.Sprintf("mongorestore %s --archive --gzip --drop --nsInclude %s.* 2>&1",
+		mongoConnArgs(c), shared.ShellQuote(db)))
 }
 
 func (mongoMigrator) DumpCommand(c DBCredentials, db, path string) string {
-	return mongoMigrator{}.StreamDumpCommand(c, db) + " > " + shared.ShellQuote(path)
+	return dockerWrap(c.Container, mongoMigrator{}.StreamDumpCommand(c, db) + " > " + shared.ShellQuote(path))
 }
 
 func (mongoMigrator) RestoreCommand(c DBCredentials, db, path string) string {
-	return fmt.Sprintf("mongorestore %s --archive %s --gzip --drop --nsInclude %s.* 2>&1",
-		mongoConnArgs(c), shared.ShellQuote(path), shared.ShellQuote(db))
+	return dockerWrap(c.Container, fmt.Sprintf("mongorestore %s --archive %s --gzip --drop --nsInclude %s.* 2>&1",
+		mongoConnArgs(c), shared.ShellQuote(path), shared.ShellQuote(db)))
 }
 
 func (mongoMigrator) DropDatabaseCommand(c DBCredentials, db string) string {
@@ -354,7 +380,7 @@ func (mongoMigrator) DropDatabaseCommand(c DBCredentials, db string) string {
 	// (no ctx/ssh), so mongosh is used unconditionally — replication.go already
 	// assumes mongosh. The legacy fallback only applies to ListDatabases.
 	drop := fmt.Sprintf("db.getSiblingDB(%s).dropDatabase()", shared.ShellQuote(db))
-	return fmt.Sprintf("mongosh %s --quiet --eval %s 2>/dev/null", mongoConnArgs(c), shared.ShellQuote(drop))
+	return dockerWrap(c.Container, fmt.Sprintf("mongosh %s --quiet --eval %s 2>/dev/null", mongoConnArgs(c), shared.ShellQuote(drop)))
 }
 
 // --- Redis -----------------------------------------------------------------
@@ -373,8 +399,8 @@ func (redisMigrator) Streaming() bool { return false }
 func (redisMigrator) ListDatabases(ctx context.Context, ssh SSHExecuter, c DBCredentials) ([]DBCatalogEntry, error) {
 	// Redis has one logical DB namespace; report DBSIZE as a rough "size" (key
 	// count, not MiB — Redis exposes no per-DB size without SCAN+DEBUG).
-	cmd := fmt.Sprintf("%s redis-cli -h %s -p %d DBSIZE 2>/dev/null",
-		redisEnv(c), shared.ShellQuote(c.Host), c.Port)
+	cmd := dockerWrap(c.Container, fmt.Sprintf("%s redis-cli -h %s -p %d DBSIZE 2>/dev/null",
+		redisEnv(c), shared.ShellQuote(c.Host), c.Port))
 	out, _, exit, err := ssh.ExecContext(ctx, cmd)
 	if err != nil || exit != 0 {
 		return nil, fmt.Errorf("redis dbsize: %v", err)
@@ -396,8 +422,8 @@ func (redisMigrator) StreamRestoreCommand(c DBCredentials, db string) string {
 func (redisMigrator) DumpCommand(c DBCredentials, db, path string) string {
 	// redis-cli --rdb streams the RDB to stdout; redirect to the remote file.
 	// Password rides REDISCLI_AUTH (never -a on argv).
-	return fmt.Sprintf("%s redis-cli -h %s -p %d --rdb %s 2>/dev/null",
-		redisEnv(c), shared.ShellQuote(c.Host), c.Port, shared.ShellQuote(path))
+	return dockerWrap(c.Container, fmt.Sprintf("%s redis-cli -h %s -p %d --rdb %s 2>/dev/null",
+		redisEnv(c), shared.ShellQuote(c.Host), c.Port, shared.ShellQuote(path)))
 }
 
 func (redisMigrator) RestoreCommand(c DBCredentials, db, path string) string {
@@ -405,7 +431,7 @@ func (redisMigrator) RestoreCommand(c DBCredentials, db, path string) string {
 	// health check. A failed restart must surface as an error — no || true masking
 	// the chain. set -e makes any step abort before the PING gate; the SHUTDOWN's
 	// expected non-zero is the only allowed non-zero (redis closes the conn).
-	return fmt.Sprintf(
+	return dockerWrap(c.Container, fmt.Sprintf(
 		"set -e; "+
 			"rdir=$(redis-cli -h %s -p %d %s CONFIG GET dir 2>/dev/null | tail -1); "+
 			"[ -n \"$rdir\" ] || rdir=/var/lib/redis; "+
@@ -417,7 +443,7 @@ func (redisMigrator) RestoreCommand(c DBCredentials, db, path string) string {
 		shared.ShellQuote(c.Host), c.Port, redisEnv(c),
 		shared.ShellQuote(path),
 		shared.ShellQuote(c.Host), c.Port, redisEnv(c),
-		shared.ShellQuote(c.Host), c.Port, redisEnv(c))
+		shared.ShellQuote(c.Host), c.Port, redisEnv(c)))
 }
 
 func (redisMigrator) DropDatabaseCommand(c DBCredentials, db string) string {

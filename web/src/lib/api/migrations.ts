@@ -36,6 +36,7 @@ export interface DatabaseConfig {
   password: string;
   host: string;
   port: number;
+  container?: string; // docker container running the engine; empty = host
 }
 
 export interface PlanRequest {

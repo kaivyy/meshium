@@ -29,6 +29,7 @@
   let dbUsername = '';
   let dbPassword = '';
   let dbName = '';
+  let dbContainer = ''; // empty = host; else `docker exec -i <name> --` the engine
   // Traffic provider + automatic-cutover selection (Phase 4G, slice 3A). The
   // backend's /api/pipeline/policy is authoritative for what is selectable as
   // automatic; this UI only reflects + gates on it. Default provider is empty
@@ -295,7 +296,7 @@
       categories: selectedCategories,
       configPaths: configPaths ? configPaths.split('\n').map(p => p.trim()).filter(p => p) : undefined,
       databaseConfig: selectedCategories.includes('database')
-        ? { engine: dbEngine, databaseName: dbName.trim(), username: dbUsername, password: dbPassword, host: dbHost, port: dbPort }
+        ? { engine: dbEngine, databaseName: dbName.trim(), username: dbUsername, password: dbPassword, host: dbHost, port: dbPort, container: dbContainer.trim() }
         : undefined,
       operationId,
     };
@@ -499,7 +500,14 @@
               <label for="dbPassword" class="text-xs font-medium text-fg block mb-1">Password</label>
               <input id="dbPassword" type="password" bind:value={dbPassword} class="w-full p-2 border border-border rounded text-sm font-mono bg-surface" />
             </div>
+            <div>
+              <label for="dbContainer" class="text-xs font-medium text-fg block mb-1">Container (optional)</label>
+              <input id="dbContainer" bind:value={dbContainer} placeholder="empty = host; else docker container name" class="w-full p-2 border border-border rounded text-sm font-mono bg-surface" />
+            </div>
           </div>
+          {#if dbContainer}
+            <p class="text-xs text-fg-subtle">Runs inside <span class="font-mono">{dbContainer}</span> via <span class="font-mono">docker exec</span>; host/port are ignored (targets the container's loopback).</p>
+          {/if}
           {#if dbEngine === 'redis'}
             <p class="text-xs text-fg-subtle">Redis uses an RDB snapshot (no per-DB name/username); name/username are ignored.</p>
           {/if}

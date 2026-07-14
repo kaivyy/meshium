@@ -123,3 +123,71 @@ func TestDatabaseCollectAbsentNotError(t *testing.T) {
 		t.Fatalf("collect should return database CategoryData, got %+v", data)
 	}
 }
+
+// TestDockerWrap: commands run inside a container are prefixed with a
+// docker-exec, args shell-quoted; empty container is a pass-through so the
+// host-mode path is unchanged.
+func TestDockerWrap(t *testing.T) {
+	if got := dockerWrap("", "pg_dump -d x"); got != "pg_dump -d x" {
+		t.Errorf("empty container should pass through, got %q", got)
+	}
+	if got := dockerWrap("db-1", "pg_dump -d x"); got != "docker exec -i 'db-1' -- pg_dump -d x" {
+		t.Errorf("container should be prefixed, got %q", got)
+	}
+	// container names with spaces/specials must be quoted, not split
+	if got := dockerWrap("my db", "redis-cli"); got != "docker exec -i 'my db' -- redis-cli" {
+		t.Errorf("container name must be quoted, got %q", got)
+	}
+}
+
+// TestContainerCredentials: when a container is set, connections target its
+// loopback + engine default port (host/port fields are meaningless inside a
+// container), and the container flows into DBCredentials for dockerWrap.
+func TestContainerCredentials(t *testing.T) {
+	in := &DatabaseConfig{Engine: "postgres", Username: "u", Password: "p", Host: "10.0.0.5", Port: 6543, Container: "pg"}
+	c := in.ToCredentials()
+	if c.Container != "pg" {
+		t.Errorf("container not propagated: %q", c.Container)
+	}
+	if c.Host != "127.0.0.1" || c.Port != 5432 {
+		t.Errorf("container should force loopback+default port, got %s:%d", c.Host, c.Port)
+	}
+	// host mode keeps user host/port
+	hostMode := &DatabaseConfig{Engine: "mysql", Username: "u", Host: "10.0.0.5", Port: 3307}
+	hc := hostMode.ToCredentials()
+	if hc.Container != "" || hc.Host != "10.0.0.5" || hc.Port != 3307 {
+		t.Errorf("host mode should preserve host/port, got %s:%d container=%q", hc.Host, hc.Port, hc.Container)
+	}
+}
+
+// TestContainerCommandPrefix: every engine's command builders wrap in
+// docker exec when Container is set, proving no engine silently skips a
+// containerized DB.
+func TestContainerCommandPrefix(t *testing.T) {
+	pg := DBCredentials{Engine: "postgres", Username: "u", Password: "p", Host: "127.0.0.1", Port: 5432, Container: "pg"}
+	my := DBCredentials{Engine: "mysql", Username: "u", Password: "p", Host: "127.0.0.1", Port: 3306, Container: "my"}
+	mg := DBCredentials{Engine: "mongodb", Username: "u", Password: "p", Host: "127.0.0.1", Port: 27017, Container: "mg"}
+	rd := DBCredentials{Engine: "redis", Username: "u", Password: "p", Host: "127.0.0.1", Port: 6379, Container: "rd"}
+
+	for _, c := range []DBCredentials{pg, my, mg, rd} {
+		// exercise one representative command per engine
+		var cmd string
+		switch c.Engine {
+		case "postgres":
+			m := postgresMigrator{}
+			cmd = m.DumpCommand(c, "db", "/tmp/db.dump")
+		case "mysql":
+			m := mysqlMigrator{}
+			cmd = m.DumpCommand(c, "db", "/tmp/db.dump")
+		case "mongodb":
+			m := mongoMigrator{}
+			cmd = m.DumpCommand(c, "db", "/tmp/db.dump")
+		case "redis":
+			m := redisMigrator{}
+			cmd = m.DumpCommand(c, "db", "/tmp/db.rdb")
+		}
+		if !strings.HasPrefix(cmd, "docker exec -i ") {
+			t.Errorf("%s: container command not prefixed: %q", c.Engine, cmd)
+		}
+	}
+}
