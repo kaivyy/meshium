@@ -7,12 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-Consolidated unreleased work for Phase 1 (P0 safety baseline) through Phase 2D
-(operability, auditability, observability, release-readiness). Hard out-of-scope:
-new replication engines, new traffic-switch providers, weakening the
-single-tenant/fencing model, or any "zero downtime" claim. Immutable baselines
-are preserved. Full reports: `docs/phase2d-release-report.md`,
-`docs/known-limitations.md`.
+Consolidated unreleased work spanning Phase 2D (operability, auditability,
+observability, release-readiness) through Phase 4G (plan-wizard truthfulness,
+realtime operation parity) and Phase 5 (minimal-downtime migration realization).
+Hard out-of-scope: new replication engines, new traffic-switch providers,
+weakening the single-tenant/fencing model, or any "zero downtime" claim —
+Phase 5 delivers *minimal* downtime, measured by the live test matrix (see
+Phase 5 below). Immutable baselines are preserved. Full reports under
+`docs/superpowers/specs/`.
 
 ### Phase 4G.1 — Plan Wizard completion, recovery & truthfulness audit
 
@@ -94,6 +96,15 @@ work was already implemented). Six workstreams specified in
 and corrected the docs' false "open" claims.
 
 #### Added (Phase 5)
+- **Plan-hang guard (root-cause fix)** — `Planner.Plan` bounds the whole
+  collection phase with a `planCollectTimeout` (5m, `planner.go`) so a wedged
+  category collector (configs scanning `/etc` can fall into a per-file SFTP
+  loop) can no longer stall `wg.Wait()` forever, starve the terminal
+  `migration_id:N` frame, and leave the New-Migration wizard spinning with no
+  resolution. The frontend adds a 6m safety-net watchdog that reconciles
+  against REST (`reconcilePlan`) if no terminal frame or socket close arrives —
+  so the wizard can never hang even if the server wedges another way. Test:
+  `TestPlanReturnsOnWedgedCollector`.
 - **Container DB adapter (P1-1)** — `DatabaseConfig`/`DBCredentials` gain a
   `Container` field; `dockerWrap` prefixes every engine command
   (`postgres`/`mysql`/`mongodb`/`redis`) with `docker exec -i <quoted> --` when

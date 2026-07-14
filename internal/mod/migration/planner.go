@@ -5,12 +5,23 @@ import (
 	"encoding/json"
 	"fmt"
 	"sync"
+	"time"
 
 	"meshium/internal/mod/server"
 	"meshium/internal/shared"
 
 	xssh "golang.org/x/crypto/ssh"
 )
+
+// planCollectTimeout bounds the whole collection phase. A single wedged
+// category collector (notably configs, which can fall into a per-file SFTP
+// loop over /etc) must not hang Plan() forever — that would starve the
+// terminal migration_id:N frame and leave the wizard spinning with no
+// resolution. On timeout the goroutine returns an error, Plan() completes,
+// and the FE reconciles to a failed plan (never an endless spinner).
+//
+// Declared as a var (not const) so tests can shorten it; production value is 5m.
+var planCollectTimeout = 5 * time.Minute
 
 // Planner collects data from the source server and builds a migration plan.
 type Planner struct {
@@ -118,6 +129,13 @@ func (p *Planner) Plan(ctx context.Context, req PlanRequest, onProgress StepCall
 		onProgress(msg)
 	}
 
+	// Bound the whole collection phase. Individual SSH command/file-transfer
+	// timeouts already exist, but a category collector (configs especially) can
+	// compound them into a much longer stall. A shared deadline guarantees Plan()
+	// returns and emits the terminal frame even if one collector wedges.
+	collectCtx, collectCancel := context.WithTimeout(ctx, planCollectTimeout)
+	defer collectCancel()
+
 	for i, catName := range req.Categories {
 		// If the caller (e.g. the plan WebSocket) disconnected, stop launching
 		// new collection goroutines — but do NOT return early: already-launched
@@ -172,7 +190,7 @@ func (p *Planner) Plan(ctx context.Context, req PlanRequest, onProgress StepCall
 		wg.Add(1)
 		go func(idx int, name string, coll Collector) {
 			defer wg.Done()
-			data, err := coll.Collect(ctx, sshClient)
+			data, err := coll.Collect(collectCtx, sshClient)
 			results[idx] = collectResult{catName: name, err: err}
 			if err != nil {
 				emit(WSMessage{

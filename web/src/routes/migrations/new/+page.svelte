@@ -186,6 +186,17 @@
     if (planTimer) clearInterval(planTimer);
     planElapsed = 0;
     planTimer = setInterval(() => { planElapsed += 1; }, 1000);
+    // Safety net: if collection runs past the server-side collect deadline
+    // without a terminal frame OR a socket close, the backend has wedged (a
+    // category collector can hang). The authoritative resolution is REST
+    // reconcile — never an endless spinner. reconcilePlan no-ops if a terminal
+    // frame arrived in the meantime (planState === 'completed').
+    setTimeout(() => {
+      if (planning && planState !== 'completed') {
+        toast.error('Planning is taking unusually long — checking status…');
+        reconcilePlan(operationId);
+      }
+    }, 6 * 60 * 1000);
   }
 
   function stopPlanTimer() {
