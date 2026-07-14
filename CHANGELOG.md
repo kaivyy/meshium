@@ -122,12 +122,32 @@ documented reasons, ready to flip on). The transfer-engine/checkpoint/cutover wi
   (every category refused with a reason), `TestPlanCategoryMetaNoStoreCollectsLive`,
   `TestPlanCategoryMetaFreshnessWindow`, `TestZeroDowntimeCapableFalse`.
 
+#### Part 6 — large-transfer safety (DB path), honest status (round 2)
+- **File-path DB transfer cap removed.** PG/Redis dump+restore previously ran
+  under the 5m `Command` timeout and the 10m `FileTransfer` total-timeout — a
+  multi-GB dump/restore was killed by either. Now `DatabaseApplier.applyFile`
+  uses a narrow optional `LongCommandExecuter` / `LongTransferExecuter`
+  interface: `*ssh.Client` implements `ExecLongCommand` (timeout=0, only the
+  parent ctx bounds it) and `DownloadLong`/`UploadLong` (ctx-bounded, no total
+  cap). The streaming path (MySQL/Mongo) already had no cap (P0-9). Mocks fall
+  back to the capped `ExecContext`/`Upload`/`Download`, so behavior is unchanged
+  where the long interface is absent. Non-blocking: the execute context itself
+  still bounds lifetime.
+- **Tests:** `longcmd_test.go` — `TestExecLongOrContextPrefersLongPath`,
+  `TestTransferLongOrFallbackPrefersLongPath` (proves the cap-free path is taken
+  when available and the fallback when not).
+
 #### Not yet (explicit follow-ups, not faked)
-- Parts 5–8: resumable large-transfer engine, removal of short hard timeouts,
-  persisted checkpoints, honest `awaiting_cutover`/`observation`/rollback
-  split-brain fix, freeze/fencing + traffic-switch live wiring, and flipping
-  `zeroDowntimeCapable` true once that chain is wired. These need a dedicated
-  round; intentionally NOT stubbed here.
+- **Byte-level resumable transfer** (rsync-style resume / checkpoint ring for a
+  killed mid-GB PG/Redis file transfer). Today a killed transfer restarts from
+  zero — safe (idempotent restore), but not resumable. Needs a dedicated round.
+- **Persisted checkpoints** beyond the per-step `StepStatusApplied` skip guard.
+- **Cutover live wiring**: `StateAwaitingCutover`/`StateObservation`/manual
+  cutover already wired honestly; the freeze/fencing + traffic-switch pieces
+  exist but `zeroDowntimeCapable` stays false until the live-replication chain
+  (Parts 4–8 of the downtime gate) is genuinely verified end-to-end. Rollback is
+  already split-brain-safe (LIFO, backup-gated, `StateNeedsManualIntervention`
+  fail-closed). None of this is faked.
 
 ### Phase 4H — Deprecate & Remove Legacy Planner (/plans)
 

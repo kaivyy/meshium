@@ -318,6 +318,15 @@ func (c *Client) ExecWithTimeout(cmd string, timeout time.Duration) (string, str
 	return c.ExecContextWithTimeout(context.Background(), cmd, timeout)
 }
 
+// ExecLongCommand runs a command with NO hard wall-clock cap — it is bounded
+// only by the parent context (and an optional inactivity watchdog). Multi-GB
+// database dumps/restores legitimately outlast the default 5m Command timeout;
+// capping them would kill real large transfers. A timeout of 0 means only the
+// parent context applies. Satisfies migration.LongCommandExecuter.
+func (c *Client) ExecLongCommand(ctx context.Context, cmd string) (string, string, int, error) {
+	return c.ExecContextWithTimeout(ctx, cmd, 0)
+}
+
 // ExecContextWithTimeout is the primary command execution method. It combines
 // a parent context (for caller-driven cancellation) with a per-command timeout
 // (for hung-session protection). Whichever fires first cancels the command.
@@ -865,6 +874,80 @@ func (c *Client) Download(remotePath string, dst io.Writer) error {
 	case <-time.After(timeout):
 		src.Close() // unblock the pending Read
 		return fmt.Errorf("sftp download timed out after %s: %s", timeout, remotePath)
+	}
+}
+
+// DownloadLong downloads a file via SFTP with NO total-time cap — it is bounded
+// only by the parent context. A multi-GB database dump over a slow link can
+// legitimately exceed the FileTransfer timeout; capping it would abort a valid
+// large transfer. Stall protection still comes from the parent context's
+// deadline. Satisfies migration.LongTransferExecuter.
+func (c *Client) DownloadLong(ctx context.Context, remotePath string, dst io.Writer) error {
+	c.touch()
+
+	sftpClient, err := sftp.NewClient(c.conn)
+	if err != nil {
+		return err
+	}
+	defer sftpClient.Close()
+
+	src, err := sftpClient.Open(remotePath)
+	if err != nil {
+		return err
+	}
+	defer src.Close()
+
+	type copyResult struct {
+		n   int64
+		err error
+	}
+	done := make(chan copyResult, 1)
+	go func() {
+		n, err := io.Copy(dst, src)
+		done <- copyResult{n, err}
+	}()
+
+	select {
+	case r := <-done:
+		return r.err
+	case <-ctx.Done():
+		return fmt.Errorf("sftp download cancelled: %w", ctx.Err())
+	}
+}
+
+// UploadLong uploads a file via SFTP with NO total-time cap — bounded only by
+// the parent context (see DownloadLong rationale). Satisfies
+// migration.LongTransferExecuter.
+func (c *Client) UploadLong(ctx context.Context, src io.Reader, remotePath string) error {
+	c.touch()
+
+	sftpClient, err := sftp.NewClient(c.conn)
+	if err != nil {
+		return err
+	}
+	defer sftpClient.Close()
+
+	dst, err := sftpClient.Create(remotePath)
+	if err != nil {
+		return err
+	}
+	defer dst.Close()
+
+	type copyResult struct {
+		n   int64
+		err error
+	}
+	done := make(chan copyResult, 1)
+	go func() {
+		n, err := io.Copy(dst, src)
+		done <- copyResult{n, err}
+	}()
+
+	select {
+	case r := <-done:
+		return r.err
+	case <-ctx.Done():
+		return fmt.Errorf("sftp upload cancelled: %w", ctx.Err())
 	}
 }
 

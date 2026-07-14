@@ -283,7 +283,7 @@ func (a *DatabaseApplier) applyFile(ctx context.Context, ssh SSHExecuter, m Data
 	if onProgress != nil {
 		onProgress(WSMessage{Step: "database:apply", Status: "progress", Value: fmt.Sprintf("Dumping %s on source", db)})
 	}
-	if _, _, exit, err := a.sourceSSH.ExecContext(ctx, m.DumpCommand(creds, db, srcDumpPath)); err != nil || exit != 0 {
+	if _, _, exit, err := execLongOrContext(ctx, a.sourceSSH, m.DumpCommand(creds, db, srcDumpPath)); err != nil || exit != 0 {
 		return fmt.Errorf("dump (exit %d): %v", exit, err)
 	}
 	defer func() { _, _, _, _ = a.sourceSSH.ExecContext(ctx, "rm -f "+srcDumpPath) }()
@@ -301,7 +301,7 @@ func (a *DatabaseApplier) applyFile(ctx context.Context, ssh SSHExecuter, m Data
 	if onProgress != nil {
 		onProgress(WSMessage{Step: "database:apply", Status: "progress", Value: fmt.Sprintf("Downloading %s dump", db)})
 	}
-	if err := a.sourceSSH.Download(srcDumpPath, openWrite(localPath)); err != nil {
+	if err := transferDownloadLongOrFallback(ctx, a.sourceSSH, srcDumpPath, openWrite(localPath)); err != nil {
 		return fmt.Errorf("download dump: %w", err)
 	}
 
@@ -310,14 +310,14 @@ func (a *DatabaseApplier) applyFile(ctx context.Context, ssh SSHExecuter, m Data
 	if onProgress != nil {
 		onProgress(WSMessage{Step: "database:apply", Status: "progress", Value: fmt.Sprintf("Uploading %s dump to target", db)})
 	}
-	if err := ssh.Upload(openRead(localPath), tgtDumpPath); err != nil {
+	if err := transferLongOrFallback(ctx, ssh, openRead(localPath), tgtDumpPath); err != nil {
 		return fmt.Errorf("upload dump: %w", err)
 	}
 
 	if onProgress != nil {
 		onProgress(WSMessage{Step: "database:apply", Status: "progress", Value: fmt.Sprintf("Restoring %s on target", db)})
 	}
-	if _, stderr, exit, err := ssh.ExecContext(ctx, m.RestoreCommand(creds, db, tgtDumpPath)); err != nil || exit != 0 {
+	if _, stderr, exit, err := execLongOrContext(ctx, ssh, m.RestoreCommand(creds, db, tgtDumpPath)); err != nil || exit != 0 {
 		return fmt.Errorf("restore (exit %d): %s", exit, stderr)
 	}
 	return nil
