@@ -144,3 +144,15 @@ work is the live matrix + three non-blocking Polish items.
 **Recommendation:** execute Workstream E (live matrix) to certify; the
 design/spec + implementation work for all six workstreams is done and truthful.
 Phase 5 should be released only after E's results are recorded.
+
+---
+
+## Addendum — Part 5 residue (resumable DB transfer), 2026-07-15 (commit `956ac6f`)
+
+The DB **file-path** transfer (PostgreSQL, Redis) is now genuinely resumable:
+killed multi-GB transfers append from the last byte offset instead of restarting
+at zero, via the `internal/mod/transfer` engine (`SCPStrategy.Resume` + deterministic
+dump path + persisted `transfer.Checkpoint` + fail-closed `transfer.Reconcile`).
+Cap-free behavior (Part 6) preserved. Parts 7/8 (fenced cutover, checkpoint-driven
+`engine.Resume`) confirmed already wired. Full per-change + risk writeup:
+`part5-resumable-db-transfer-report.md`.

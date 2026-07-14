@@ -59,10 +59,10 @@ after a crash.
 |---|---|---|
 | `UpdateStageCheckpoint` caller (P1-2) | done (`pipeline.go:455`) | — |
 | `StepStatusApplied` category skip | done | — |
-| Byte-level resume for large files (P1-2) | **not present** | implement in B3 (rsync `--partial` + checkpoint read) |
+| Byte-level resume for large files (P1-2) | **DB FILE PATH DONE (2026-07-15, `956ac6f`)** | `DatabaseApplier.applyFile` delegates to `transfer.SCPStrategy` with `Resume=true` + deterministic dump path + persisted `transfer.Checkpoint`; `transfer.Reconcile` fails closed. See `part5-resumable-db-transfer-report.md`. rsync volume (B2) + download-leg resume still open. |
 | DB-subset resume | **not present** | implement in A (re-run unprocessed DBs) |
-| Crash-resume test | not executed | **implement** in Workstream E |
+| Crash-resume test | not executed | unit-tested the fail-closed decision (`TestDatabaseResumeRefusesWhenSourceMoved`/`...AllowsWhenSourceStable`) + cap-free path; **live** failure-injection still in Workstream E |
 
 **Honest claim:** checkpoint *persistence* exists; checkpoint *consumption for
-resume* is the real D-work, implemented jointly with B3 and certified by the
-failure-injection test in the live matrix.
+resume* on the DB file path is now done and fail-closed. The live failure-injection
+test remains the certification gate (Workstream E).

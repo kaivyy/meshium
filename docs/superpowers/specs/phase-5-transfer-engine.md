@@ -70,6 +70,20 @@ already-applied *categories*, not byte-resume of a 50 GB file).
 - Post-transfer: compute sha256 at source and dest (`syncChecksumCommand`,
   `sync.go:95` already exists); on mismatch, bounded retry, then fail closed.
 
+### Status (updated 2026-07-15 — Part 5, commit `956ac6f`)
+- **DB file-path resume: DONE.** `DatabaseApplier.applyFile` now uses the already-built
+  `internal/mod/transfer` engine (`transfer.SCPStrategy.Transfer(Resume=true)`) with a
+  **deterministic** target dump path `/tmp/meshium_dump_<migrationID>_<db>` so a killed
+  upload leaves a findable partial that the next attempt appends to. A persisted
+  `transfer.Checkpoint` (SQLite-backed) + `transfer.Reconcile` makes the resume
+  **fail-closed**: a source that changed after the checkpoint → `ManualIntervention`,
+  never a blind resume. See `part5-resumable-db-transfer-report.md`.
+- **rsync volume transfer (B2) + download-leg resume: still OPEN** (the local temp
+  dump is re-downloaded on retry; only the WAN upload leg resumes). ponytail per the
+  final report's Risk 1.
+- The transfer package's `SCPStrategy` prefers `LongTransferExecuter`
+  (`DownloadLong`/`UploadLong`, ctx-bounded) so Part 6's cap-free behavior is preserved.
+
 ---
 
 ## Phase 5 net-new work for Workstream B
