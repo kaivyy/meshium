@@ -37,6 +37,10 @@ export interface DatabaseConfig {
   host: string;
   port: number;
   container?: string; // docker container running the engine; empty = host
+  execMode?: string; // host | container | compose (Phase 5E, E)
+  composeService?: string; // compose service name (execMode = compose)
+  composeFile?: string; // path to docker-compose.yml (execMode = compose)
+  migrationMode?: string; // snapshot_copy | live_replication (Phase 5E, E)
 }
 
 export interface PlanRequest {
@@ -56,6 +60,7 @@ export interface WSMessage {
   status: string;
   value?: string;
   error?: string;
+  estimatedBytes?: number; // Phase 5E (J): collector best-effort size; 0 = unknown
 }
 
 // ReconcileOutcome is the pure decision made when the FE asks the backend

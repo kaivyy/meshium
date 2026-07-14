@@ -9,9 +9,13 @@
   import {
     canAutoCutover,
     engineSupport,
-    trafficProviderSupport
+    trafficProviderSupport,
+    dbEngineResume,
+    dbEngineDowntime,
+    dbEngineTransferNote
   } from '$lib/support-status';
   import SupportStatusBadge from '$lib/components/SupportStatusBadge.svelte';
+  import { formatBytes } from '$lib/utils/format';
   import type { Server } from '$lib/stores/servers';
   import { ArrowLeft, ArrowRight, Check, Package, FileCode, Settings, Users, Loader, Container, Database } from 'lucide-svelte';
 
@@ -30,6 +34,13 @@
   let dbPassword = '';
   let dbName = '';
   let dbContainer = ''; // empty = host; else `docker exec -i <name> --` the engine
+  // Phase 5E (E): execution location + migration mode drive honest capability
+  // disclosure. execMode: host | container | compose. migrationMode:
+  // snapshot_copy | live_replication (disabled while not genuinely wired).
+  let dbExecMode = 'host';
+  let dbComposeService = '';
+  let dbComposeFile = '';
+  let dbMigrationMode = 'snapshot_copy'; // live_replication unavailable → shown disabled
   // Traffic provider + automatic-cutover selection (Phase 4G, slice 3A). The
   // backend's /api/pipeline/policy is authoritative for what is selectable as
   // automatic; this UI only reflects + gates on it. Default provider is empty
@@ -177,6 +188,14 @@
   $: autoCutoverAllowed = canAutoCutover(dbEngine, trafficProvider, policy).allowed;
   $: if (autoCutover && !autoCutoverAllowed) autoCutover = false;
 
+  // Phase 5E (J): best-effort total data size from the collect frames. 0 = unknown
+  // → the UI shows "size unknown", never "0 MB".
+  $: dbEstimatedBytes = selectedCategories.includes('database')
+    ? planMessages
+        .filter(m => m.step === 'plan:database' && m.status === 'success')
+        .reduce((sum, m) => sum + (m.estimatedBytes ?? 0), 0)
+    : 0;
+
   onDestroy(() => {
     ws?.close();
     if (planTimer) clearInterval(planTimer);
@@ -307,7 +326,19 @@
       categories: selectedCategories,
       configPaths: configPaths ? configPaths.split('\n').map(p => p.trim()).filter(p => p) : undefined,
       databaseConfig: selectedCategories.includes('database')
-        ? { engine: dbEngine, databaseName: dbName.trim(), username: dbUsername, password: dbPassword, host: dbHost, port: dbPort, container: dbContainer.trim() }
+        ? {
+            engine: dbEngine,
+            databaseName: dbName.trim(),
+            username: dbUsername,
+            password: dbPassword,
+            host: dbHost,
+            port: dbPort,
+            container: dbExecMode === 'container' ? dbContainer.trim() : '',
+            execMode: dbExecMode,
+            composeService: dbExecMode === 'compose' ? dbComposeService.trim() : '',
+            composeFile: dbExecMode === 'compose' ? dbComposeFile.trim() : '',
+            migrationMode: dbMigrationMode,
+          }
         : undefined,
       operationId,
     };
@@ -511,21 +542,79 @@
               <label for="dbPassword" class="text-xs font-medium text-fg block mb-1">Password</label>
               <input id="dbPassword" type="password" bind:value={dbPassword} class="w-full p-2 border border-border rounded text-sm font-mono bg-surface" />
             </div>
-            <div>
-              <label for="dbContainer" class="text-xs font-medium text-fg block mb-1">Container (optional)</label>
-              <input id="dbContainer" bind:value={dbContainer} placeholder="empty = host; else docker container name" class="w-full p-2 border border-border rounded text-sm font-mono bg-surface" />
-            </div>
           </div>
-          {#if dbContainer}
+
+          <!-- Phase 5E (E): execution location drives where the dump/restore
+               actually runs. Host = localhost on the server; Container = docker
+               exec into a named container; Compose = a service in a compose file. -->
+          <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
+            <div>
+              <label for="dbExecMode" class="text-xs font-medium text-fg block mb-1">Execution location</label>
+              <select id="dbExecMode" bind:value={dbExecMode} class="w-full p-2 border border-border rounded text-sm bg-surface">
+                <option value="host">Host (localhost on server)</option>
+                <option value="container">Docker container</option>
+                <option value="compose">Docker compose service</option>
+              </select>
+            </div>
+            {#if dbExecMode === 'container'}
+              <div>
+                <label for="dbContainer" class="text-xs font-medium text-fg block mb-1">Container name</label>
+                <input id="dbContainer" bind:value={dbContainer} placeholder="e.g. postgres-prod" class="w-full p-2 border border-border rounded text-sm font-mono bg-surface" />
+              </div>
+            {:else if dbExecMode === 'compose'}
+              <div>
+                <label for="dbComposeService" class="text-xs font-medium text-fg block mb-1">Compose service</label>
+                <input id="dbComposeService" bind:value={dbComposeService} placeholder="e.g. db" class="w-full p-2 border border-border rounded text-sm font-mono bg-surface" />
+              </div>
+              <div class="sm:col-span-2">
+                <label for="dbComposeFile" class="text-xs font-medium text-fg block mb-1">Compose file (optional)</label>
+                <input id="dbComposeFile" bind:value={dbComposeFile} placeholder="empty = auto; else /path/docker-compose.yml" class="w-full p-2 border border-border rounded text-sm font-mono bg-surface" />
+              </div>
+            {/if}
+          </div>
+          {#if dbExecMode === 'container'}
             <p class="text-xs text-fg-subtle">Runs inside <span class="font-mono">{dbContainer}</span> via <span class="font-mono">docker exec</span>; host/port are ignored (targets the container's loopback).</p>
+          {:else if dbExecMode === 'compose'}
+            <p class="text-xs text-fg-subtle">Runs the <span class="font-mono">{dbComposeService}</span> service via <span class="font-mono">docker compose exec</span>.</p>
           {/if}
           {#if dbEngine === 'redis'}
             <p class="text-xs text-fg-subtle">Redis uses an RDB snapshot (no per-DB name/username); name/username are ignored.</p>
           {/if}
 
-          <!-- Phase 4G 3A: support matrix, derived from GET /api/pipeline/policy.
-               The backend enforces the decision; the UI reflects + gates on it. -->
+          <!-- Phase 5E (E): per-engine capability is disclosed honestly — what
+               the transfer can resume, the real downtime class, and the warnings. -->
           <div class="mt-4 pt-4 border-t border-border space-y-3">
+            <div class="flex flex-wrap items-center gap-2">
+              <span class="text-sm font-medium text-fg">Migration mode</span>
+              <span
+                class="px-2 py-0.5 rounded text-xs border {dbMigrationMode === 'snapshot_copy'
+                  ? 'bg-success/10 text-success border-success/30'
+                  : 'bg-surface-muted text-fg-muted border-border'}"
+              >
+                {dbMigrationMode === 'snapshot_copy' ? 'Snapshot copy (available)' : 'Live replication (not available)'}
+              </span>
+            </div>
+            <div>
+              <label for="dbMigrationMode" class="text-xs font-medium text-fg block mb-1">Mode</label>
+              <select id="dbMigrationMode" bind:value={dbMigrationMode} class="w-full p-2 border border-border rounded text-sm bg-surface">
+                <option value="snapshot_copy">Snapshot copy — offline dump &amp; restore (downtime = transfer time)</option>
+                <option value="live_replication" disabled>Live replication — not yet wired (would need seeded replica + fenced cutover)</option>
+              </select>
+            </div>
+
+            <div class="rounded border border-border bg-surface-subtle p-3 space-y-2">
+              <p class="text-xs font-semibold text-fg">What this engine will actually do</p>
+              <div class="flex flex-wrap gap-x-4 gap-y-1 text-xs text-fg-subtle">
+                <span>Resume after interruption:
+                  <span class="font-medium text-fg">{dbEngineResume(dbEngine)}</span>
+                </span>
+                <span>Downtime:
+                  <span class="font-medium text-fg">{dbEngineDowntime(dbEngine)}</span>
+                </span>
+              </div>
+              <p class="text-xs text-fg-subtle">{dbEngineTransferNote(dbEngine)}</p>
+            </div>
+
             <div class="flex flex-wrap items-center gap-2">
               <span class="text-sm font-medium text-fg">Engine support</span>
               <SupportStatusBadge level={engineSupport(dbEngine, policy).level} label={engineSupport(dbEngine, policy).label} />
@@ -607,6 +696,13 @@
             <p class="text-sm text-fg-subtle">Database</p>
             <p class="font-mono text-xs text-fg-muted">
               {dbEngine}://{dbUsername ? '***' : '(no auth)'}@{dbHost}:{dbPort}{dbName ? '/' + dbName : ' (all user DBs)'}
+              {#if dbExecMode === 'container'} · container: {dbContainer}{:else if dbExecMode === 'compose'} · compose: {dbComposeService}{/if}
+              {#if dbMigrationMode === 'snapshot_copy'} · snapshot copy{:else} · {dbMigrationMode}{/if}
+            </p>
+            <p class="text-xs text-fg-subtle mt-1">
+              {#if dbEstimatedBytes > 0}Estimated size: <span class="font-mono text-fg">{formatBytes(dbEstimatedBytes)}</span>{:else}Estimated size: <span class="font-mono text-fg-muted">unknown until plan collects</span>{/if}
+              · Resume: <span class="font-mono text-fg">{dbEngineResume(dbEngine)}</span>
+              · {dbEngineDowntime(dbEngine)}
             </p>
           </div>
         {/if}

@@ -75,6 +75,21 @@
   let bytesTotal = 0;
   let speedBytes = 0;
   let eta = '';
+  // Phase 5E (F): honest transfer observability — populated only from real
+  // backend frames (WSMessage.transferMethod/bytesCompleted/...). No synthetic
+  // 100% completion; defaults render as "unknown" until a real frame arrives.
+  let transferMethod = '';
+  let transferDirection = '';
+  let transferBytesDone = 0;
+  let transferBytesTotal = 0;
+  let transferSpeed = 0;
+  let transferEtaSeconds: number | undefined = undefined;
+  let checkpointStatus = '';
+  let resumeState = '';
+  let resumeReason = '';
+  let transferAttempt = 0;
+  let transferResumable = false;
+  let downtimeClass = '';
   let replicationLag = 0;
   let healthScore = 100;
   let currentState = '';
@@ -880,6 +895,19 @@
     if (msg.networkTxBytesSec !== undefined) networkTxBytesSec = msg.networkTxBytesSec;
     if (msg.containerHealth) containerHealth = msg.containerHealth;
     if (msg.queueInfo) queueStates = msg.queueInfo;
+    // Phase 5E (F): honest transfer observability.
+    if (msg.transferMethod) transferMethod = msg.transferMethod;
+    if (msg.direction) transferDirection = msg.direction;
+    if (msg.bytesCompleted !== undefined) transferBytesDone = msg.bytesCompleted;
+    if (msg.bytesTotal) transferBytesTotal = msg.bytesTotal;
+    if (msg.throughputBps) transferSpeed = msg.throughputBps;
+    if (msg.etaSeconds !== undefined) transferEtaSeconds = msg.etaSeconds;
+    if (msg.checkpointStatus) checkpointStatus = msg.checkpointStatus;
+    if (msg.resumeState) resumeState = msg.resumeState;
+    if (msg.resumeReason) resumeReason = msg.resumeReason;
+    if (msg.attempt !== undefined) transferAttempt = msg.attempt;
+    if (msg.isResumable !== undefined) transferResumable = msg.isResumable;
+    if (msg.downtimeClass) downtimeClass = msg.downtimeClass;
     // A live frame arrived — the snapshot is no longer stale, and persist the
     // refreshed values so a later refresh/close-reopen restores them.
     metricsStale = false;
@@ -1735,6 +1763,53 @@
             <div class="text-base font-mono">{eta || '—'}</div>
           </div>
         </div>
+
+        <!-- Phase 5E (F): honest transfer observability. Rendered ONLY when a real
+             backend frame has set transferMethod — no synthetic 100% completion. -->
+        {#if transferMethod}
+          <div class="rounded-lg border border-border bg-surface-subtle p-3 mb-4 space-y-2">
+            <div class="flex items-center justify-between">
+              <span class="text-sm font-medium text-fg">Transfer ({transferMethod}{transferDirection ? ' · ' + transferDirection : ''})</span>
+              {#if downtimeClass}
+                <span class="text-xs font-mono text-fg-subtle">downtime: {downtimeClass}</span>
+              {/if}
+            </div>
+            <div class="grid grid-cols-2 sm:grid-cols-4 gap-2 text-xs">
+              <div>
+                <div class="text-fg-subtle">Bytes</div>
+                <div class="font-mono text-fg">
+                  {transferBytesTotal ? formatBytes(transferBytesDone) + ' / ' + formatBytes(transferBytesTotal) : (transferBytesDone ? formatBytes(transferBytesDone) : 'unknown')}
+                </div>
+              </div>
+              <div>
+                <div class="text-fg-subtle">Speed</div>
+                <div class="font-mono text-fg">{transferSpeed ? formatSpeed(transferSpeed) : '—'}</div>
+              </div>
+              <div>
+                <div class="text-fg-subtle">ETA</div>
+                <div class="font-mono text-fg">{transferEtaSeconds !== undefined ? transferEtaSeconds + 's' : '—'}</div>
+              </div>
+              <div>
+                <div class="text-fg-subtle">Resume</div>
+                <div class="font-mono text-fg">{transferResumable ? 'supported' : (resumeState ? 'not supported' : '—')}</div>
+              </div>
+            </div>
+            <div class="flex flex-wrap items-center gap-x-4 gap-y-1 text-xs text-fg-subtle">
+              {#if checkpointStatus}
+                <span>Checkpoint: <span class="font-mono text-fg">{checkpointStatus}</span></span>
+              {/if}
+              {#if transferAttempt}
+                <span>Attempt: <span class="font-mono text-fg">{transferAttempt}</span></span>
+              {/if}
+              {#if resumeState}
+                <span>State: <span class="font-mono text-fg">{resumeState}</span></span>
+              {/if}
+              {#if resumeReason}
+                <span class="block w-full">Note: <span class="text-warning">{resumeReason}</span></span>
+              {/if}
+            </div>
+          </div>
+        {/if}
 
         <!-- Resource Metrics -->
         <div class="grid grid-cols-1 sm:grid-cols-3 gap-2 mb-4">

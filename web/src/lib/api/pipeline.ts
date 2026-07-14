@@ -350,6 +350,23 @@ export interface WSMessageExtended {
   // Event sequence for reconnect replay
   sequence?: number;
   timestamp?: string;
+  // Phase 5E (F): honest transfer observability — mirrors the backend WSMessage
+  // additive fields so the pipeline view can render real method/bytes/speed/ETA/
+  // checkpoint/resume/verification state without parsing `value`.
+  migrationId?: number;
+  transferId?: string;
+  direction?: string; // download | upload
+  transferMethod?: string; // scp | rsync | stream | sftp
+  bytesCompleted?: number;
+  throughputBps?: number;
+  etaSeconds?: number;
+  checkpointStatus?: string; // loaded | none | deleted
+  resumeState?: string; // fresh_transfer | resuming_upload | ... (Phase 5E tokens)
+  resumeReason?: string;
+  sourceFingerprint?: string;
+  attempt?: number;
+  isResumable?: boolean;
+  downtimeClass?: string; // offline_copy | minimal_downtime | zero_downtime
 }
 
 // --- Metrics & Audit ---

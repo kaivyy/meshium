@@ -158,3 +158,50 @@ export function supportClasses(level: SupportLevel): string {
     default: return 'bg-surface-muted text-fg-muted border-border';
   }
 }
+
+// --- Phase 5E (E): honest per-engine database transfer disclosure. ---
+// These mirror the backend DatabaseResumable / DowntimeClassFor / ResumeNote
+// (no re-derivation of safety — they state what the engine path does today).
+
+// dbEngineResume: file-path engines resume the upload leg; streaming engines
+// restart the whole transfer. Never claim a resumable badge for the latter.
+export function dbEngineResume(engine: string | undefined): string {
+  switch (engine) {
+    case 'postgres':
+    case 'redis':
+      return 'Yes — upload resumes from a partial';
+    case 'mysql':
+    case 'mongodb':
+      return 'No — restarts from the beginning';
+    default:
+      return 'Unknown';
+  }
+}
+
+// dbEngineDowntime: DB migration is an offline snapshot copy today. It is NEVER
+// "zero downtime" — there is no committed live-replication + fenced-cutover path.
+export function dbEngineDowntime(engine: string | undefined): string {
+  switch (engine) {
+    case 'postgres':
+    case 'mysql':
+    case 'mongodb':
+    case 'redis':
+      return 'Offline (downtime = transfer time)';
+    default:
+      return 'Unknown';
+  }
+}
+
+// dbEngineTransferNote: the honest one-line caveat surfaced in Step 3.
+export function dbEngineTransferNote(engine: string | undefined): string {
+  switch (engine) {
+    case 'postgres':
+    case 'redis':
+      return 'Target upload can resume after a network interruption if the source dump is unchanged. If the local/source dump is unavailable, the dump+download stage runs again.';
+    case 'mysql':
+    case 'mongodb':
+      return 'Streaming transfer restarts from the beginning after an interruption — there is no resumable artifact yet.';
+    default:
+      return 'Select an engine to see its transfer behavior.';
+  }
+}
