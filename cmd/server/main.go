@@ -25,6 +25,7 @@ import (
 	"meshium/internal/mod/process"
 	"meshium/internal/mod/server"
 	"meshium/internal/mod/ssh"
+	"meshium/internal/mod/transfer"
 	"meshium/internal/shared"
 )
 
@@ -193,6 +194,7 @@ func main() {
 		authSvc,
 		knownHosts,
 		migrationRegistry,
+		transfer.NewSQLiteCheckpointStore(database),
 	)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "Failed to create pipeline: %v\n", err)

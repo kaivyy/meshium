@@ -1,16 +1,37 @@
 package transfer
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"strings"
-
-	"meshium/internal/mod/migration"
 )
 
-// FileTransferStep implements migration.MigrationStep for file transfers.
-// It transfers a file (or directory) from a source to a destination,
-// with checksum verification and rollback support.
+// StepContext is the minimal transfer-step execution context. It intentionally
+// mirrors only the subset of migration.StepContext the transfer package needs
+// (Ctx + Progress) so transfer has NO compile-time dependency on the migration
+// package. That matters: migration imports transfer (to drive resumable DB
+// dumps), so transfer must not import migration back — doing so would be a
+// cycle. The migration package builds a transfer.StepContext when it drives a
+// transfer step, wrapping its own WSMessage-based callback in Progress.
+type StepContext struct {
+	Ctx      context.Context
+	Progress func(WSMessage)
+}
+
+// WSMessage is the progress message format the transfer package emits. It is a
+// local copy of the migration WSMessage shape so transfer stays independent of
+// the migration package (import-cycle avoidance, see StepContext above).
+type WSMessage struct {
+	Step   string
+	Status string
+	Value  string
+	Error  string
+}
+
+// FileTransferStep implements a file transfer as Prepare/Apply/Verify/Rollback
+// phases, with checksum verification. It is a reusable building block; the
+// migration package drives it via transfer.StepContext.
 type FileTransferStep struct {
 	StepName  string
 	Source    TransferTarget
@@ -52,7 +73,7 @@ type ApplyData struct {
 	BytesTransferred int64  `json:"bytesTransferred"`
 	Checksum         string `json:"checksum"`
 	Strategy         string `json:"strategy"`
-	Resumed           bool   `json:"resumed"`
+	Resumed          bool   `json:"resumed"`
 }
 
 // VerifyData is the data returned by Verify and stored as a checkpoint.
@@ -66,7 +87,7 @@ type VerifyData struct {
 //   - Gets the source file size
 //   - Checks available disk space at the destination
 //   - Selects the appropriate transfer strategy
-func (s *FileTransferStep) Prepare(sctx migration.StepContext) (string, error) {
+func (s *FileTransferStep) Prepare(sctx StepContext) (string, error) {
 	ctx := sctx.Ctx
 
 	// Check source file exists
@@ -92,7 +113,7 @@ func (s *FileTransferStep) Prepare(sctx migration.StepContext) (string, error) {
 		if err != nil {
 			// Log warning but don't fail — disk space check is best-effort
 			if sctx.Progress != nil {
-				sctx.Progress(migration.WSMessage{
+				sctx.Progress(WSMessage{
 					Step:   s.StepName,
 					Status: "warning",
 					Value:  fmt.Sprintf("Could not check disk space: %v", err),
@@ -132,7 +153,7 @@ func (s *FileTransferStep) Prepare(sctx migration.StepContext) (string, error) {
 	}
 
 	if sctx.Progress != nil {
-		sctx.Progress(migration.WSMessage{
+		sctx.Progress(WSMessage{
 			Step:   s.StepName,
 			Status: "progress",
 			Value:  fmt.Sprintf("Prepared: strategy=%s, size=%d bytes, resumed=%v", strategy.Name(), fileSize, resumed),
@@ -145,7 +166,7 @@ func (s *FileTransferStep) Prepare(sctx migration.StepContext) (string, error) {
 // Apply performs the file transfer using the selected strategy.
 // It wraps the transfer with progress tracking and emits progress
 // via the StepContext's progress callback.
-func (s *FileTransferStep) Apply(sctx migration.StepContext) (string, error) {
+func (s *FileTransferStep) Apply(sctx StepContext) (string, error) {
 	ctx := sctx.Ctx
 
 	if s.selectedStrategy == nil {
@@ -153,12 +174,12 @@ func (s *FileTransferStep) Apply(sctx migration.StepContext) (string, error) {
 		s.selectedStrategy = s.Selector.Select(ctx, s.fileSize, s.Options, s.Source)
 	}
 
-	// Wrap progress callback to use migration.WSMessage
+	// Wrap progress callback to use WSMessage
 	opts := s.Options
 	if sctx.Progress != nil {
 		originalCallback := opts.ProgressCallback
 		opts.ProgressCallback = func(p TransferProgress) {
-			sctx.Progress(migration.WSMessage{
+			sctx.Progress(WSMessage{
 				Step:   s.StepName,
 				Status: "progress",
 				Value:  fmt.Sprintf("%.1f%% — %d/%d bytes — %d B/s", p.Percentage, p.BytesTransferred, p.TotalBytes, p.SpeedBPS),
@@ -170,7 +191,7 @@ func (s *FileTransferStep) Apply(sctx migration.StepContext) (string, error) {
 	}
 
 	if sctx.Progress != nil {
-		sctx.Progress(migration.WSMessage{
+		sctx.Progress(WSMessage{
 			Step:   s.StepName,
 			Status: "progress",
 			Value:  fmt.Sprintf("Starting transfer via %s", s.selectedStrategy.Name()),
@@ -194,7 +215,7 @@ func (s *FileTransferStep) Apply(sctx migration.StepContext) (string, error) {
 	}
 
 	if sctx.Progress != nil {
-		sctx.Progress(migration.WSMessage{
+		sctx.Progress(WSMessage{
 			Step:   s.StepName,
 			Status: "progress",
 			Value:  fmt.Sprintf("Transfer complete: %d bytes via %s", result.BytesTransferred, result.Strategy),
@@ -206,11 +227,11 @@ func (s *FileTransferStep) Apply(sctx migration.StepContext) (string, error) {
 
 // Verify computes the SHA256 checksum at both source and destination
 // and compares them. If they match, the transfer is verified.
-func (s *FileTransferStep) Verify(sctx migration.StepContext) (string, error) {
+func (s *FileTransferStep) Verify(sctx StepContext) (string, error) {
 	ctx := sctx.Ctx
 
 	if sctx.Progress != nil {
-		sctx.Progress(migration.WSMessage{
+		sctx.Progress(WSMessage{
 			Step:   s.StepName,
 			Status: "progress",
 			Value:  "Verifying checksums...",
@@ -233,10 +254,10 @@ func (s *FileTransferStep) Verify(sctx migration.StepContext) (string, error) {
 	}
 
 	if sctx.Progress != nil {
-		sctx.Progress(migration.WSMessage{
+		sctx.Progress(WSMessage{
 			Step:   s.StepName,
 			Status: "success",
-			Value:  fmt.Sprintf("Checksum verified: %s", checksum[:16]+"..."),
+			Value:  fmt.Sprintf("Checksum verified: %s", checksum[:16]),
 		})
 	}
 
@@ -245,11 +266,11 @@ func (s *FileTransferStep) Verify(sctx migration.StepContext) (string, error) {
 
 // Rollback removes the transferred file from the destination.
 // This cleans up any partial or complete file that was transferred.
-func (s *FileTransferStep) Rollback(sctx migration.StepContext) error {
+func (s *FileTransferStep) Rollback(sctx StepContext) error {
 	ctx := sctx.Ctx
 
 	if sctx.Progress != nil {
-		sctx.Progress(migration.WSMessage{
+		sctx.Progress(WSMessage{
 			Step:   s.StepName,
 			Status: "progress",
 			Value:  fmt.Sprintf("Rolling back: removing %s", s.Dest.Path),
@@ -262,7 +283,7 @@ func (s *FileTransferStep) Rollback(sctx migration.StepContext) error {
 	}
 
 	if sctx.Progress != nil {
-		sctx.Progress(migration.WSMessage{
+		sctx.Progress(WSMessage{
 			Step:   s.StepName,
 			Status: "success",
 			Value:  "Rollback complete: file removed",
@@ -274,9 +295,8 @@ func (s *FileTransferStep) Rollback(sctx migration.StepContext) error {
 
 // --- DirectoryTransferStep ---
 
-// DirectoryTransferStep implements migration.MigrationStep for directory
-// transfers. It transfers all files in a directory, with resume support
-// (skipping files that are already transferred and match in size).
+// DirectoryTransferStep is a step wrapper around DirectoryTransfer. It is a
+// reusable building block driven via transfer.StepContext.
 type DirectoryTransferStep struct {
 	StepName string
 	Source   TransferTarget
@@ -305,7 +325,7 @@ func NewDirectoryTransferStep(name string, src, dst TransferTarget, opts Transfe
 func (s *DirectoryTransferStep) Name() string { return s.StepName }
 
 // Prepare validates that the source directory exists and lists its files.
-func (s *DirectoryTransferStep) Prepare(sctx migration.StepContext) (string, error) {
+func (s *DirectoryTransferStep) Prepare(sctx StepContext) (string, error) {
 	ctx := sctx.Ctx
 
 	// Create directory transfer
@@ -318,7 +338,7 @@ func (s *DirectoryTransferStep) Prepare(sctx migration.StepContext) (string, err
 	}
 
 	if sctx.Progress != nil {
-		sctx.Progress(migration.WSMessage{
+		sctx.Progress(WSMessage{
 			Step:   s.StepName,
 			Status: "progress",
 			Value:  fmt.Sprintf("Found %d files to transfer", len(files)),
@@ -337,19 +357,19 @@ func (s *DirectoryTransferStep) Prepare(sctx migration.StepContext) (string, err
 }
 
 // Apply transfers all files in the directory.
-func (s *DirectoryTransferStep) Apply(sctx migration.StepContext) (string, error) {
+func (s *DirectoryTransferStep) Apply(sctx StepContext) (string, error) {
 	ctx := sctx.Ctx
 
 	if s.dirTransfer == nil {
 		s.dirTransfer = NewDirectoryTransfer(s.Selector)
 	}
 
-	// Wrap progress callback to use migration.WSMessage
+	// Wrap progress callback to use WSMessage
 	opts := s.Options
 	if sctx.Progress != nil {
 		originalCallback := opts.ProgressCallback
 		opts.ProgressCallback = func(p TransferProgress) {
-			sctx.Progress(migration.WSMessage{
+			sctx.Progress(WSMessage{
 				Step:   s.StepName,
 				Status: "progress",
 				Value:  fmt.Sprintf("%.1f%% — %d/%d bytes — %d B/s", p.Percentage, p.BytesTransferred, p.TotalBytes, p.SpeedBPS),
@@ -377,7 +397,7 @@ func (s *DirectoryTransferStep) Apply(sctx migration.StepContext) (string, error
 	}
 
 	if sctx.Progress != nil {
-		sctx.Progress(migration.WSMessage{
+		sctx.Progress(WSMessage{
 			Step:   s.StepName,
 			Status: "success",
 			Value:  fmt.Sprintf("Directory transfer: %d files, %d bytes", result.TransferredFiles, result.TransferredBytes),
@@ -388,7 +408,7 @@ func (s *DirectoryTransferStep) Apply(sctx migration.StepContext) (string, error
 }
 
 // Verify computes checksums for all transferred files.
-func (s *DirectoryTransferStep) Verify(sctx migration.StepContext) (string, error) {
+func (s *DirectoryTransferStep) Verify(sctx StepContext) (string, error) {
 	ctx := sctx.Ctx
 
 	if s.dirTransfer == nil {
@@ -396,7 +416,7 @@ func (s *DirectoryTransferStep) Verify(sctx migration.StepContext) (string, erro
 	}
 
 	if sctx.Progress != nil {
-		sctx.Progress(migration.WSMessage{
+		sctx.Progress(WSMessage{
 			Step:   s.StepName,
 			Status: "progress",
 			Value:  "Verifying directory checksums...",
@@ -422,7 +442,7 @@ func (s *DirectoryTransferStep) Verify(sctx migration.StepContext) (string, erro
 	}
 
 	if sctx.Progress != nil {
-		sctx.Progress(migration.WSMessage{
+		sctx.Progress(WSMessage{
 			Step:   s.StepName,
 			Status: "success",
 			Value:  "All files verified",
@@ -433,7 +453,7 @@ func (s *DirectoryTransferStep) Verify(sctx migration.StepContext) (string, erro
 }
 
 // Rollback removes all transferred files from the destination.
-func (s *DirectoryTransferStep) Rollback(sctx migration.StepContext) error {
+func (s *DirectoryTransferStep) Rollback(sctx StepContext) error {
 	ctx := sctx.Ctx
 
 	if s.dirTransfer == nil {
@@ -441,7 +461,7 @@ func (s *DirectoryTransferStep) Rollback(sctx migration.StepContext) error {
 	}
 
 	if sctx.Progress != nil {
-		sctx.Progress(migration.WSMessage{
+		sctx.Progress(WSMessage{
 			Step:   s.StepName,
 			Status: "progress",
 			Value:  "Rolling back: removing transferred files...",
@@ -454,7 +474,7 @@ func (s *DirectoryTransferStep) Rollback(sctx migration.StepContext) error {
 	}
 
 	if sctx.Progress != nil {
-		sctx.Progress(migration.WSMessage{
+		sctx.Progress(WSMessage{
 			Step:   s.StepName,
 			Status: "success",
 			Value:  "Rollback complete: all files removed",
@@ -463,7 +483,3 @@ func (s *DirectoryTransferStep) Rollback(sctx migration.StepContext) error {
 
 	return nil
 }
-
-// Ensure FileTransferStep and DirectoryTransferStep implement migration.MigrationStep
-var _ migration.MigrationStep = (*FileTransferStep)(nil)
-var _ migration.MigrationStep = (*DirectoryTransferStep)(nil)

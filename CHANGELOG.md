@@ -137,11 +137,63 @@ documented reasons, ready to flip on). The transfer-engine/checkpoint/cutover wi
   `TestTransferLongOrFallbackPrefersLongPath` (proves the cap-free path is taken
   when available and the fallback when not).
 
+#### Part 5 — resumable DB dump/restore transfer (the killed-mid-GB fix)
+
+Wires the already-built, tested `internal/mod/transfer` engine into the canonical
+`DatabaseApplier.applyFile` path so a killed multi-GB PG/Redis file transfer
+**resumes from the last byte offset instead of restarting at zero** — using the
+deterministic dump path + persisted checkpoints + honest fail-closed reconcile.
+This closes two of the three "Not yet" items from round 2. The transfer package
+was orphaned (built, tested, never imported); this is integration, not a new build.
+
+- **Import-cycle break (precondition):** `transfer/step.go` previously imported
+  `migration` (`FileTransferStep`/`DirectoryTransferStep` used `migration.StepContext`
+  / `migration.WSMessage`), which would have cycled once `migration` imported
+  `transfer`. `transfer` now owns local `StepContext`/`WSMessage` types (the
+  minimal subset it needs) — `migration` imports `transfer`, `transfer` no longer
+  imports `migration`. The two orphaned adapters are not on any live path
+  (nothing constructs `FileTransferStep`), so this is a safe, breaking-free move.
+- **Deterministic dump path:** `applyFile` no longer uses a `time.Now()`-based
+  temp path for the target dump. It uses `/tmp/meshium_dump_<migrationID>_<db>`
+  so a killed upload leaves a *findable* partial on the target; the upload leg
+  (`transfer.SCPStrategy.Transfer` with `Resume=true`) appends to it. Time-based
+  paths made the partial unfindable → restart-from-zero.
+- **Re-dump only when absent:** the source dump is reused across retries (it is
+  stable, and reusing it keeps the source-snapshot fingerprint stable so resume
+  stays valid). Re-dumping only happens when the source dump file is missing.
+- **Cap-free preserves Part 6:** the SFTP legs now go through `transfer` which
+  prefers `LongTransferExecuter` (`DownloadLong`/`UploadLong`, ctx-bounded, no
+  10m SFTP cap) when the SSH impl supports it, falling back to capped
+  `Download`/`Upload` otherwise. So Part 5 does NOT regress the Part 6 safety fix.
+- **Honest fail-closed resume:** before uploading, if a checkpoint exists,
+  `reconcileOrFail` builds `ReconcileEvidence` (live source size+mtime fingerprint
+  via `transfer.StatFile`, target partial size) and calls `transfer.Reconcile`.
+  Source moved or partial inconsistent → `VerdictManualIntervention` → `applyFile`
+  returns `ErrTransferReconcileFailed` and the stage fails to
+  `NeedsManualIntervention` — **never** a blind resume onto unverified state.
+  After a successful restore the checkpoint is deleted (no phantom "partial"
+  on the next retry).
+- **Checkpoint wiring:** `Pipeline` gains a `transfer.CheckpointStore`
+  (constructed from `*sql.DB` via `transfer.NewSQLiteCheckpointStore(database)` in
+  `cmd/server/main.go`); `initialSyncStage` injects it into the `DatabaseApplier`
+  via `SetCheckpointStore(migrationID, store)`. `NewPipeline` gained the trailing
+  `checkpointStore` param; `cutover_p0_test.go` updated to pass `nil` (one-shot,
+  legacy behavior, no regression).
+- **Tests:**
+  - `database_resume_test.go` (new) — `TestDatabaseResumeRefusesWhenSourceMoved`
+    (source snapshot changed after checkpoint → `ManualIntervention`, fail-closed)
+    and `TestDatabaseResumeAllowsWhenSourceStable` (source unchanged + partial
+    present → `Resume`). Uses an in-memory `transfer.CheckpointStore`.
+  - `transfer/longtransfer_test.go` (new) — `TestLongDownloadPrefersCapFreePath`
+    proves the SFTP legs take `DownloadLong`/`UploadLong` when available and the
+    capped fallback otherwise (moved here from `longcmd_test.go`, which only kept
+    the command-leg test `TestExecLongOrContextPrefersLongPath`).
+
 #### Not yet (explicit follow-ups, not faked)
-- **Byte-level resumable transfer** (rsync-style resume / checkpoint ring for a
-  killed mid-GB PG/Redis file transfer). Today a killed transfer restarts from
-  zero — safe (idempotent restore), but not resumable. Needs a dedicated round.
-- **Persisted checkpoints** beyond the per-step `StepStatusApplied` skip guard.
+- **Byte-level download-leg resume:** the *local* temp dump is still re-downloaded
+  on retry (meshium's temp is ephemeral). Only the slow WAN upload leg resumes.
+  ponytail: persist the local dump to also resume the download leg (costs ~2×
+  dump disk on meshium).
 - **Cutover live wiring**: `StateAwaitingCutover`/`StateObservation`/manual
   cutover already wired honestly; the freeze/fencing + traffic-switch pieces
   exist but `zeroDowntimeCapable` stays false until the live-replication chain

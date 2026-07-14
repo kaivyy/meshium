@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"meshium/internal/mod/server"
+	"meshium/internal/mod/transfer"
 	"meshium/internal/shared"
 )
 
@@ -46,6 +47,10 @@ type PipelineContext struct {
 	OnProgress     StepCallback
 	StateMachine   *StateMachine
 	CheckpointData map[string]string // stage_name → checkpoint data
+	// CheckpointStore persists resumable transfer checkpoints for this run. It is
+	// copied from the Pipeline at Execute time so stages (initialSyncStage) can
+	// inject it into the DatabaseApplier without reaching back into the Pipeline.
+	CheckpointStore transfer.CheckpointStore
 }
 
 // Pipeline is the unified orchestration engine for zero-downtime migrations.
@@ -87,6 +92,10 @@ type Pipeline struct {
 	// so a migration holding several servers releases each exactly once.
 	resourceMu    sync.Mutex
 	resourceLocks map[int]int // serverID → holder count
+	// checkpointStore persists resumable transfer checkpoints (transfer package).
+	// The DB category's file-path engines (PostgreSQL, Redis) use it to resume a
+	// killed multi-GB dump/restore from the last byte offset instead of restarting.
+	checkpointStore transfer.CheckpointStore
 }
 
 // DefaultMaxConcurrentMigrations bounds how many migrations may run at once.
@@ -105,6 +114,7 @@ func NewPipeline(
 	authSvc AESKeyProvider,
 	hosts HostKeyStore,
 	registry *CategoryRegistry,
+	checkpointStore transfer.CheckpointStore,
 ) (*Pipeline, error) {
 	if registry == nil {
 		return nil, fmt.Errorf("category registry is required")
@@ -118,6 +128,7 @@ func NewPipeline(
 		hosts:     hosts,
 		registry:  registry,
 		lifecycle: newPipelineRegistry(),
+		checkpointStore: checkpointStore,
 	}
 	p.maxConcurrent = DefaultMaxConcurrentMigrations
 	p.sem = make(chan struct{}, p.maxConcurrent)
@@ -319,6 +330,7 @@ func (p *Pipeline) Execute(ctx context.Context, migrationID int, onProgress Step
 		OnProgress:     onProgress,
 		StateMachine:   sm,
 		CheckpointData: make(map[string]string),
+		CheckpointStore: p.checkpointStore,
 	}
 
 	p.mu.Lock()
@@ -1578,6 +1590,10 @@ func (s *initialSyncStage) Execute(ctx context.Context, pc *PipelineContext) err
 			if pc.Config != nil {
 				dba.SetConfig(pc.Config.DatabaseConfig)
 			}
+			// Resumable DB dump/restore: give the applier the checkpoint store +
+			// owning migration so a killed multi-GB transfer resumes from the last
+			// byte offset instead of restarting (Part 5). nil store ⇒ one-shot.
+			dba.SetCheckpointStore(pc.MigrationID, pc.CheckpointStore)
 		}
 
 		pc.OnProgress(WSMessage{Step: "initial_sync", Status: "progress", Value: fmt.Sprintf("Applying %s...", step.Category)})

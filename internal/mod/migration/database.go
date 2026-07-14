@@ -4,11 +4,12 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"io"
 	"log"
 	"os"
 	"strings"
 	"time"
+
+	"meshium/internal/mod/transfer"
 )
 
 // DatabaseCollectData is the plan-time metadata captured by Collect. It stores
@@ -143,6 +144,13 @@ func dbNames(dbs []DBCatalogEntry) string {
 type DatabaseApplier struct {
 	config    *DatabaseConfig
 	sourceSSH SSHExecuter // injected via SetSourceSSH so Apply can reach the source
+	// migrationID + checkpointStore enable resumable file-path transfers.
+	// applyFile uses a deterministic dump path per (migrationID, db) and persists
+	// a transfer.Checkpoint so a killed multi-GB upload RESUMES from the last
+	// byte offset instead of restarting from zero. Both are nil-safe: when
+	// checkpointStore is nil, applyFile behaves as a one-shot transfer (no resume).
+	migrationID    int
+	checkpointStore transfer.CheckpointStore
 }
 
 // SetConfig injects the (decrypted) DB config from MigrationConfig. Called by
@@ -152,6 +160,14 @@ func (a *DatabaseApplier) SetConfig(cfg *DatabaseConfig) { a.config = cfg }
 // SetSourceSSH injects the source-side SSH so Apply can run the dump half. The
 // Applier.Apply signature only receives the target; the source is carried here.
 func (a *DatabaseApplier) SetSourceSSH(src SSHExecuter) { a.sourceSSH = src }
+
+// SetCheckpointStore injects the resumable-transfer checkpoint store and the
+// owning migration ID. Called by initialSyncStage the canonical way
+// SetConfig/SetSourceSSH are. nil store ⇒ no resume (one-shot, legacy behavior).
+func (a *DatabaseApplier) SetCheckpointStore(migrationID int, store transfer.CheckpointStore) {
+	a.migrationID = migrationID
+	a.checkpointStore = store
+}
 
 // Backup records target databases that already exist, so Rollback only drops
 // what the migration introduced.
@@ -279,16 +295,36 @@ func (a *DatabaseApplier) applyFile(ctx context.Context, ssh SSHExecuter, m Data
 	if a.sourceSSH == nil {
 		return fmt.Errorf("file transfer requires source SSH")
 	}
-	srcDumpPath := fmt.Sprintf("/tmp/meshium_dump_%d_%s", time.Now().UnixNano(), sanitizeName(db))
+	safe := sanitizeName(db)
+	// Deterministic dump paths keyed on (migrationID, db) — NOT time-based. A
+	// killed multi-GB transfer must leave a findable partial on the TARGET so a
+	// later attempt resumes from it (transfer.SCPStrategy resumes via --partial /
+	// temp-file append). Time-based paths make the partial unfindable → restart
+	// from zero, defeating Part 5's resume.
+	srcDumpPath := fmt.Sprintf("/tmp/meshium_dump_%d_%s", a.migrationID, safe)
+	tgtDumpPath := fmt.Sprintf("/tmp/meshium_dump_%d_%s", a.migrationID, safe)
+	transferID := fmt.Sprintf("db:%d:%s", a.migrationID, safe)
+
+	// 1. Dump on source (cap-free via execLongOrContext). Re-dump ONLY when the
+	//    dump file is absent — reusing a surviving dump keeps the snapshot stable
+	//    and lets the upload leg resume instead of re-dumping a multi-GB DB.
 	if onProgress != nil {
 		onProgress(WSMessage{Step: "database:apply", Status: "progress", Value: fmt.Sprintf("Dumping %s on source", db)})
 	}
-	if _, _, exit, err := execLongOrContext(ctx, a.sourceSSH, m.DumpCommand(creds, db, srcDumpPath)); err != nil || exit != 0 {
-		return fmt.Errorf("dump (exit %d): %v", exit, err)
+	srcTarget := transfer.TransferTarget{Path: srcDumpPath, SSHClient: a.sourceSSH}
+	srcExists, _ := transfer.FileExists(ctx, srcTarget)
+	if !srcExists {
+		if _, _, exit, err := execLongOrContext(ctx, a.sourceSSH, m.DumpCommand(creds, db, srcDumpPath)); err != nil || exit != 0 {
+			return fmt.Errorf("dump (exit %d): %v", exit, err)
+		}
 	}
 	defer func() { _, _, _, _ = a.sourceSSH.ExecContext(ctx, "rm -f "+srcDumpPath) }()
 
-	// Stream the dump to a local temp file (compressed; cleaned up in defer).
+	// 2. Download source dump to a local temp. meshium's local temp is ephemeral
+	//    (cleared on function return / process restart), so this leg is never
+	//    resumable — it is re-downloaded on retry. The download leg is LAN-fast;
+	//    the slow WAN leg (upload to target) is what resumes. ponytail: persist
+	//    the local dump to also resume the download leg (costs 2x dump disk).
 	localFile, err := os.CreateTemp("", "meshium-dbdump-*")
 	if err != nil {
 		return fmt.Errorf("create temp: %w", err)
@@ -298,29 +334,134 @@ func (a *DatabaseApplier) applyFile(ctx context.Context, ssh SSHExecuter, m Data
 	if err := localFile.Close(); err != nil {
 		return err
 	}
+	localTarget := transfer.TransferTarget{Path: localPath, IsLocal: true}
 	if onProgress != nil {
 		onProgress(WSMessage{Step: "database:apply", Status: "progress", Value: fmt.Sprintf("Downloading %s dump", db)})
 	}
-	if err := transferDownloadLongOrFallback(ctx, a.sourceSSH, srcDumpPath, openWrite(localPath)); err != nil {
+	dlResult, err := transfer.NewSCPStrategy().Transfer(ctx, srcTarget, localTarget, transfer.TransferOptions{
+		Resume:          false,
+		ProgressCallback: dbTransferProgress(onProgress, db, "download"),
+	})
+	if err != nil {
 		return fmt.Errorf("download dump: %w", err)
 	}
+	_ = dlResult
 
-	tgtDumpPath := fmt.Sprintf("/tmp/meshium_dump_%d_%s", time.Now().UnixNano(), sanitizeName(db))
-	defer func() { _, _, _, _ = ssh.ExecContext(ctx, "rm -f "+tgtDumpPath) }()
+	// 3. Upload to target — RESUMABLE. SCPStrategy resumes from the target's
+	//    partial dump file (deterministic tgtDumpPath). Before uploading, if a
+	//    prior checkpoint exists, Reconcile fails closed (ManualIntervention) when
+	//    the source snapshot moved or the partial target is inconsistent — we never
+	//    blind-resume onto unverified state.
+	tgtTarget := transfer.TransferTarget{Path: tgtDumpPath, SSHClient: ssh}
+	if a.checkpointStore != nil {
+		if verdict, fail := a.reconcileOrFail(ctx, transferID, safe, srcTarget, tgtTarget); fail {
+			return fmt.Errorf("transfer reconcile for %s refused resume (source/partial changed): %w", db, transfer.ErrTransferReconcileFailed)
+		} else if verdict == transfer.VerdictFreshStart {
+			// No usable partial — fall through to a clean full upload (Resume=false).
+			tgtTarget = transfer.TransferTarget{Path: tgtDumpPath, SSHClient: ssh}
+		}
+	}
 	if onProgress != nil {
 		onProgress(WSMessage{Step: "database:apply", Status: "progress", Value: fmt.Sprintf("Uploading %s dump to target", db)})
 	}
-	if err := transferLongOrFallback(ctx, ssh, openRead(localPath), tgtDumpPath); err != nil {
+	resume := a.checkpointStore != nil
+	ulResult, err := transfer.NewSCPStrategy().Transfer(ctx, localTarget, tgtTarget, transfer.TransferOptions{
+		Resume:          resume,
+		ProgressCallback: dbTransferProgress(onProgress, db, "upload"),
+	})
+	if err != nil {
 		return fmt.Errorf("upload dump: %w", err)
 	}
+	if a.checkpointStore != nil {
+		a.persistTransferCheckpoint(transferID, safe, srcDumpPath, tgtDumpPath, ulResult)
+	}
+	defer func() { _, _, _, _ = ssh.ExecContext(ctx, "rm -f "+tgtDumpPath) }()
 
+	// 4. Restore (cap-free, idempotent via --clean/--drop).
 	if onProgress != nil {
 		onProgress(WSMessage{Step: "database:apply", Status: "progress", Value: fmt.Sprintf("Restoring %s on target", db)})
 	}
 	if _, stderr, exit, err := execLongOrContext(ctx, ssh, m.RestoreCommand(creds, db, tgtDumpPath)); err != nil || exit != 0 {
 		return fmt.Errorf("restore (exit %d): %s", exit, stderr)
 	}
+	// Restore verified — drop the checkpoint so a later retry does not think a
+	// partial upload is outstanding.
+	if a.checkpointStore != nil {
+		_ = a.checkpointStore.DeleteCheckpoints(transferID)
+	}
 	return nil
+}
+
+// reconcileOrFail consults the persisted checkpoint for a resume and returns
+// (VerdictFreshStart/VerdictResume, false) when it is safe to proceed, or
+// (_, true) when Reconcile demands manual intervention (source moved / partial
+// target inconsistent). Honest fail-closed: we never blind-resume.
+func (a *DatabaseApplier) reconcileOrFail(ctx context.Context, transferID, fileName string, srcTarget, tgtTarget transfer.TransferTarget) (transfer.ReconcileVerdict, bool) {
+	cp, err := a.checkpointStore.GetCheckpoint(transferID, fileName)
+	if err != nil || cp == nil {
+		return transfer.VerdictFreshStart, false
+	}
+	// Source fingerprint = size+mtime of the surviving source dump file.
+	srcSnap, _ := sourceSnapshot(ctx, srcTarget)
+	partialExists, _ := transfer.FileExists(ctx, tgtTarget)
+	partialSize, _ := transfer.GetFileSize(ctx, tgtTarget)
+	ev := transfer.ReconcileEvidence{
+		CurrentSourceSnapshot:     srcSnap,
+		PartialTargetExists:       partialExists,
+		CurrentTargetPartialState: fmt.Sprintf("%d", partialSize),
+		StrategyStillValid:        true,
+	}
+	verdict, err := transfer.Reconcile(cp, ev)
+	if err != nil {
+		return verdict, true // ManualIntervention or ambiguous → fail closed
+	}
+	return verdict, false
+}
+
+// persistTransferCheckpoint records the upload as transferred (never "verified"
+// without the restore step having succeeded — that is asserted by the caller
+// deleting the checkpoint only after RestoreCommand returns). Observability
+// only; the resume decision is driven by the deterministic target partial file.
+func (a *DatabaseApplier) persistTransferCheckpoint(transferID, fileName, srcPath, tgtPath string, res *transfer.TransferResult) {
+	_ = a.checkpointStore.SaveCheckpoint(transfer.TransferCheckpoint{
+		TransferID:       transferID,
+		MigrationID:      a.migrationID,
+		Category:         "database",
+		FileName:         fileName,
+		Strategy:         "scp",
+		SourcePath:       srcPath,
+		TargetPath:       tgtPath,
+		TotalBytes:       res.BytesTransferred,
+		BytesTransferred: res.BytesTransferred,
+		Resumable:        true,
+		LastVerifiedPhase: "transferred",
+		StartedAt:        time.Now().UTC().Format(time.RFC3339),
+	})
+}
+
+// sourceSnapshot returns a size+mtime fingerprint of a remote source file, used
+// to detect a source that changed after a checkpoint was taken.
+func sourceSnapshot(ctx context.Context, t transfer.TransferTarget) (string, error) {
+	info, err := transfer.StatFile(ctx, t)
+	if err != nil {
+		return "", err
+	}
+	return fmt.Sprintf("%d:%d", info.Size, info.ModTime), nil
+}
+
+// dbTransferProgress adapts transfer.TransferProgress into a migration WSMessage
+// for one leg (download/upload) of one database's dump.
+func dbTransferProgress(onProgress StepCallback, db, leg string) func(transfer.TransferProgress) {
+	if onProgress == nil {
+		return nil
+	}
+	return func(p transfer.TransferProgress) {
+		onProgress(WSMessage{
+			Step:   "database:apply",
+			Status: "progress",
+			Value:  fmt.Sprintf("%s %s: %.1f%% — %d/%d bytes — %d B/s", leg, db, p.Percentage, p.BytesTransferred, p.TotalBytes, p.SpeedBPS),
+		})
+	}
 }
 
 // Rollback drops databases the migration introduced (those not in the backup).
@@ -371,32 +512,3 @@ func sanitizeName(name string) string {
 	}
 	return string(out)
 }
-
-// openWrite opens a file for writing, returning a Writer that also satisfies
-// io.Closer (os.File does). Panics surface as errors upstream.
-func openWrite(path string) io.Writer {
-	f, err := os.Create(path)
-	if err != nil {
-		log.Printf("openWrite %s: %v", path, err)
-		return errWriter{}
-	}
-	return f
-}
-
-// openRead opens a file for reading for Upload.
-func openRead(path string) io.Reader {
-	f, err := os.Open(path)
-	if err != nil {
-		log.Printf("openRead %s: %v", path, err)
-		return errReader{}
-	}
-	return f
-}
-
-type errWriter struct{}
-
-func (errWriter) Write(p []byte) (int, error) { return len(p), nil }
-
-type errReader struct{}
-
-func (errReader) Read(p []byte) (int, error) { return 0, io.EOF }

@@ -22,7 +22,7 @@ func newCommitPipeline(t *testing.T) *Pipeline {
 	pool := newMockPool()
 	authSvc := &mockAuthSvc{}
 	hosts := &mockHostKeyStore{}
-	p, err := NewPipeline(repo.(PipelineRepo), repo.(JobRepository), srvRepo, pool, authSvc, hosts, registry)
+	p, err := NewPipeline(repo.(PipelineRepo), repo.(JobRepository), srvRepo, pool, authSvc, hosts, registry, nil)
 	if err != nil {
 		t.Fatalf("new pipeline: %v", err)
 	}

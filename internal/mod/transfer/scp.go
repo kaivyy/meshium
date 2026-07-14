@@ -171,8 +171,8 @@ func (s *SCPStrategy) localToRemote(ctx context.Context, src, dst TransferTarget
 		// Resume: upload remaining data as temp file, then append
 		err = s.uploadAndAppend(ctx, dst.SSHClient, reader, dst.Path, offset)
 	} else {
-		// Fresh transfer: upload directly
-		err = dst.SSHClient.Upload(reader, dst.Path)
+		// Fresh transfer: upload directly (cap-free when supported)
+		err = longUpload(ctx, dst.SSHClient, reader, dst.Path)
 	}
 
 	if err != nil {
@@ -238,8 +238,8 @@ func (s *SCPStrategy) remoteToLocal(ctx context.Context, src, dst TransferTarget
 		// SFTP Download reads the whole file, so we need to skip the first `offset` bytes
 		err = s.downloadWithOffset(ctx, src.SSHClient, writer, src.Path, offset, totalSize)
 	} else {
-		// Fresh download
-		err = src.SSHClient.Download(src.Path, writer)
+		// Fresh download (cap-free when supported)
+		err = longDownload(ctx, src.SSHClient, src.Path, writer)
 	}
 
 	if err != nil {
@@ -319,8 +319,8 @@ func (s *SCPStrategy) remoteToRemote(ctx context.Context, src, dst TransferTarge
 func (s *SCPStrategy) uploadAndAppend(ctx context.Context, ssh transport.SSHExecuter, reader io.Reader, dstPath string, offset int64) error {
 	tempPath := dstPath + ".resume_tmp"
 
-	// Upload remaining data to temp file
-	err := ssh.Upload(reader, tempPath)
+	// Upload remaining data to temp file (cap-free when supported)
+	err := longUpload(ctx, ssh, reader, tempPath)
 	if err != nil {
 		// Clean up temp file on failure
 		ssh.ExecContext(ctx, fmt.Sprintf("rm -f '%s'", tempPath))
@@ -353,7 +353,7 @@ func (s *SCPStrategy) downloadWithOffset(ctx context.Context, ssh transport.SSHE
 		delegate:  writer,
 	}
 
-	return ssh.Download(remotePath, skipWriter)
+	return longDownload(ctx, ssh, remotePath, skipWriter)
 }
 
 // offsetSkipWriter discards the first `offset` bytes, then passes the rest

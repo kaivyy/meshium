@@ -78,6 +78,42 @@ func deleteRemoteFile(ctx context.Context, ssh transport.SSHExecuter, path strin
 	return nil
 }
 
+// StatInfo is a transport-neutral file stat used for source fingerprinting.
+type StatInfo struct {
+	Size   int64
+	ModTime int64 // unix seconds
+}
+
+// StatFile returns size + mtime for a file at the given target. Used by callers
+// (e.g. the DB applier) to detect a source that moved under a checkpoint.
+func StatFile(ctx context.Context, target TransferTarget) (StatInfo, error) {
+	if target.IsLocal {
+		info, err := os.Stat(target.Path)
+		if err != nil {
+			return StatInfo{}, fmt.Errorf("stat local file: %w", err)
+		}
+		return StatInfo{Size: info.Size(), ModTime: info.ModTime().Unix()}, nil
+	}
+	if target.SSHClient == nil {
+		return StatInfo{}, fmt.Errorf("remote target has no SSH client")
+	}
+	// Print size and mtime (unix) space-separated; tolerate both GNU stat -c and
+	// BSD stat -f by trying GNU first.
+	cmd := fmt.Sprintf("stat -c '%%s %%Y' '%s' 2>/dev/null || stat -f '%%z %%m' '%s' 2>/dev/null", target.Path, target.Path)
+	stdout, _, exitCode, err := target.SSHClient.ExecContext(ctx, cmd)
+	if err != nil {
+		return StatInfo{}, fmt.Errorf("stat remote file: %w", err)
+	}
+	if exitCode != 0 {
+		return StatInfo{}, fmt.Errorf("stat remote file: exit code %d", exitCode)
+	}
+	var size, mod int64
+	if _, err := fmt.Sscanf(strings.TrimSpace(stdout), "%d %d", &size, &mod); err != nil {
+		return StatInfo{}, fmt.Errorf("parse stat from %q: %w", strings.TrimSpace(stdout), err)
+	}
+	return StatInfo{Size: size, ModTime: mod}, nil
+}
+
 // GetRemoteDiskFree returns the available disk space (in bytes) at the
 // given path on a remote server.
 func GetRemoteDiskFree(ctx context.Context, ssh transport.SSHExecuter, path string) (int64, error) {

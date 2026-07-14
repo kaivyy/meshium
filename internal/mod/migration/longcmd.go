@@ -2,7 +2,6 @@ package migration
 
 import (
 	"context"
-	"io"
 )
 
 // LongCommandExecuter runs a command bounded ONLY by the parent context — no
@@ -32,31 +31,4 @@ func execLongOrContext(ctx context.Context, ssh SSHExecuter, cmd string) (string
 		return lc.ExecLongCommand(ctx, cmd)
 	}
 	return ssh.ExecContext(ctx, cmd)
-}
-
-// LongTransferExecuter moves a file with NO total-time cap — bounded only by the
-// parent context. The default Upload/Download apply a FileTransfer total-timeout
-// (stall protection) that a multi-GB DB dump over a slow link can exceed. For
-// the database file path that would abort a valid large transfer, so applyFile
-// uses this when available and falls back to Upload/Download otherwise. Off the
-// core SSHExecuter interface so the ~9 capped mocks are untouched.
-type LongTransferExecuter interface {
-	DownloadLong(ctx context.Context, remotePath string, dst io.Writer) error
-	UploadLong(ctx context.Context, src io.Reader, remotePath string) error
-}
-
-// transferLongOrFallback uses cap-free transfer when supported, else the capped
-// Upload/Download.
-func transferLongOrFallback(ctx context.Context, ssh SSHExecuter, src io.Reader, remotePath string) error {
-	if lt, ok := ssh.(LongTransferExecuter); ok {
-		return lt.UploadLong(ctx, src, remotePath)
-	}
-	return ssh.Upload(src, remotePath)
-}
-
-func transferDownloadLongOrFallback(ctx context.Context, ssh SSHExecuter, remotePath string, dst io.Writer) error {
-	if lt, ok := ssh.(LongTransferExecuter); ok {
-		return lt.DownloadLong(ctx, remotePath, dst)
-	}
-	return ssh.Download(remotePath, dst)
 }
