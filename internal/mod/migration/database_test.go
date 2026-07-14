@@ -2,6 +2,7 @@ package migration
 
 import (
 	"context"
+	"encoding/json"
 	"strings"
 	"testing"
 )
@@ -109,18 +110,51 @@ func TestDatabaseListExcludesSystemDBs(t *testing.T) {
 	}
 }
 
-// TestDatabaseCollectAbsentNotError: when the engine is absent on the source,
-// Collect returns empty metadata (not an error) — a server without that DB
-// engine is a no-op, not a failed plan.
-func TestDatabaseCollectAbsentNotError(t *testing.T) {
+// TestDatabaseCollectAbsentErrors: when the engine is absent on the source,
+// Collect MUST fail clearly (Phase 5B P0-1). A silent "0 databases" success
+// would falsely reassure the operator. A server without the engine selected is
+// a hard planning error, not a no-op.
+func TestDatabaseCollectAbsentErrors(t *testing.T) {
 	ssh := newMockSSH() // no "yes" outputs → Detect returns false
 	coll := &DatabaseCollector{Creds: &DatabaseConfig{Engine: "postgres"}, DatabaseName: ""}
+	if _, err := coll.Collect(context.Background(), ssh); err == nil {
+		t.Fatalf("collect on absent engine should error clearly, got nil")
+	}
+}
+
+// TestDatabaseCollectNamedDBMissingErrors: a user-named database that the
+// engine does not expose is a hard error, never a quiet drop.
+func TestDatabaseCollectNamedDBMissingErrors(t *testing.T) {
+	ssh := newMockSSH()
+	// Detect → "yes"; ListDatabases returns only "appdb".
+	ssh.addOutput("pgrep -x postgres", "yes")
+	ssh.addOutput("psql", "appdb\t10\notherdb\t20\n")
+	coll := &DatabaseCollector{Creds: &DatabaseConfig{Engine: "postgres", Username: "u", Password: "p"}, DatabaseName: "ghostdb"}
+	if _, err := coll.Collect(context.Background(), ssh); err == nil {
+		t.Fatalf("collect with missing named DB should error, got nil")
+	}
+}
+
+// TestDatabaseCollectAllUserDBs: empty DatabaseName enumerates every user DB
+// (system DBs excluded by the engine query) and is flagged AllUserDBs.
+func TestDatabaseCollectAllUserDBs(t *testing.T) {
+	ssh := newMockSSH()
+	ssh.addOutput("pgrep -x postgres", "yes")
+	ssh.addOutput("psql", "appdb\t10\notherdb\t20\n")
+	coll := &DatabaseCollector{Creds: &DatabaseConfig{Engine: "postgres", Username: "u", Password: "p"}, DatabaseName: ""}
 	data, err := coll.Collect(context.Background(), ssh)
 	if err != nil {
-		t.Fatalf("collect on absent engine should not error: %v", err)
+		t.Fatalf("collect all user dbs: %v", err)
 	}
-	if data.Type != "database" {
-		t.Fatalf("collect should return database CategoryData, got %+v", data)
+	var cd DatabaseCollectData
+	if err := json.Unmarshal(data.Data, &cd); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	if len(cd.Databases) != 2 {
+		t.Fatalf("want 2 user dbs, got %d: %+v", len(cd.Databases), cd.Databases)
+	}
+	if !cd.AllUserDBs {
+		t.Errorf("AllUserDBs should be true when DatabaseName empty")
 	}
 }
 
@@ -140,54 +174,68 @@ func TestDockerWrap(t *testing.T) {
 	}
 }
 
-// TestContainerCredentials: when a container is set, connections target its
-// loopback + engine default port (host/port fields are meaningless inside a
-// container), and the container flows into DBCredentials for dockerWrap.
+// TestContainerCredentials: when ExecMode=container, connections target the
+// container's loopback + engine default port (host/port fields are meaningless
+// inside a container), and the container/execMode flow into DBCredentials.
 func TestContainerCredentials(t *testing.T) {
-	in := &DatabaseConfig{Engine: "postgres", Username: "u", Password: "p", Host: "10.0.0.5", Port: 6543, Container: "pg"}
+	in := &DatabaseConfig{Engine: "postgres", Username: "u", Password: "p", Host: "10.0.0.5", Port: 6543, ExecMode: "container", Container: "pg"}
 	c := in.ToCredentials()
-	if c.Container != "pg" {
-		t.Errorf("container not propagated: %q", c.Container)
+	if c.ExecMode != "container" || c.Container != "pg" {
+		t.Errorf("execMode/container not propagated: mode=%q container=%q", c.ExecMode, c.Container)
 	}
 	if c.Host != "127.0.0.1" || c.Port != 5432 {
 		t.Errorf("container should force loopback+default port, got %s:%d", c.Host, c.Port)
 	}
+	// compose mode also forces loopback
+	compose := &DatabaseConfig{Engine: "postgres", Username: "u", Host: "10.0.0.5", Port: 6543, ExecMode: "compose", ComposeService: "pg", ComposeFile: "/opt/stack/docker-compose.yml"}
+	cc := compose.ToCredentials()
+	if cc.Host != "127.0.0.1" || cc.Port != 5432 || cc.ComposeService != "pg" {
+		t.Errorf("compose should force loopback+default port, got %s:%d svc=%q", cc.Host, cc.Port, cc.ComposeService)
+	}
 	// host mode keeps user host/port
 	hostMode := &DatabaseConfig{Engine: "mysql", Username: "u", Host: "10.0.0.5", Port: 3307}
 	hc := hostMode.ToCredentials()
-	if hc.Container != "" || hc.Host != "10.0.0.5" || hc.Port != 3307 {
-		t.Errorf("host mode should preserve host/port, got %s:%d container=%q", hc.Host, hc.Port, hc.Container)
+	if hc.ExecMode != "host" || hc.Container != "" || hc.Host != "10.0.0.5" || hc.Port != 3307 {
+		t.Errorf("host mode should preserve host/port, got %s:%d mode=%q container=%q", hc.Host, hc.Port, hc.ExecMode, hc.Container)
 	}
 }
 
-// TestContainerCommandPrefix: every engine's command builders wrap in
-// docker exec when Container is set, proving no engine silently skips a
-// containerized DB.
+// TestContainerCommandPrefix: every engine's command builders wrap in the
+// execution context (docker exec for container mode, docker compose exec for
+// compose mode) when ExecMode is set — proving no engine silently skips a
+// containerized/compose-managed DB.
 func TestContainerCommandPrefix(t *testing.T) {
-	pg := DBCredentials{Engine: "postgres", Username: "u", Password: "p", Host: "127.0.0.1", Port: 5432, Container: "pg"}
-	my := DBCredentials{Engine: "mysql", Username: "u", Password: "p", Host: "127.0.0.1", Port: 3306, Container: "my"}
-	mg := DBCredentials{Engine: "mongodb", Username: "u", Password: "p", Host: "127.0.0.1", Port: 27017, Container: "mg"}
-	rd := DBCredentials{Engine: "redis", Username: "u", Password: "p", Host: "127.0.0.1", Port: 6379, Container: "rd"}
+	pg := DBCredentials{Engine: "postgres", Username: "u", Password: "p", Host: "127.0.0.1", Port: 5432, ExecMode: "container", Container: "pg"}
+	my := DBCredentials{Engine: "mysql", Username: "u", Password: "p", Host: "127.0.0.1", Port: 3306, ExecMode: "container", Container: "my"}
+	mg := DBCredentials{Engine: "mongodb", Username: "u", Password: "p", Host: "127.0.0.1", Port: 27017, ExecMode: "container", Container: "mg"}
+	rd := DBCredentials{Engine: "redis", Username: "u", Password: "p", Host: "127.0.0.1", Port: 6379, ExecMode: "container", Container: "rd"}
+	cp := DBCredentials{Engine: "postgres", Username: "u", Password: "p", Host: "127.0.0.1", Port: 5432, ExecMode: "compose", ComposeService: "pg", ComposeFile: "/opt/stack/docker-compose.yml"}
 
-	for _, c := range []DBCredentials{pg, my, mg, rd} {
-		// exercise one representative command per engine
+	for _, c := range []DBCredentials{pg, my, mg, rd, cp} {
 		var cmd string
 		switch c.Engine {
 		case "postgres":
-			m := postgresMigrator{}
-			cmd = m.DumpCommand(c, "db", "/tmp/db.dump")
+			cmd = postgresMigrator{}.DumpCommand(c, "db", "/tmp/db.dump")
 		case "mysql":
-			m := mysqlMigrator{}
-			cmd = m.DumpCommand(c, "db", "/tmp/db.dump")
+			cmd = mysqlMigrator{}.DumpCommand(c, "db", "/tmp/db.dump")
 		case "mongodb":
-			m := mongoMigrator{}
-			cmd = m.DumpCommand(c, "db", "/tmp/db.dump")
+			cmd = mongoMigrator{}.DumpCommand(c, "db", "/tmp/db.dump")
 		case "redis":
-			m := redisMigrator{}
-			cmd = m.DumpCommand(c, "db", "/tmp/db.rdb")
+			cmd = redisMigrator{}.DumpCommand(c, "db", "/tmp/db.rdb")
 		}
-		if !strings.HasPrefix(cmd, "docker exec -i ") {
-			t.Errorf("%s: container command not prefixed: %q", c.Engine, cmd)
+		switch c.ExecMode {
+		case "container":
+			if !strings.HasPrefix(cmd, "docker exec -i ") {
+				t.Errorf("%s: container command not prefixed: %q", c.Engine, cmd)
+			}
+		case "compose":
+			if !strings.HasPrefix(cmd, "docker compose -f ") || !strings.Contains(cmd, "exec 'pg' -- ") {
+				t.Errorf("%s: compose command not prefixed: %q", c.Engine, cmd)
+			}
+		default:
+			if strings.HasPrefix(cmd, "docker") {
+				t.Errorf("%s: host command should not be docker-prefixed: %q", c.Engine, cmd)
+			}
 		}
 	}
 }

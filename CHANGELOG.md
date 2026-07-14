@@ -52,6 +52,57 @@ reflects backend state (no improvisation of unsupported states).
   delegates to them so the page and the unit tests can't drift. `rollback-reconcile.test.ts`
   updated to the current vocabulary.
 
+### Phase 5B — Fast Planning, Real DB Migration, Honest Downtime (round 1)
+
+First increment of Phase 5B. Follows the mandated P0→P3 order. This round lands
+the correctness blockers + the category-metadata/downtime foundation; planner
+reuse (Part 4) and the transfer-engine/checkpoint/cutover wiring (Parts 5–8)
+are explicit follow-ups (see "Not yet in this round").
+
+- **P0-1 DB silent-skip eliminated:** `DatabaseCollector.Collect` now fails
+  *clearly* when the engine is not detected, auth/list fails, a named DB is
+  absent, or no user DBs exist. No more fake "0 databases success". Empty
+  `DatabaseName` enumerates ALL user DBs (system DBs excluded) and is flagged
+  `AllUserDBs` in the collect metadata.
+- **P0-2 execMode host/container/compose:** `DatabaseConfig` gains
+  `migrationMode` (`snapshot_copy`|`live_replication`), `execMode`
+  (`host`|`container`|`compose`), `containerName`/`composeService`/`composeFile`.
+  All engine command builders now wrap via `execPrefix` (host = no wrap,
+  container = `docker exec -i`, compose = `docker compose -f <file> exec <svc>`),
+  so a containerized/compose DB is never silently skipped. `ToCredentials`
+  forces loopback + engine default port for non-host modes.
+- **P0-3 honest live_replication gate:** new `SupportsLiveReplication()` on the
+  `DatabaseMigrator` interface — currently `false` for every engine (no engine
+  has a fully wired live path yet). A `live_replication` request is honestly
+  downgraded to `snapshot_copy` rather than claimed. This is the backbone of the
+  honest downtime model (Part 3).
+- **P0-3 Redis restore honest:** restore now refuses a missing/empty RDB
+  (`[ -s rdb ] || exit 1`) and fails if the post-restart PING is not `PONG`
+  (`exit 2`); `DropDatabaseCommand` now wraps through the engine's exec context
+  (was host-only, ignoring container/compose).
+- **Part 1 category metadata:** new `category_meta.go` defines `CategoryMeta`
+  (`collectionStrategy`, `reuseSource`, `executionMode`, `estimatedBytes`,
+  `estimatedDuration`, `resumable`, `downtimeClass`, `warnings`,
+  `blockingIssues`, `planBehavior`, `executeBehavior`) with a per-category
+  contract (`CategoryMetaFor`) so Step 3/4 can show what each category will do
+  before execute. `DowntimeClassFor` caps claims at `offline_copy` /
+  `minimal_downtime` / `zero_downtime` and never returns `zero_downtime` unless
+  the capability gate passes.
+- **Tests:** `database_test.go` rewritten to the honest contract —
+  `TestDatabaseCollectAbsentErrors`, `TestDatabaseCollectNamedDBMissingErrors`,
+  `TestDatabaseCollectAllUserDBs`, `TestContainerCredentials` (execMode
+  host/container/compose), `TestContainerCommandPrefix` (docker exec + compose
+  exec). Mock gains substring `addOutput`.
+
+#### Not yet in this round (explicit follow-ups, not faked)
+- Part 4 freshness-aware planner reuse (read `discovery_snapshots` when fresh;
+  the planner currently has `srvRepo` but not the `SnapshotStore` — wiring +
+  config-hash freshness gate still to do).
+- Parts 5–8: resumable large-transfer engine, removal of short hard timeouts,
+  persisted checkpoints, honest `awaiting_cutover`/`observation`/rollback
+  split-brain fix, freeze/fencing + traffic-switch live wiring. These need a
+  dedicated round; intentionally NOT stubbed here.
+
 ### Phase 4H — Deprecate & Remove Legacy Planner (/plans)
 
 Removes the parallel legacy planner subsystem (`/plans` → `planner.NewDefaultPlanner` →

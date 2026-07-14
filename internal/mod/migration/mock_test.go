@@ -61,7 +61,24 @@ func (m *mockSSH) Exec(cmd string) (string, string, int, error) {
 			return out, "", m.exitFor(key), nil
 		}
 	}
+	// Try substring match (for probes whose command varies but a stable token
+	// identifies the expected output, e.g. "pgrep -x postgres").
+	for key, out := range m.execOutput {
+		if strings.Contains(cmd, key) {
+			if err, ok := m.execErr[key]; ok {
+				return out, "", 1, err
+			}
+			return out, "", m.exitFor(key), nil
+		}
+	}
 	return "", "", 0, nil
+}
+
+// addOutput registers a substring→stdout mapping (lowest-priority, substring
+// match). Useful for probes like "pgrep -x postgres" whose exact command is
+// awkward to key by prefix.
+func (m *mockSSH) addOutput(substr, out string) {
+	m.execOutput[substr] = out
 }
 
 // exitFor returns the configured nonzero exit code for a command (exact or

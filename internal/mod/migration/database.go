@@ -7,15 +7,21 @@ import (
 	"io"
 	"log"
 	"os"
+	"strings"
 	"time"
 )
 
 // DatabaseCollectData is the plan-time metadata captured by Collect. It stores
 // engine + database names + sizes — never row data, never credentials.
 type DatabaseCollectData struct {
-	Engine     string           `json:"engine"`
-	Databases  []DBCatalogEntry `json:"databases"`
-	DetectedAt string           `json:"detectedAt,omitempty"`
+	Engine       string           `json:"engine"`
+	ExecMode     string           `json:"execMode,omitempty"` // host | container | compose
+	MigrationMode string          `json:"migrationMode,omitempty"` // snapshot_copy | live_replication
+	Databases    []DBCatalogEntry `json:"databases"`
+	DetectedAt   string           `json:"detectedAt,omitempty"`
+	// AllUserDBs is true when the user left DatabaseName empty (meaning "every
+	// user database"). The FE shows the enumerated list before execute.
+	AllUserDBs bool `json:"allUserDbs,omitempty"`
 }
 
 // DatabaseBackup records the target's pre-existing databases so Rollback can
@@ -32,28 +38,51 @@ type DatabaseCollector struct {
 	DatabaseName string // empty = all user DBs
 }
 
-// Collect detects the engine and lists databases (metadata only). Absence of
-// the engine is not an error — it returns empty data, mirroring docker.go's
-// convention so a selected-but-absent category no-ops cleanly.
+// Collect detects the engine and lists databases (metadata only). Unlike the
+// silent "no-op on absent engine" convention used by e.g. docker, the database
+// category MUST fail clearly when it cannot proceed — a silent success with
+// "0 databases" would falsely reassure the operator (Phase 5B, P0-1). The
+// collected set is authoritative: empty DatabaseName means enumerate ALL user
+// databases (system DBs excluded per engine rules); a named DB that the engine
+// does not expose is a hard error, not a quiet drop.
 func (c *DatabaseCollector) Collect(ctx context.Context, ssh SSHExecuter) (CategoryData, error) {
 	if c.Creds == nil {
-		return CategoryData{Type: "database", Data: []byte("{}")}, nil
+		return CategoryData{}, fmt.Errorf("database collect: no credentials supplied")
+	}
+	if c.Creds.Engine == "" {
+		return CategoryData{}, fmt.Errorf("database collect: engine not specified")
 	}
 	migrator, ok := getMigrator(c.Creds.Engine)
 	if !ok {
-		return CategoryData{Type: "database", Data: []byte("{}")}, nil
+		return CategoryData{}, fmt.Errorf("database collect: unsupported engine %q (supported: postgres, mysql, mongodb, redis)", c.Creds.Engine)
 	}
 	if !migrator.Detect(ctx, ssh) {
-		return CategoryData{Type: "database", Data: []byte("{}")}, nil
+		return CategoryData{}, fmt.Errorf("database collect: engine %q not detected on source (is it running? if containerized, set execMode=container/compose and the container name)", c.Creds.Engine)
 	}
 
 	creds := c.Creds.ToCredentials()
+	// Verify we can actually authenticate + enumerate. A connection/auth failure
+	// here is a hard error — never a silent empty result.
 	dbs, err := migrator.ListDatabases(ctx, ssh, creds)
 	if err != nil {
-		return CategoryData{}, fmt.Errorf("database collect: %w", err)
+		return CategoryData{}, fmt.Errorf("database collect: list databases failed: %w", err)
 	}
-	// If the user named a single DB, keep only that one.
-	if c.DatabaseName != "" {
+
+	allUser := c.DatabaseName == ""
+	if !allUser {
+		// The user named a specific DB: it MUST be present in the enumerated set.
+		found := false
+		for _, d := range dbs {
+			if d.Name == c.DatabaseName {
+				found = true
+				break
+			}
+		}
+		if !found {
+			return CategoryData{}, fmt.Errorf("database collect: requested database %q not found on source (available: %s)",
+				c.DatabaseName, dbNames(dbs))
+		}
+		// Keep only the named DB.
 		var filtered []DBCatalogEntry
 		for _, d := range dbs {
 			if d.Name == c.DatabaseName {
@@ -62,14 +91,50 @@ func (c *DatabaseCollector) Collect(ctx context.Context, ssh SSHExecuter) (Categ
 		}
 		dbs = filtered
 	}
+	// If, after enumeration, nothing is migratable and the user asked for all,
+	// that is suspicious (engine detected but no user DBs) — surface it rather
+	// than emit a "success" with zero databases.
+	if len(dbs) == 0 {
+		return CategoryData{}, fmt.Errorf("database collect: engine %q detected but no user databases enumerated (only system databases present?)", c.Creds.Engine)
+	}
 
 	data := DatabaseCollectData{
-		Engine:     migrator.Engine(),
-		Databases:  dbs,
-		DetectedAt: time.Now().UTC().Format(time.RFC3339),
+		Engine:       migrator.Engine(),
+		ExecMode:     creds.ExecMode,
+		MigrationMode: c.resolveMigrationMode(migrator),
+		Databases:    dbs,
+		DetectedAt:   time.Now().UTC().Format(time.RFC3339),
+		AllUserDBs:   allUser,
 	}
 	raw, _ := json.Marshal(data)
 	return CategoryData{Type: "database", Data: raw}, nil
+}
+
+// resolveMigrationMode returns the mode the user requested, defaulting to
+// snapshot_copy, and downgrades live_replication to snapshot_copy when the
+// engine/topology does not genuinely support a wired replication path. We never
+// claim live_replication for an unsupported engine (Phase 5B, Part 3 + P0).
+func (c *DatabaseCollector) resolveMigrationMode(m DatabaseMigrator) string {
+	mode := c.Creds.MigrationMode
+	if mode == "" {
+		mode = "snapshot_copy"
+	}
+	if mode == "live_replication" && !m.SupportsLiveReplication() {
+		// Honest downgrade: caller records the reason via Warnings.
+		return "snapshot_copy"
+	}
+	return mode
+}
+
+func dbNames(dbs []DBCatalogEntry) string {
+	names := make([]string, 0, len(dbs))
+	for _, d := range dbs {
+		names = append(names, d.Name)
+	}
+	if len(names) == 0 {
+		return "(none)"
+	}
+	return strings.Join(names, ", ")
 }
 
 // DatabaseApplier is stateless; credentials are injected by the pipeline via
