@@ -272,6 +272,7 @@
       next === 'completed' ? 'Rollback completed' :
       next === 'degraded' ? 'Rollback completed with some steps that could not be reverted' :
       next === 'failed' ? 'Rollback failed' :
+      next === 'manual' ? 'Rollback stopped — needs manual intervention' :
       next === 'unknown' ? 'Rollback status unknown — check the migration state' :
       '';
     return next;
@@ -812,8 +813,11 @@
     return fallback;
   }
 
+  // 4F.Y G2: must mirror BE IsTerminal() (state.go:164). Added rollback_degraded
+  // and needs_manual_intervention so a terminal-ish rollback state no longer
+  // wrongly offers a further rollback (rollbackAvailable depends on this).
   function isTerminalState(state: string): boolean {
-    return ['completed', 'committed', 'archived', 'rolled_back', 'cancelled'].includes(state.toLowerCase());
+    return ['completed', 'committed', 'archived', 'rolled_back', 'rollback_degraded', 'needs_manual_intervention', 'cancelled'].includes(state.toLowerCase());
   }
 
   function canRetryState(state: string): boolean {
@@ -1175,6 +1179,14 @@
         <div class="flex items-center gap-1.5 text-xs text-warning" role="alert">
           {rollbackStateDetail}
           <a class="underline" href="/migrations">Check Migration History</a>
+        </div>
+      {:else if rollbackState === 'manual'}
+        <!-- 4F.Y G1: complements SafetyStatePanel's "Needs manual intervention"
+             banner — same role=alert / text-error tone so the operator sees the
+             rollback outcome distinctly, never a silent idle. -->
+        <div class="flex items-center gap-1.5 text-xs text-error" role="alert">
+          <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 9v4"/><path d="M12 17h.01"/></svg>
+          {rollbackStateDetail}
         </div>
       {/if}
       <button on:click={exportReport} class="flex items-center gap-1.5 px-3 py-1.5 bg-surface-muted hover:bg-surface rounded-lg text-xs font-medium transition-colors">
