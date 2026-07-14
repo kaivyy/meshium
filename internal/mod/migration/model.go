@@ -84,6 +84,10 @@ type WSMessage struct {
 	IsResumable bool `json:"isResumable,omitempty"`
 	// DowntimeClass is the honest downtime model for this category/engine.
 	DowntimeClass string `json:"downtimeClass,omitempty"`
+	// EstimatedBytes is the collector's best-effort total data size for a category
+	// (e.g. summed DB sizes). 0 = unknown; the FE shows "size unknown", never
+	// "0 MB" (Phase 5E, J).
+	EstimatedBytes int64 `json:"estimatedBytes,omitempty"`
 }
 
 // ResumeState values (Phase 5E, D2). These are explicit so the FE never has to

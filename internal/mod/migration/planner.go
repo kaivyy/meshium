@@ -134,6 +134,20 @@ func (p *Planner) Plan(ctx context.Context, req PlanRequest, onProgress StepCall
 		onProgress(msg)
 	}
 
+	// collectEstimatedBytes extracts a collector's best-effort total data size
+	// from the persisted collect step JSON, so the plan success frame can carry
+	// it to the wizard (Phase 5E, J). Returns 0 when unknown / not present.
+	collectEstimatedBytes := func(catName string, raw []byte) int64 {
+		if catName != "database" || len(raw) == 0 {
+			return 0
+		}
+		var d DatabaseCollectData
+		if err := json.Unmarshal(raw, &d); err != nil {
+			return 0
+		}
+		return d.EstimatedBytes
+	}
+
 	// Bound the whole collection phase. Individual SSH command/file-transfer
 	// timeouts already exist, but a category collector (configs especially) can
 	// compound them into a much longer stall. A shared deadline guarantees Plan()
@@ -213,10 +227,14 @@ func (p *Planner) Plan(ctx context.Context, req PlanRequest, onProgress StepCall
 			data.Meta = p.planCategoryMeta(ctx, req.SourceServerID, name, p.zeroDowntimeCapable())
 			rawData, _ := json.Marshal(data)
 			p.repo.CreateStep(planID, name, "collect", string(rawData))
+			// Phase 5E (J): surface the collector's best-effort size estimate so the
+			// wizard can show a real number (never "0 MB"). Only set when nonzero.
+			estBytes := collectEstimatedBytes(name, rawData)
 			emit(WSMessage{
-				Step:   "plan:" + name,
-				Status: "success",
-				Value:  "Collected " + name,
+				Step:            "plan:" + name,
+				Status:          "success",
+				Value:           "Collected " + name,
+				EstimatedBytes:  estBytes,
 			})
 		}(i, catName, collector)
 	}
