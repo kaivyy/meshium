@@ -23,7 +23,7 @@ func TestPlannerPlanInterruptedNotLeftPlanned(t *testing.T) {
 	srvRepo.AddServer(&server.Server{ID: 2, Host: "target", Port: 22, Username: "user"})
 
 	registry := NewCategoryRegistry()
-	planner := NewPlanner(registry, repo, srvRepo, newMockPool(), &mockAuthSvc{}, &mockHostKeyStore{})
+	planner := NewPlanner(registry, repo, srvRepo, newMockPool(), &mockAuthSvc{}, &mockHostKeyStore{}, nil)
 
 	// Cancel after CreateMigration commits but before collection finishes. The
 	// registry's real collectors run against mockSSH (instant), so cancel now to

@@ -7,6 +7,7 @@ import (
 	"sync"
 	"time"
 
+	"meshium/internal/mod/discovery"
 	"meshium/internal/mod/server"
 	"meshium/internal/shared"
 
@@ -25,15 +26,17 @@ var planCollectTimeout = 5 * time.Minute
 
 // Planner collects data from the source server and builds a migration plan.
 type Planner struct {
-	registry *CategoryRegistry
-	repo     Repo
-	srvRepo  server.Repo
-	pool     ConnectionPool
-	authSvc  AESKeyProvider
-	hosts    HostKeyStore
+	registry  *CategoryRegistry
+	repo      Repo
+	srvRepo   server.Repo
+	pool      ConnectionPool
+	authSvc   AESKeyProvider
+	hosts     HostKeyStore
+	snapStore discovery.SnapshotStore // optional: enables freshness-aware reuse of onboarding scans
 }
 
-// NewPlanner creates a Planner.
+// NewPlanner creates a Planner. snapStore may be nil (reuse disabled; every
+// category is collected live and the reason is recorded in step metadata).
 func NewPlanner(
 	registry *CategoryRegistry,
 	repo Repo,
@@ -41,14 +44,16 @@ func NewPlanner(
 	pool ConnectionPool,
 	authSvc AESKeyProvider,
 	hosts HostKeyStore,
+	snapStore discovery.SnapshotStore,
 ) *Planner {
 	return &Planner{
-		registry: registry,
-		repo:     repo,
-		srvRepo:  srvRepo,
-		pool:     pool,
-		authSvc:  authSvc,
-		hosts:    hosts,
+		registry:  registry,
+		repo:      repo,
+		srvRepo:   srvRepo,
+		pool:      pool,
+		authSvc:   authSvc,
+		hosts:     hosts,
+		snapStore: snapStore,
 	}
 }
 
@@ -201,6 +206,11 @@ func (p *Planner) Plan(ctx context.Context, req PlanRequest, onProgress StepCall
 				p.repo.CreateStep(planID, name, "collect", fmt.Sprintf(`{"error":"collect failed: %s"}`, err.Error()))
 				return
 			}
+			// Attach freshness-aware honesty metadata (reuse decision, downtime
+			// class, why live was chosen). Appliers ignore Meta; the FE renders it
+			// in Step 3/4 so the user sees WHY discovery ran again, not a silent
+			// second scan.
+			data.Meta = p.planCategoryMeta(ctx, req.SourceServerID, name, p.zeroDowntimeCapable())
 			rawData, _ := json.Marshal(data)
 			p.repo.CreateStep(planID, name, "collect", string(rawData))
 			emit(WSMessage{

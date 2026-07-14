@@ -48,7 +48,7 @@ func TestPlanReturnsOnWedgedCollector(t *testing.T) {
 	cfg, _ := registry.Get("configs")
 	registry.Register("configs", wedgingCollector{}, cfg.Applier)
 
-	p := NewPlanner(registry, repo, srvRepo, pool, &mockAuthSvc{}, &mockHostKeyStore{})
+	p := NewPlanner(registry, repo, srvRepo, pool, &mockAuthSvc{}, &mockHostKeyStore{}, nil)
 
 	// Live parent context: the guard must come from planCollectTimeout firing,
 	// not from a pre-cancelled parent.

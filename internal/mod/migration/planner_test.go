@@ -27,7 +27,7 @@ func TestPlannerPlanRequest(t *testing.T) {
 
 func TestNewPlanner(t *testing.T) {
 	registry := NewCategoryRegistry()
-	p := NewPlanner(registry, nil, nil, nil, nil, nil)
+	p := NewPlanner(registry, nil, nil, nil, nil, nil, nil)
 	if p == nil {
 		t.Error("expected non-nil planner")
 	}

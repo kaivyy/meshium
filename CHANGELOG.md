@@ -55,9 +55,10 @@ reflects backend state (no improvisation of unsupported states).
 ### Phase 5B — Fast Planning, Real DB Migration, Honest Downtime (round 1)
 
 First increment of Phase 5B. Follows the mandated P0→P3 order. This round lands
-the correctness blockers + the category-metadata/downtime foundation; planner
-reuse (Part 4) and the transfer-engine/checkpoint/cutover wiring (Parts 5–8)
-are explicit follow-ups (see "Not yet in this round").
+the correctness blockers (P0), the category-metadata/downtime foundation (Parts 1+3),
+and an honest freshness-aware reuse gate (Part 4 — wired, refuses reuse today with
+documented reasons, ready to flip on). The transfer-engine/checkpoint/cutover wiring
+(Parts 5–8) is an explicit follow-up (see "Not yet").
 
 - **P0-1 DB silent-skip eliminated:** `DatabaseCollector.Collect` now fails
   *clearly* when the engine is not detected, auth/list fails, a named DB is
@@ -94,14 +95,39 @@ are explicit follow-ups (see "Not yet in this round").
   host/container/compose), `TestContainerCommandPrefix` (docker exec + compose
   exec). Mock gains substring `addOutput`.
 
-#### Not yet in this round (explicit follow-ups, not faked)
-- Part 4 freshness-aware planner reuse (read `discovery_snapshots` when fresh;
-  the planner currently has `srvRepo` but not the `SnapshotStore` — wiring +
-  config-hash freshness gate still to do).
+#### Part 4 — freshness-aware reuse gate (honest: refuses today, ready to flip on)
+- **Wiring:** `Planner` now takes a `discovery.SnapshotStore` (nil = reuse
+  disabled; wired in `cmd/server/main.go`). Every collect step now carries
+  `*CategoryMeta` (`CategoryData.Meta`, `omitempty`) so the FE can render the
+  reuse decision + why-live in Step 3/4. Appliers ignore `Meta` (nil on the
+  execute path), so it is non-breaking.
+- **Honest gate, not a fake reuse:** `planCategoryMeta` loads the source's
+  onboarding snapshot and reuses ONLY if it is fresh (`planReuseMaxAge = 30m`)
+  AND the snapshot shape maps faithfully to what the category's applier
+  consumes. `reuseRefusedReason` enumerates the real divergence per category and
+  is the audit surface for "why does discovery run again":
+  - `packages`: onboarding `Packages` is **never populated** → reuse = "0 packages"
+  - `services`: onboarding lists *active* units; migration plans *enabled* →
+    reuse silently drops enabled-but-inactive
+  - `database`: snapshot has only detection metadata (no creds, no DB list)
+  - `users`: applier needs raw /etc/passwd + crontabs + firewall; snapshot has summaries
+  - `docker`: snapshot lacks container IDs/env the applier consumes
+  - `configs`: applier transfers file bodies the snapshot doesn't capture
+- **Net result today:** every category is collected LIVE (refresh), each with a
+  concrete refusal reason in `Meta.Warnings` — the honest answer to the audit's
+  question, in code. When an onboarding collector starts populating the matching
+  fields faithfully, returning `""` from `reuseRefusedReason` for that category
+  is the ONLY change needed to enable reuse. No silent skip, no fake match.
+- **Tests:** `reuse_test.go` — `TestPlanCategoryMetaRefusesReuseWhenSnapshotDiverges`
+  (every category refused with a reason), `TestPlanCategoryMetaNoStoreCollectsLive`,
+  `TestPlanCategoryMetaFreshnessWindow`, `TestZeroDowntimeCapableFalse`.
+
+#### Not yet (explicit follow-ups, not faked)
 - Parts 5–8: resumable large-transfer engine, removal of short hard timeouts,
   persisted checkpoints, honest `awaiting_cutover`/`observation`/rollback
-  split-brain fix, freeze/fencing + traffic-switch live wiring. These need a
-  dedicated round; intentionally NOT stubbed here.
+  split-brain fix, freeze/fencing + traffic-switch live wiring, and flipping
+  `zeroDowntimeCapable` true once that chain is wired. These need a dedicated
+  round; intentionally NOT stubbed here.
 
 ### Phase 4H — Deprecate & Remove Legacy Planner (/plans)
 

@@ -7,8 +7,12 @@ import (
 
 // CategoryData is a generic container for collected data.
 // Each category module defines its own concrete data type and serializes to JSON.
+// Meta carries planner-computed honesty metadata (reuse decision, downtime
+// class, warnings) surfaced in Step 3/4. Appliers ignore Meta on the execute
+// path (it is nil when they unmarshal), so adding it is non-breaking.
 type CategoryData struct {
 	Type string          `json:"type"`
+	Meta *CategoryMeta   `json:"meta,omitempty"`
 	Data json.RawMessage `json:"data"`
 }
 
