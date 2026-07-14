@@ -54,6 +54,38 @@ authorization, and legal transitions. Full report:
 - `internal/mod/migration/plan_op_idempotency_test.go`, `plan_reconcile_test.go` —
   op persistence, reconcile-by-op, dedup-excludes-failed, dedup-returns-existing.
 
+### Phase 4G.2 — Realtime Operation Parity Sweep (dry-run, compat, execute, rollback)
+
+Regression audit + truthful-parity fix for the four realtime operation flows that
+survived 4G.1. Key finding: the flows already reconcile via `loadSession()` (REST)
+and `wsPipelineConnect` (resilient), so the drift was a narrow FE truthfulness gap
+— not a missing transport/reconcile. Backend stays authoritative; terminal WS
+frames stay progress-only; ambiguity renders as `unknown`. Full report:
+`docs/superpowers/specs/phase-4g2-realtime-parity-final-report.md`.
+
+#### Changed (4G.2)
+- **dry-run / compatibility** — `onclose` reconcile failure now sets the step to
+  `unknown` (honest ambiguity) instead of a faked `failed`. The in-flight WS frame
+  remains progress-only; `loadSession()` REST stays the authority.
+- **rollback** — added an explicit FE rollback state machine
+  (`idle | running | completed | degraded | failed | unknown`) reconciled from the
+  authoritative backend `state` on mount and after the REST call. Renders
+  `rolling_back` / `rolled_back` / `rollback_degraded` / `rollback_failed` distinctly
+  via a status banner (was a single collapsible toast). In-flight state is set
+  *before* the call so a mid-call refresh reconciles to `running`, never fake-completed.
+- **PipelineStepper** — `unknown` step-status color (warning) added.
+- **execute** — no change; already the reference (resilient WS + run-lock + state machine).
+
+#### Added (4G.2)
+- Pure `reconcileRollbackState(backendState, current)` helper in
+  `web/src/lib/api/pipeline.ts`, unit-tested.
+- `web/src/lib/api/rollback-reconcile.test.ts` — 8 truthfulness cases.
+
+#### Tests (4G.2)
+- `npm run check` 0 errors · `npx vitest run` 65 passing (8 new) · `npm run build` OK.
+- **No backend contract change** — all fixes render states the backend already held.
+  Optional compatibility verification-row upsert (cosmetic) deferred.
+
 ### Phase 2D — operability, auditability, observability, release readiness
 
 Makes the Phase 1 / 2A / 2B / 2C results **operable, auditable, observable,

@@ -3,13 +3,14 @@
   import { page } from '$app/stores';
   import {
     pipelineApi, wsPipelineConnect, WIZARD_STEPS, defaultMigrationConfig,
+    reconcileRollbackState,
     type MigrationSession, type PipelineStage, type WSMessageExtended,
     type CompatibilityCheckResult, type RiskReport, type HealthCheckResult,
     type SyncSession, type ReplicationStatus, type QueueState,
     type ProvisionState, type ContainerHealthInfo, type AuditEntry,
     type MigrationConfig, type WSConnectionState, type PlannerResult,
     type MigrationEvent, type PlannerWarning, type DependencyGraph,
-    type StrategySelection
+    type StrategySelection, type RollbackState
   } from '$lib/api/pipeline';
   import { APIError } from '$lib/api/client';
   import { migrationApi, type DryRunResult, wsDryRun, wsCompatibility, type WSMessage } from '$lib/api/migrations';
@@ -29,7 +30,10 @@
 
   // ── Wizard Step State ──
   let currentStep = 0;
-  let stepStatuses: ('pending' | 'running' | 'completed' | 'failed')[] = Array(11).fill('pending');
+  // 4G.2: added 'unknown' to the step-status union so a failed
+  // reconcile (dry-run / compat) surfaces as explicit UNKNOWN rather than a
+  // faked 'failed' (truthfulness rule: ambiguity shown as ambiguity).
+  let stepStatuses: ('pending' | 'running' | 'completed' | 'failed' | 'unknown')[] = Array(11).fill('pending');
 
   // ── Session & Data ──
   let session: MigrationSession | null = null;
@@ -73,6 +77,13 @@
   let replicationLag = 0;
   let healthScore = 100;
   let currentState = '';
+  // 4G.2: explicit rollback state machine. Backend already tracks the full
+  // vocabulary (rolling_back / rolled_back / rollback_degraded / rollback_failed)
+  // but the FE used to collapse it into a single toast. Reconcile from the
+  // authoritative backend state so the operator sees running/completed/degraded/
+  // failed/unknown distinctly — never a false success or a hidden failure.
+  let rollbackState: RollbackState = 'idle';
+  let rollbackStateDetail = '';
   let cpuUsagePercent = 0;
   let ramUsedBytes = 0;
   let ramTotalBytes = 0;
@@ -194,7 +205,10 @@
         currentState = plan.status;
         recoverStepFromRecords();
       } catch { /* ignore */ }
-    } finally {
+    // 4G.2: after either load path, reconcile the explicit rollback state
+    // machine from the authoritative backend state.
+    applyRollbackReconcile();
+  } finally {
       loading = false;
     }
   }
@@ -248,10 +262,25 @@
     if (st === 'discovery' || st === 'planning' || st === 'created') { setStep(0); return; }
   }
 
+  // 4G.2: set the explicit rollback state machine from the authoritative
+  // backend state via the pure, unit-tested helper in $lib/api/pipeline.
+  function applyRollbackReconcile(): RollbackState {
+    const next = reconcileRollbackState(currentState, rollbackState);
+    rollbackState = next;
+    rollbackStateDetail =
+      next === 'running' ? 'Rollback in progress…' :
+      next === 'completed' ? 'Rollback completed' :
+      next === 'degraded' ? 'Rollback completed with some steps that could not be reverted' :
+      next === 'failed' ? 'Rollback failed' :
+      next === 'unknown' ? 'Rollback status unknown — check the migration state' :
+      '';
+    return next;
+  }
+
   function recoverStepFromRecords() {
     if (!session) return;
 
-    const restoredStatuses: ('pending' | 'running' | 'completed' | 'failed')[] = Array(11).fill('pending');
+    const restoredStatuses: ('pending' | 'running' | 'completed' | 'failed' | 'unknown')[] = Array(11).fill('pending');
     const markCompleted = (step: number) => {
       for (let i = 0; i <= step; i++) restoredStatuses[i] = 'completed';
     };
@@ -567,8 +596,10 @@
               if (hasCritical) toast.error('Critical compatibility issues found');
               else toast.success('Compatibility check passed');
             } catch {
-              stepStatuses[1] = 'failed';
-              toast.error('Compatibility results could not be loaded');
+              // 4G.2: same truthfulness rule as dry-run — a failed reconcile
+              // must not be faked as a failed check. Surface UNKNOWN.
+              stepStatuses[1] = 'unknown';
+              toast.error('Compatibility status unknown — check results below or reload');
             }
           }
           actionLoading = false;
@@ -659,8 +690,12 @@
               stepStatuses[4] = 'completed';
               toast.success('Dry run completed');
             } catch {
-              stepStatuses[4] = 'failed';
-              toast.error('Dry run result could not be loaded');
+              // 4G.2: the backend is authoritative, but if WE cannot reach it
+              // we must not silently claim failure. The run may have succeeded
+              // server-side — surface explicit UNKNOWN so the operator can check
+              // rather than believing a false "failed".
+              stepStatuses[4] = 'unknown';
+              toast.error('Dry run status unknown — check results below or reload');
             }
           }
           actionLoading = false;
@@ -889,14 +924,36 @@
 
   async function rollbackPipeline() {
     actionLoading = true;
+    // 4G.2: mark the rollback as in-flight BEFORE the call so a refresh
+    // mid-call reconciles to 'running' (not idle/fake-completed). The
+    // authoritative terminal state is set by reconcileRollbackState() after loadSession.
+    rollbackState = 'running';
+    rollbackStateDetail = 'Rollback requested…';
     try {
       await pipelineApi.rollbackMigration(migrationId);
       pipelineRunning = false; pipelinePaused = false;
       await loadSession().catch(() => {});
-      toast.success('Rollback initiated');
+      const rb: RollbackState = applyRollbackReconcile();
+      if (rb === 'completed') {
+        toast.success('Rollback completed');
+      } else if (rb === 'degraded') {
+        toast.error('Rollback completed with errors — some steps could not be reverted');
+      } else if (rb === 'failed') {
+        toast.error('Rollback failed');
+      } else {
+        toast.success('Rollback initiated');
+      }
       confirmationAction = null;
-    } catch (err) { toast.error(actionErrorMessage(err, 'Rollback failed')); }
-    finally { actionLoading = false; }
+    } catch (err) {
+      // 4G.2: a failed REST call is a genuine FE-side failure, but the
+      // backend may still be rolling back. Don't fake success; surface the
+      // error AND keep 'unknown' (we cannot tell whether the backend rolled
+      // back). loadSession swallows its own errors, so we must not reconcile
+      // here — doing so could flip 'unknown' to 'idle' and hide evidence.
+      rollbackState = 'unknown';
+      rollbackStateDetail = 'Rollback status unknown — check the migration state';
+      toast.error(actionErrorMessage(err, 'Rollback failed'));
+    } finally { actionLoading = false; }
   }
 
   async function exportReport() {
@@ -1093,6 +1150,32 @@
           <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 12a9 9 0 1 0 9-9 9.75 9.75 0 0 0-6.74 2.74L3 8"/><path d="M3 3v5h5"/></svg>
           Rollback
         </button>
+      {/if}
+      <!-- 4G.2: explicit, truthful rollback status — never a silent toast.
+           Surfaces running/completed/degraded/failed/unknown so a destructive
+           action's outcome is always visible, even after refresh/reconnect. -->
+      {#if rollbackState === 'running'}
+        <div class="flex items-center gap-1.5 text-xs text-fg-subtle" role="status" aria-live="polite">
+          <svg class="animate-spin" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 12a9 9 0 1 1-6.22-8.56"/></svg>
+          {rollbackStateDetail}
+        </div>
+      {:else if rollbackState === 'completed'}
+        <div class="flex items-center gap-1.5 text-xs text-success" role="status" aria-live="polite">
+          <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="20 6 9 17 4 12"/></svg>
+          {rollbackStateDetail}
+        </div>
+      {:else if rollbackState === 'degraded'}
+        <div class="flex items-center gap-1.5 text-xs text-warning" role="status" aria-live="polite">
+          <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 9v4"/><path d="M12 17h.01"/></svg>
+          {rollbackStateDetail}
+        </div>
+      {:else if rollbackState === 'failed'}
+        <div class="flex items-center gap-1.5 text-xs text-error" role="alert">{rollbackStateDetail}</div>
+      {:else if rollbackState === 'unknown'}
+        <div class="flex items-center gap-1.5 text-xs text-warning" role="alert">
+          {rollbackStateDetail}
+          <a class="underline" href="/migrations">Check Migration History</a>
+        </div>
       {/if}
       <button on:click={exportReport} class="flex items-center gap-1.5 px-3 py-1.5 bg-surface-muted hover:bg-surface rounded-lg text-xs font-medium transition-colors">
         <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>

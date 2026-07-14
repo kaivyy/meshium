@@ -610,6 +610,32 @@ export const pipelineApi = {
 // and we are re-hydrating missed events before resuming live frames.
 export type WSConnectionState = 'connecting' | 'connected' | 'disconnected' | 'reconnecting' | 'failed' | 'stale' | 'replaying';
 
+// RollbackState is the FE's truthful view of a rollback's progress, reconciled
+// from the authoritative backend migration state (4G.2). The backend tracks
+// rolling_back / rolled_back / rollback_degraded / rollback_failed; we surface
+// each distinctly so a destructive action's outcome is never a silent toast.
+export type RollbackState = 'idle' | 'running' | 'completed' | 'degraded' | 'failed' | 'unknown';
+
+// reconcileRollbackState maps the backend migration `state` string to the FE
+// RollbackState. It is a pure function (unit-tested) so the truthfulness
+// rule is single-sourced: ambiguity (anything unrecognized) becomes 'unknown',
+// never a faked success or hidden failure. `current` is the FE's in-flight
+// state, preserved when the migration is not in a rollback-related state
+// (e.g. mid-pipeline), so a reconciliation never clobbers an active run.
+export function reconcileRollbackState(backendState: string | null | undefined, current: RollbackState): RollbackState {
+  const st = (backendState ?? '').toLowerCase();
+  switch (st) {
+    case 'rolling_back': return 'running';
+    case 'rolled_back': return 'completed';
+    case 'rollback_degraded': return 'degraded';
+    case 'rollback_failed': return 'failed';
+    default:
+      // Unrecognized / non-rollback state: if we are mid-rollback keep the
+      // in-flight 'running' marker; otherwise fall back to idle.
+      return current === 'running' ? 'running' : 'idle';
+  }
+}
+
 function getWsToken(): string {
   return typeof localStorage !== 'undefined' ? localStorage.getItem('meshium_session_token') ?? '' : '';
 }
