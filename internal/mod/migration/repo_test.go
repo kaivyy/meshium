@@ -14,7 +14,7 @@ func TestListMigrationsHandlesNullError(t *testing.T) {
 	insertServer(t, database, 2)
 
 	r := NewRepo(database)
-	if _, err := r.CreateMigration(1, 2, []string{"packages"}); err != nil {
+	if _, err := r.CreateMigration(1, 2, []string{"packages"}, ""); err != nil {
 		t.Fatalf("CreateMigration failed: %v", err)
 	}
 

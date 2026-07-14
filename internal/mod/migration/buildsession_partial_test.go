@@ -25,7 +25,7 @@ func TestBuildSessionFlagsPartialCollection(t *testing.T) {
 
 	// Plan two categories but collect only one (packages). configs is missing —
 	// the partial state the old early-return bug left behind.
-	id, err := repo.CreateMigration(1, 2, []string{"packages", "configs"})
+	id, err := repo.CreateMigration(1, 2, []string{"packages", "configs"}, "")
 	if err != nil {
 		t.Fatalf("CreateMigration: %v", err)
 	}
@@ -62,7 +62,7 @@ func TestBuildSessionCompleteCollectionNotFlagged(t *testing.T) {
 		_, _ = db.Exec(`INSERT INTO servers (name, host, port, username, password, ssh_key, passphrase, tags, environment, region, icon, color, favorite, bastion_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 			h, h, 22, "user", "", "", "", "[]", "", "", "", "", 0, 0)
 	}
-	id, _ := repo.CreateMigration(1, 2, []string{"packages", "configs"})
+	id, _ := repo.CreateMigration(1, 2, []string{"packages", "configs"}, "")
 	for _, cat := range []string{"packages", "configs"} {
 		data, _ := json.Marshal(CategoryData{Type: cat, Data: []byte("{}")})
 		repo.CreateStep(id, cat, "collect", string(data))

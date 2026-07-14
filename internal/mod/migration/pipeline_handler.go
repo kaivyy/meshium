@@ -169,10 +169,11 @@ func (h *PipelineHandler) handleCreatePipelineMigration(w http.ResponseWriter, r
 
 	shared.LimitRequestBody(r)
 	var req struct {
-		SourceID   int              `json:"sourceId"`
-		TargetID   int              `json:"targetId"`
-		Categories []string         `json:"categories"`
-		Config     *MigrationConfig `json:"config,omitempty"`
+		SourceID     int              `json:"sourceId"`
+		TargetID     int              `json:"targetId"`
+		Categories   []string         `json:"categories"`
+		OperationID  string           `json:"operationId,omitempty"`
+		Config       *MigrationConfig `json:"config,omitempty"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		shared.WriteError(w, http.StatusBadRequest, "invalid request body", "VALIDATION_ERROR")
@@ -211,7 +212,7 @@ func (h *PipelineHandler) handleCreatePipelineMigration(w http.ResponseWriter, r
 	}
 
 	// Create migration record directly via base repo
-	migrationID, err := h.baseRepo.CreateMigration(req.SourceID, req.TargetID, req.Categories)
+	migrationID, err := h.baseRepo.CreateMigration(req.SourceID, req.TargetID, req.Categories, req.OperationID)
 	if err != nil {
 		shared.WriteError(w, http.StatusInternalServerError, fmt.Sprintf("failed to create migration: %v", err), "INTERNAL")
 		return

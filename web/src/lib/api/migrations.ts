@@ -44,6 +44,10 @@ export interface PlanRequest {
   categories: string[];
   configPaths?: string[];
   databaseConfig?: DatabaseConfig;
+  // Client-generated idempotency key for the whole create-plan attempt. Sent to
+  // the backend so a refresh/retry/reconnect returns the same migration rather
+  // than inserting a second one (phase-4g1).
+  operationId?: string;
 }
 
 export interface WSMessage {
@@ -51,6 +55,32 @@ export interface WSMessage {
   status: string;
   value?: string;
   error?: string;
+}
+
+// ReconcileOutcome is the pure decision made when the FE asks the backend
+// (authoritative) whether a create-plan operation resolved. It is extracted
+// from the component so the truthfulness rules are unit-testable without a DOM.
+// - 'completed': a migration exists and is actionable → navigate to it.
+// - 'failed': the backend recorded a genuine failure → show it honestly.
+// - 'unknown': nothing found / reconcile error → surface ambiguity, never
+//   fake success (phase-4g1 rules 2 & 5).
+export type ReconcileOutcome =
+  | { kind: 'completed'; id: number; migrationStatus: string }
+  | { kind: 'failed'; id: number; migrationStatus: string }
+  | { kind: 'unknown' };
+
+// Statuses that mean "the migration record exists and is usable" — what a
+// create-plan wait is trying to confirm. A recorded 'failed' is NOT here: it is
+// mapped to the honest failed outcome so the user sees failure, not a dead plan.
+const COMPLETED_STATUSES = new Set(['planned', 'running', 'interrupted', 'completed', 'committed']);
+
+export function decideReconcile(list: Array<{ id: number; status: string }> | null | undefined, errorOccurred = false): ReconcileOutcome {
+  if (errorOccurred) return { kind: 'unknown' };
+  if (!list || list.length === 0) return { kind: 'unknown' };
+  const m = list[0];
+  if (m.status === 'failed') return { kind: 'failed', id: m.id, migrationStatus: m.status };
+  if (COMPLETED_STATUSES.has(m.status)) return { kind: 'completed', id: m.id, migrationStatus: m.status };
+  return { kind: 'unknown' };
 }
 
 export interface DryRunChange {

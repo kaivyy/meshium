@@ -61,7 +61,7 @@ func TestExecuteRejectsWhenServerBusy(t *testing.T) {
 	other := p.acquireResourceLocks(2)
 	defer p.releaseResourceLocks(other)
 
-	migID, err := p.jobRepo.CreateMigration(1, 2, []string{"packages"})
+	migID, err := p.jobRepo.CreateMigration(1, 2, []string{"packages"}, "")
 	if err != nil {
 		t.Fatalf("create migration: %v", err)
 	}

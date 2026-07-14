@@ -4,7 +4,7 @@
   import { page } from '$app/stores';
   import { api } from '$lib/api/client';
   import { toast } from '$lib/stores/toast';
-  import { wsPlan, type WSMessage, type PlanRequest } from '$lib/api/migrations';
+  import { wsPlan, decideReconcile, type WSMessage, type PlanRequest } from '$lib/api/migrations';
   import { pipelineApi, type PolicyMatrix } from '$lib/api/pipeline';
   import {
     canAutoCutover,
@@ -47,19 +47,61 @@
   let planning = false;
   let planMessages: WSMessage[] = [];
   let ws: WebSocket | null = null;
-  // Elapsed timer for the Plan step so "Planning..." shows how long collection
-  // has been running instead of a bare spinner. Not persisted: this wizard
-  // doesn't survive a refresh (it resets to step 1), so cross-reload doesn't
-  // apply.
+  // phase-4g1 truthful plan state machine. The wizard never hangs on a bare
+  // spinner: completion = backend-confirmed (REST reconcile), not "I saw a WS
+  // frame". States: idle | connecting | collecting | checking | completed |
+  // failed | unknown.
+  type PlanState = 'idle' | 'connecting' | 'collecting' | 'checking' | 'completed' | 'failed' | 'unknown';
+  let planState: PlanState = 'idle';
+  let recoveredMigrationId: number | null = null;
+  let recoveredStatus: string | null = null;
+  // Client-generated idempotency key for this create-plan attempt. Persisted to
+  // the URL + sessionStorage BEFORE the first submit so a refresh/reconnect can
+  // reconcile to the same backend migration instead of creating a duplicate.
+  const OP_STORAGE_KEY = 'meshium_plan_op';
+  function loadOperationId(): string {
+    try {
+      const fromUrl = $page.url.searchParams.get('op');
+      if (fromUrl) return fromUrl;
+      const fromStore = sessionStorage.getItem(OP_STORAGE_KEY);
+      if (fromStore) return fromStore;
+    } catch { /* ignore */ }
+    return '';
+  }
+  function persistOperationId(op: string) {
+    try {
+      sessionStorage.setItem(OP_STORAGE_KEY, op);
+      const url = new URL($page.url);
+      url.searchParams.set('op', op);
+      history.replaceState(null, '', url);
+    } catch { /* ignore */ }
+  }
+  function clearOperationId() {
+    try { sessionStorage.removeItem(OP_STORAGE_KEY); } catch { /* ignore */ }
+    try {
+      const url = new URL($page.url);
+      url.searchParams.delete('op');
+      history.replaceState(null, '', url);
+    } catch { /* ignore */ }
+  }
+  function newOperationId(): string {
+    // crypto.randomUUID is available in all targets we ship; fall back cheaply.
+    try { return crypto.randomUUID(); } catch { return `op-${Date.now()}-${Math.random().toString(36).slice(2)}`; }
+  }
+  let operationId = '';
+  // Elapsed timer for the Plan step so "Planning…" shows how long collection has
+  // been running instead of a bare spinner.
   let planElapsed = 0;
   let planTimer: ReturnType<typeof setInterval> | null = null;
-  // Derived plan outcome, computed from the messages we've received so far.
-  // A message stream can contain progress lines long before it ends in either
-  // success or failure, so the button label must reflect the actual outcome —
-  // not merely "a message exists" (which previously mislabeled in-progress
-  // plans as "Retry").
-  $: planDone = planMessages.some(m => m.step === 'plan' && m.status === 'complete');
-  $: planFailed = planMessages.some(m => m.status === 'error') && !planDone;
+  // Completed when the backend has CONFIRMED the migration exists. We require a
+  // `migration_id:N` terminal frame (id-bearing) — the older id-less
+  // "Migration plan created" frame is non-terminal (demoted to progress) so the
+  // FE never stops on a frame that carries no id.
+  $: planDone = planMessages.some(m => m.step === 'plan' && m.status === 'complete' && /migration_id:\d+/.test(m.value ?? ''));
+  $: planFailed = planMessages.some(m => m.status === 'error') && !planDone && planState !== 'completed';
+  // In-flight = a create-plan operation is active or being reconciled. While
+  // in-flight the submit button is disabled and double-submit is impossible.
+  $: planInFlight = planning || planState === 'connecting' || planState === 'collecting' || planState === 'checking';
 
   // Reactive gate for the Next button. Declared as a top-level reactive
   // statement (not a function called in the template) so Svelte 5's legacy
@@ -111,6 +153,18 @@
       if (sourceParam && targetParam) {
         step = 3;
       }
+
+      // phase-4g1 recovery: if we hold a create-plan operation id (URL or
+      // sessionStorage), a plan was in flight or completed before this load. We
+      // must NOT silently reset to Step 1 — restore Step 4 in a "checking"
+      // state and reconcile against the backend, which is authoritative.
+      const op = loadOperationId();
+      if (op) {
+        operationId = op;
+        step = 4;
+        planState = 'checking';
+        await reconcilePlan(op);
+      }
     } catch {
       // handle error
     }
@@ -160,8 +214,77 @@
     dbPort = DB_DEFAULT_PORTS[dbEngine] ?? 5432;
   }
 
+  // Reconcile a pending create-plan operation against the backend, which is
+  // authoritative. Called on load (refresh) and after a WS close. Never trusts a
+  // WS frame alone — the decision is made by decideReconcile (unit-tested).
+  async function reconcilePlan(op: string) {
+    planState = 'checking';
+    try {
+      const list = await api.get(`/migrations?operationId=${encodeURIComponent(op)}`) as Array<{ id: number; status: string }>;
+      const outcome = decideReconcile(list);
+      if (outcome.kind === 'completed') {
+        recoveredMigrationId = outcome.id;
+        recoveredStatus = outcome.migrationStatus;
+        planState = 'completed';
+        planning = false;
+        stopPlanTimer();
+        clearOperationId();
+        setTimeout(() => goto(`/migrations/${outcome.id}/pipeline`), 800);
+        return;
+      }
+      if (outcome.kind === 'failed') {
+        recoveredMigrationId = outcome.id;
+        recoveredStatus = outcome.migrationStatus;
+        planState = 'failed';
+        planning = false;
+        stopPlanTimer();
+        return;
+      }
+      // unknown: nothing found / unreconcilable. Surface ambiguity, never a bare
+      // spinner — and only once no live connection is keeping us in-flight.
+      if (!planning) planState = 'unknown';
+    } catch {
+      // Reconciliation itself failed. Do not fake success or loop forever:
+      // show the honest unknown state with guidance to check history.
+      if (!planning) planState = 'unknown';
+    }
+  }
+
+  // Confirm completion after the id-bearing terminal frame: persist the
+  // provider/cutover choice (backend is authoritative and may return 400), then
+  // navigate. id AND op are known here.
+  async function onPlanCompleted(newId: number, op: string) {
+    planning = false;
+    stopPlanTimer();
+    planState = 'completed';
+    recoveredMigrationId = newId;
+    clearOperationId();
+    toast.success('Migration plan created');
+    if (newId) {
+      configureError = '';
+      await pipelineApi
+        .configure(Number(newId), {
+          trafficProvider: trafficProvider || undefined,
+          autoCutover: autoCutoverAllowed ? autoCutover : false,
+        })
+        .catch((e) => {
+          configureError = e instanceof Error ? e.message : 'Failed to apply cutover configuration';
+        });
+    }
+    setTimeout(() => {
+      goto(newId ? `/migrations/${newId}/pipeline` : '/migrations');
+    }, 1000);
+  }
+
   function startPlanning() {
+    if (planning || planState === 'checking') return; // double-submit guard
+    // Generate + persist the operation id BEFORE opening the socket, so a
+    // refresh/reconnect reconciles to the same backend migration.
+    operationId = loadOperationId() || newOperationId();
+    persistOperationId(operationId);
+
     planning = true;
+    planState = 'connecting';
     planMessages = [];
     startPlanTimer();
     toast.info('Planning migration...');
@@ -174,58 +297,41 @@
       databaseConfig: selectedCategories.includes('database')
         ? { engine: dbEngine, databaseName: dbName.trim(), username: dbUsername, password: dbPassword, host: dbHost, port: dbPort }
         : undefined,
+      operationId,
     };
 
     ws = wsPlan(
       req,
       (msg: WSMessage) => {
         planMessages = [...planMessages, msg];
-        if (msg.step === 'plan' && msg.status === 'complete') {
-          planning = false;
-          stopPlanTimer();
-          toast.success('Migration plan created');
-          // Extract migration ID from the message value (format: "migration_id:123")
+        if (msg.status === 'progress' || msg.status === 'success') planState = 'collecting';
+        // Only a frame carrying `migration_id:N` is terminal. (The id-less
+        // "Migration plan created" progress frame is never terminal.)
+        if (msg.step === 'plan' && msg.status === 'complete' && /migration_id:(\d+)/.test(msg.value ?? '')) {
           const match = msg.value?.match(/migration_id:(\d+)/);
-          const newId = match ? match[1] : '';
-          if (newId) {
-            // Phase 4G 3A: persist the operator's provider + cutover choice.
-            // The backend enforces the support matrix at this boundary and returns
-            // 400 with an honest reason if the combination is not permitted —
-            // surface that verbatim rather than suppressing it.
-            configureError = '';
-            pipelineApi
-              .configure(Number(newId), {
-                trafficProvider: trafficProvider || undefined,
-                autoCutover: autoCutoverAllowed ? autoCutover : false,
-              })
-              .catch((e) => {
-                configureError = e instanceof Error ? e.message : 'Failed to apply cutover configuration';
-              });
-          }
-          setTimeout(() => {
-            if (newId) {
-              goto(`/migrations/${newId}/pipeline`);
-            } else {
-              goto('/migrations');
-            }
-          }, 1000);
+          const newId = match ? Number(match[1]) : 0;
+          onPlanCompleted(newId, operationId);
         }
       },
       () => {
-        // WS closed. If we never got `complete`, the plan may still have been
-        // committed server-side (CreateMigration runs before collection), so a
-        // silent reset to "Create" would hide it and risk a duplicate. Tell the
-        // user to check the list instead of pretending nothing happened.
+        // WS closed. The plan may have been committed server-side (CreateMigration
+        // runs before collection) but the terminal frame lost. Reconcile instead
+        // of guessing. Never silently reset to Step 1 or pretend failure.
         planning = false;
         stopPlanTimer();
-        if (!planMessages.some(m => m.step === 'plan' && m.status === 'complete')) {
-          toast.warning('Connection closed mid-plan. Check the migration list — the plan may already exist.');
+        if (planState !== 'completed') {
+          reconcilePlan(operationId);
         }
       },
       () => {
+        // Transport error: reconcile to find out what actually happened.
         planning = false;
         stopPlanTimer();
-        toast.error('Migration planning failed');
+        if (planState !== 'completed') {
+          planState = 'unknown';
+          toast.error('Connection error during planning — checking status…');
+          reconcilePlan(operationId);
+        }
       }
     );
   }
@@ -522,16 +628,58 @@
         </div>
       {/if}
 
-      {#if !planning}
-        {#if planDone}
-          <button
-            type="button"
-            disabled
-            class="w-full px-4 py-3 bg-success/20 text-success rounded-lg font-medium cursor-default"
-          >
-            Plan created — redirecting…
-          </button>
-        {:else if planFailed}
+      <!-- Truthful, non-hanging status banner. The wizard never shows a bare
+           spinner with no reconcile path; every in-flight state has an honest
+           label, and ambiguous outcomes are shown as UNKNOWN, not fake success. -->
+      {#if planState === 'connecting'}
+        <div class="flex items-center justify-center gap-2 text-sm text-fg-subtle" role="status" aria-live="polite">
+          <Loader size={16} class="animate-spin" />
+          Connecting to planner…
+        </div>
+      {:else if planState === 'collecting'}
+        <div class="flex items-center justify-center gap-2 text-sm text-fg-subtle" role="status" aria-live="polite">
+          <Loader size={16} class="animate-spin" />
+          Planning… {Math.floor(planElapsed / 60)}:{String(planElapsed % 60).padStart(2, '0')}
+        </div>
+      {:else if planState === 'checking'}
+        <div class="flex items-center justify-center gap-2 text-sm text-fg-subtle" role="status" aria-live="polite">
+          <Loader size={16} class="animate-spin" />
+          Checking plan status… (reconnecting to server)
+        </div>
+      {:else if planState === 'unknown'}
+        <div class="bg-warning/10 border border-warning/30 text-warning rounded-lg p-3 text-sm" role="status" aria-live="polite">
+          Plan status could not be confirmed. Your plan may already exist —
+          check <a class="underline" href="/migrations">Migration History</a>.
+          If no plan appears there, you can safely retry.
+        </div>
+      {:else if planState === 'failed'}
+        <div class="bg-error/10 border border-error/30 text-error rounded-lg p-3 text-sm" role="alert">
+          Migration planning failed{recoveredStatus ? ` (status: ${recoveredStatus})` : ''}.
+          You can retry — a fresh plan will be created.
+        </div>
+      {/if}
+
+      <!-- Action button. Disabled while in-flight; never abandons a running
+           operation. 'unknown' offers a safe Retry (reuses the same op id) AND a
+           link to history so the user can verify before retrying. -->
+      {#if planState === 'completed'}
+        <button
+          type="button"
+          disabled
+          class="w-full px-4 py-3 bg-success/20 text-success rounded-lg font-medium cursor-default"
+        >
+          Plan created — redirecting…
+        </button>
+      {:else if planState === 'failed'}
+        <button
+          type="button"
+          on:click={startPlanning}
+          class="w-full px-4 py-3 bg-accent text-accent-fg rounded-lg font-medium hover:bg-accent-hover"
+        >
+          Retry Migration Plan
+        </button>
+      {:else if planState === 'unknown'}
+        <div class="space-y-2">
           <button
             type="button"
             on:click={startPlanning}
@@ -539,20 +687,26 @@
           >
             Retry Migration Plan
           </button>
-        {:else}
-          <button
-            type="button"
-            on:click={startPlanning}
-            class="w-full px-4 py-3 bg-accent text-accent-fg rounded-lg font-medium hover:bg-accent-hover"
+          <a
+            href="/migrations"
+            class="block w-full text-center px-4 py-2 text-sm text-fg-muted hover:text-fg border border-border rounded-lg"
           >
-            Create Migration Plan
-          </button>
-        {/if}
-      {:else if planning}
-        <div class="flex items-center justify-center gap-2 text-sm text-fg-subtle">
-          <Loader size={16} class="animate-spin" />
-          Planning… {Math.floor(planElapsed / 60)}:{String(planElapsed % 60).padStart(2, '0')}
+            Go to Migration History
+          </a>
         </div>
+      {:else if planInFlight}
+        <div class="flex items-center justify-center gap-2 text-sm text-fg-subtle opacity-60">
+          <Loader size={16} class="animate-spin" />
+          {planState === 'checking' ? 'Reconciling…' : 'Working…'}
+        </div>
+      {:else}
+        <button
+          type="button"
+          on:click={startPlanning}
+          class="w-full px-4 py-3 bg-accent text-accent-fg rounded-lg font-medium hover:bg-accent-hover"
+        >
+          Create Migration Plan
+        </button>
       {/if}
     </div>
   {/if}

@@ -17,8 +17,9 @@ func IsMigrationNotFound(err error) bool {
 }
 
 type Repo interface {
-	CreateMigration(sourceID, targetID int, categories []string) (int, error)
+	CreateMigration(sourceID, targetID int, categories []string, operationID string) (int, error)
 	GetMigration(id int) (*Migration, error)
+	GetMigrationByOperationID(operationID string) (*Migration, error)
 	ListMigrations() ([]Migration, error)
 	UpdateMigrationStatus(id int, status, errMsg string) error
 	// TryUpdateMigrationStatus atomically updates the status only if the
@@ -51,20 +52,58 @@ func NewRepo(db *sql.DB) Repo {
 	return &sqliteRepo{db: db}
 }
 
-func (r *sqliteRepo) CreateMigration(sourceID, targetID int, categories []string) (int, error) {
+func (r *sqliteRepo) CreateMigration(sourceID, targetID int, categories []string, operationID string) (int, error) {
 	cats, err := json.Marshal(categories)
 	if err != nil {
 		return 0, fmt.Errorf("marshal categories: %w", err)
 	}
 	res, err := r.db.Exec(
-		`INSERT INTO migrations (source_id, target_id, categories, status) VALUES (?, ?, ?, 'planned')`,
-		sourceID, targetID, string(cats),
+		`INSERT INTO migrations (source_id, target_id, categories, status, operation_id) VALUES (?, ?, ?, 'planned', ?)`,
+		sourceID, targetID, string(cats), operationID,
 	)
 	if err != nil {
 		return 0, err
 	}
 	id, err := res.LastInsertId()
 	return int(id), err
+}
+
+// GetMigrationByOperationID returns the migration carrying the given client
+// idempotency key, or ErrMigrationNotFound. Used to dedup a retried/resumed
+// create-plan so a refresh never inserts a second migration.
+func (r *sqliteRepo) GetMigrationByOperationID(operationID string) (*Migration, error) {
+	var m Migration
+	var categoriesJSON string
+	var planJSON, errStr sql.NullString
+	var completedAt sql.NullString
+	err := r.db.QueryRow(
+		`SELECT id, source_id, target_id, categories, status, plan, error, created_at, completed_at, operation_id
+		 FROM migrations WHERE operation_id = ? ORDER BY id DESC LIMIT 1`,
+		operationID,
+	).Scan(&m.ID, &m.SourceID, &m.TargetID, &categoriesJSON, &m.Status, &planJSON, &errStr, &m.CreatedAt, &completedAt, &m.OperationID)
+	if errors.Is(err, sql.ErrNoRows) {
+		return nil, ErrMigrationNotFound
+	}
+	if err != nil {
+		return nil, err
+	}
+	if err := json.Unmarshal([]byte(categoriesJSON), &m.Categories); err != nil {
+		return nil, fmt.Errorf("unmarshal migration categories: %w", err)
+	}
+	if planJSON.Valid {
+		var plan MigrationPlan
+		if err := json.Unmarshal([]byte(planJSON.String), &plan); err != nil {
+			return nil, fmt.Errorf("unmarshal migration plan: %w", err)
+		}
+		m.Plan = &plan
+	}
+	if errStr.Valid {
+		m.Error = errStr.String
+	}
+	if completedAt.Valid {
+		m.CompletedAt = completedAt.String
+	}
+	return &m, nil
 }
 
 func (r *sqliteRepo) SetMigrationCategories(id int, categories []string) error {
@@ -82,9 +121,9 @@ func (r *sqliteRepo) GetMigration(id int) (*Migration, error) {
 	var planJSON, errStr sql.NullString
 	var completedAt sql.NullString
 	err := r.db.QueryRow(
-		`SELECT id, source_id, target_id, categories, status, plan, error, created_at, completed_at
+		`SELECT id, source_id, target_id, categories, status, plan, error, created_at, completed_at, operation_id
 		 FROM migrations WHERE id = ?`, id,
-	).Scan(&m.ID, &m.SourceID, &m.TargetID, &categoriesJSON, &m.Status, &planJSON, &errStr, &m.CreatedAt, &completedAt)
+	).Scan(&m.ID, &m.SourceID, &m.TargetID, &categoriesJSON, &m.Status, &planJSON, &errStr, &m.CreatedAt, &completedAt, &m.OperationID)
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, ErrMigrationNotFound
 	}

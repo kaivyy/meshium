@@ -73,7 +73,7 @@ func (p *Planner) Plan(ctx context.Context, req PlanRequest, onProgress StepCall
 	onProgress(WSMessage{Step: "plan", Status: "success", Value: "Connected to source server"})
 
 	// 3. Create migration record
-	planID, err := p.repo.CreateMigration(req.SourceServerID, req.TargetServerID, req.Categories)
+	planID, err := p.repo.CreateMigration(req.SourceServerID, req.TargetServerID, req.Categories, req.OperationID)
 	if err != nil {
 		sendError(onProgress, "plan", "failed to create migration record")
 		return nil, fmt.Errorf("create migration: %w", err)
@@ -226,7 +226,11 @@ func (p *Planner) Plan(ctx context.Context, req PlanRequest, onProgress StepCall
 		})
 	}
 
-	onProgress(WSMessage{Step: "plan", Status: "complete", Value: "Migration plan created"})
+	// Emit an in-progress marker (NOT a terminal "complete") — the migration id is
+	// not known to callers here, and a terminal frame without an id would let the
+	// FE believe the plan is done before it can navigate. The authoritative
+	// terminal "migration_id:N" frame is written by handlePlanWS after Plan returns.
+	onProgress(WSMessage{Step: "plan", Status: "progress", Value: "Plan collection complete — finalizing…"})
 
 	return plan, nil
 }

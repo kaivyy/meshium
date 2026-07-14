@@ -12,7 +12,7 @@ func TestIdempotencyKeyRoundTrips(t *testing.T) {
 	seedServers(t, repo)
 	ctx := context.Background()
 
-	migID, err := repo.CreateMigration(1, 2, []string{"docker"})
+	migID, err := repo.CreateMigration(1, 2, []string{"docker"}, "")
 	if err != nil {
 		t.Fatalf("seed migration: %v", err)
 	}
@@ -58,7 +58,7 @@ func TestAuditInheritsIdempotencyKey(t *testing.T) {
 	seedServers(t, repo)
 	ctx := context.Background()
 
-	migID, err := repo.CreateMigration(1, 2, []string{"docker"})
+	migID, err := repo.CreateMigration(1, 2, []string{"docker"}, "")
 	if err != nil {
 		t.Fatalf("seed migration: %v", err)
 	}

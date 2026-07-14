@@ -14,14 +14,15 @@ type mockRepo struct {
 	backups    []MigrationBackup
 }
 
-func (m *mockRepo) CreateMigration(sourceID, targetID int, categories []string) (int, error) {
+func (m *mockRepo) CreateMigration(sourceID, targetID int, categories []string, operationID string) (int, error) {
 	id := len(m.migrations) + 1
 	m.migrations = append(m.migrations, Migration{
 		ID:         id,
 		SourceID:   sourceID,
 		TargetID:   targetID,
-		Categories: categories,
-		Status:     StatusPlanned,
+		Categories:  categories,
+		Status:      StatusPlanned,
+		OperationID: operationID,
 	})
 	return id, nil
 }
@@ -33,6 +34,22 @@ func (m *mockRepo) GetMigration(id int) (*Migration, error) {
 		}
 	}
 	return nil, ErrMigrationNotFound
+}
+
+func (m *mockRepo) GetMigrationByOperationID(operationID string) (*Migration, error) {
+	// Mirror the SQL `ORDER BY id DESC LIMIT 1`: a retried op that created a
+	// fresh (failed→new) row must reconcile to the NEWEST, not the dead one.
+	var found *Migration
+	for i := range m.migrations {
+		if m.migrations[i].OperationID == operationID {
+			cp := m.migrations[i]
+			found = &cp
+		}
+	}
+	if found == nil {
+		return nil, ErrMigrationNotFound
+	}
+	return found, nil
 }
 
 func (m *mockRepo) ListMigrations() ([]Migration, error) {

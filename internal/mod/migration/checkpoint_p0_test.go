@@ -27,7 +27,7 @@ func TestStageCheckpointPersists(t *testing.T) {
 	seedServers(t, repo)
 	ctx := context.Background()
 
-	migID, err := repo.CreateMigration(1, 2, []string{"packages"})
+	migID, err := repo.CreateMigration(1, 2, []string{"packages"}, "")
 	if err != nil {
 		t.Fatalf("create migration: %v", err)
 	}
@@ -59,7 +59,7 @@ func TestStageCheckpointWriteFailureFailsClosed(t *testing.T) {
 	seedServers(t, repo)
 	ctx := context.Background()
 
-	migID, err := repo.CreateMigration(1, 2, []string{"packages"})
+	migID, err := repo.CreateMigration(1, 2, []string{"packages"}, "")
 	if err != nil {
 		t.Fatalf("create migration: %v", err)
 	}

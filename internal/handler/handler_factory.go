@@ -128,7 +128,7 @@ func (f *HandlerFactoryImpl) createMigrationHandler(job *jobengine.Job) (jobengi
 		for _, step := range plan.Steps {
 			categories = append(categories, string(step.Type))
 		}
-		migrationID, err := f.migrationRepo.CreateMigration(job.SourceID, job.TargetID, categories)
+		migrationID, err := f.migrationRepo.CreateMigration(job.SourceID, job.TargetID, categories, "")
 		if err != nil {
 			return nil, fmt.Errorf("create migration record: %w", err)
 		}

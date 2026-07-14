@@ -17,7 +17,7 @@ func TestBuildDiagnosticBundleAggregates(t *testing.T) {
 	seedServers(t, repo)
 
 	ctx := context.Background()
-	migrationID, err := repo.CreateMigration(1, 2, []string{"docker"})
+	migrationID, err := repo.CreateMigration(1, 2, []string{"docker"}, "")
 	if err != nil {
 		t.Fatalf("seed migration: %v", err)
 	}
@@ -64,7 +64,7 @@ func TestBuildDiagnosticBundleRedactsConfig(t *testing.T) {
 	seedServers(t, repo)
 
 	ctx := context.Background()
-	migrationID, err := repo.CreateMigration(1, 2, []string{"docker"})
+	migrationID, err := repo.CreateMigration(1, 2, []string{"docker"}, "")
 	if err != nil {
 		t.Fatalf("seed migration: %v", err)
 	}

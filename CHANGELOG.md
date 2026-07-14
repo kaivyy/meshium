@@ -14,6 +14,46 @@ single-tenant/fencing model, or any "zero downtime" claim. Immutable baselines
 are preserved. Full reports: `docs/phase2d-release-report.md`,
 `docs/known-limitations.md`.
 
+### Phase 4G.1 — Plan Wizard completion, recovery & truthfulness audit
+
+Fixes the New Migration → Step 4 "Review & Create Plan" flow that could hang on
+a loading spinner after the backend had already created the plan, lose operation
+state on refresh, silently return to Step 1, or duplicate plans on retry/reconnect.
+Backend stays authoritative for plan-creation result, idempotency, operation state,
+authorization, and legal transitions. Full report:
+`docs/superpowers/specs/phase-4g1-plan-wizard-final-report.md`.
+
+#### Added (4G.1)
+- **Truthful plan state machine** (`web/src/routes/migrations/new/+page.svelte`):
+  `idle | connecting | collecting | checking | completed | failed | unknown`.
+  The wizard never hangs on a bare spinner — every in-flight state has an honest
+  label, and ambiguous outcomes render as UNKNOWN (a banner + link to Migration
+  History), never fake success or an endless spinner.
+- **Operation idempotency key (`operationId`)**: client-generated UUID persisted
+  to the URL (`?op=`) + `sessionStorage` *before* the first submit, passed to the
+  backend, and persisted on the `migrations` row. Enables refresh/reconnect to
+  reconcile to the same migration instead of creating a duplicate.
+- **REST reconcile contract** `GET /api/migrations?operationId=` — the backend is
+  authoritative for completion; the FE reconciles rather than trusting a single
+  WS frame (the `migration_id:N` terminal frame is now required to mark done).
+- **Pure reconcile decision** `decideReconcile()` (`web/src/lib/api/migrations.ts`),
+  unit-tested: maps a found recoverable migration → `completed`, a recorded
+  failure → `failed`, missing/ambiguous → `unknown`.
+
+#### Changed (4G.1)
+- `handlePlanWS` dedups a resubmitted `operationId` to the *same* migration for
+  in-flight/recoverable statuses (`planned`/`running`/`interrupted`); a recorded
+  `failed` is deliberately NOT deduped so a retry creates a fresh plan.
+- Planner's id-less "Migration plan created" progress frame is demoted to
+  `progress` (non-terminal); only an id-bearing frame is terminal.
+- `txtar`/DB migration adds `operation_id TEXT` column + index on `migrations`.
+
+#### Tests (4G.1)
+- `web/src/lib/api/reconcile.test.ts` — 7 truthfulness cases (completed/failed/unknown,
+  lost terminal event, reconcile error, unrecognized status).
+- `internal/mod/migration/plan_op_idempotency_test.go`, `plan_reconcile_test.go` —
+  op persistence, reconcile-by-op, dedup-excludes-failed, dedup-returns-existing.
+
 ### Phase 2D — operability, auditability, observability, release readiness
 
 Makes the Phase 1 / 2A / 2B / 2C results **operable, auditable, observable,

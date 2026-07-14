@@ -22,7 +22,7 @@ func TestReleaseGateNoSecretInAnySink(t *testing.T) {
 	seedServers(t, repo)
 
 	ctx := context.Background()
-	migrationID, err := repo.CreateMigration(1, 2, []string{"docker"})
+	migrationID, err := repo.CreateMigration(1, 2, []string{"docker"}, "")
 	if err != nil {
 		t.Fatalf("seed migration: %v", err)
 	}

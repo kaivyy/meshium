@@ -323,7 +323,7 @@ func createTestMigration(t *testing.T, repo JobRepository) int {
 	}
 
 	categories := []string{"packages", "configs"}
-	id, err := repo.CreateMigration(1, 2, categories)
+	id, err := repo.CreateMigration(1, 2, categories, "")
 	if err != nil {
 		t.Fatalf("failed to create migration: %v", err)
 	}

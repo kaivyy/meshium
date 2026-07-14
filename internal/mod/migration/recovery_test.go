@@ -68,7 +68,7 @@ func newInterruptedMigrationTestSetup(t *testing.T, categories []string, rollbac
 
 	manager := NewRecoveryManager(repo, serverRepo, pool, authSvc, hosts, registry)
 
-	migrationID, err := repo.CreateMigration(1, 2, categories)
+	migrationID, err := repo.CreateMigration(1, 2, categories, "")
 	if err != nil {
 		t.Fatalf("failed to create migration: %v", err)
 	}

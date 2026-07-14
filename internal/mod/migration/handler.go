@@ -135,6 +135,17 @@ func (h *Handler) handleMigrationByID(w http.ResponseWriter, r *http.Request) {
 // --- REST handlers ---
 
 func (h *Handler) handleList(w http.ResponseWriter, r *http.Request) {
+	// Reconciliation for an in-flight/completed create-plan: a client that lost
+	// the terminal WS frame re-asks by operationId. Backend is authoritative.
+	if op := r.URL.Query().Get("operationId"); op != "" {
+		m, err := h.repo.GetMigrationByOperationID(op)
+		if err != nil {
+			shared.WriteJSON(w, http.StatusOK, []interface{}{})
+			return
+		}
+		shared.WriteJSON(w, http.StatusOK, []Migration{*m})
+		return
+	}
 	migrations, err := h.repo.ListMigrations()
 	if err != nil {
 		shared.WriteError(w, http.StatusInternalServerError, "failed to list migrations", "INTERNAL")
@@ -266,6 +277,32 @@ func (h *Handler) handlePlanWS(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Idempotency: if a client resubmits the same operationId (refresh/retry/
+	// reconnect), return the existing recoverable migration instead of creating a
+	// second one. Only recoverable statuses are deduped; a terminal failure is
+	// left to the caller (the FE reuses the same op for a safe retry).
+	if req.OperationID != "" {
+		if existing, derr := h.repo.GetMigrationByOperationID(req.OperationID); derr == nil {
+			// Return the existing in-flight/valid plan for refresh/reconnect/retry
+			// idempotency — never insert a duplicate. StatusFailed is deliberately
+			// excluded: a retry after failure must create a FRESH plan, so it is
+			// allowed to fall through to CreateMigration again (the op string is
+			// not unique-constrained; reconcile reads ORDER BY id DESC so it sees
+			// the newest row). GetMigrationByOperationID on a refresh of a failed
+			// op still returns it, so the FE shows the failed banner (rule 2: no
+			// discarded finished state).
+			switch existing.Status {
+			case StatusPlanned, StatusRunning, StatusInterrupted:
+				conn.WriteJSON(WSMessage{
+					Step:   "plan",
+					Status: "complete",
+					Value:  fmt.Sprintf("migration_id:%d", existing.ID),
+				})
+				return
+			}
+		}
+	}
+
 	plan, err := h.runner.Plan(ctx, req, func(msg WSMessage) {
 		if writeErr := conn.WriteJSON(msg); writeErr != nil {
 			log.Printf("websocket write failed: %v", writeErr)
@@ -282,7 +319,16 @@ func (h *Handler) handlePlanWS(w http.ResponseWriter, r *http.Request) {
 	if plan != nil {
 		migrationID = plan.ID
 	}
-	conn.WriteJSON(WSMessage{Step: "plan", Status: "complete", Value: fmt.Sprintf("migration_id:%d", migrationID)})
+	// Terminal frame MUST carry the migration id (and the operation echo) so the
+	// FE can reconcile without regex fragility. The migration is already
+	// persisted (CreateMigration runs early in Plan), so this is the authoritative
+	// completion signal — but the FE treats completion as REST-confirmed, never
+	// trusting the frame alone.
+	conn.WriteJSON(WSMessage{
+		Step:   "plan",
+		Status: "complete",
+		Value:  fmt.Sprintf("migration_id:%d", migrationID),
+	})
 }
 
 func (h *Handler) handleMigrateWS(w http.ResponseWriter, r *http.Request) {

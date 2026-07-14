@@ -38,7 +38,7 @@ func TestCommitRejectedWhileManualRequired(t *testing.T) {
 	prepo := p.repo
 	ctx := context.Background()
 
-	migID, err := repo.CreateMigration(1, 2, []string{"packages"})
+	migID, err := repo.CreateMigration(1, 2, []string{"packages"}, "")
 	if err != nil {
 		t.Fatalf("create migration: %v", err)
 	}
@@ -71,7 +71,7 @@ func TestCommitAllowedWhenConfirmed(t *testing.T) {
 	prepo := p.repo
 	ctx := context.Background()
 
-	migID, err := repo.CreateMigration(1, 2, []string{"packages"})
+	migID, err := repo.CreateMigration(1, 2, []string{"packages"}, "")
 	if err != nil {
 		t.Fatalf("create migration: %v", err)
 	}
@@ -128,7 +128,7 @@ func TestAwaitingCutoverRoundTripsThroughStateColumn(t *testing.T) {
 	repo := newTestRepo(t)
 	seedServers(t, repo)
 	ctx := context.Background()
-	migID, err := repo.CreateMigration(1, 2, []string{"packages"})
+	migID, err := repo.CreateMigration(1, 2, []string{"packages"}, "")
 	if err != nil {
 		t.Fatalf("create migration: %v", err)
 	}

@@ -18,7 +18,7 @@ func newCutoverHarness(t *testing.T) (*cutoverMachine, *FencingAuthority, *fakeC
 	sqlite := repo.(*sqliteRepo)
 	seedServers(t, repo)
 	ctx := context.Background()
-	migID, err := repo.CreateMigration(1, 2, []string{"postgres"})
+	migID, err := repo.CreateMigration(1, 2, []string{"postgres"}, "")
 	if err != nil {
 		t.Fatalf("create migration: %v", err)
 	}

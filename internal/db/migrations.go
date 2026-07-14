@@ -154,7 +154,8 @@ func Migrate(db *sql.DB) error {
 			plan         TEXT,
 			error        TEXT,
 			created_at   DATETIME DEFAULT CURRENT_TIMESTAMP,
-			completed_at DATETIME
+			completed_at DATETIME,
+			operation_id TEXT DEFAULT ''
 		);`,
 		`CREATE TABLE IF NOT EXISTS migration_steps (
 			id           INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -524,6 +525,7 @@ func Migrate(db *sql.DB) error {
 		`ALTER TABLE servers ADD COLUMN fingerprint TEXT DEFAULT ''`,
 		`ALTER TABLE servers ADD COLUMN key_type TEXT DEFAULT 'rsa'`,
 		`ALTER TABLE migrations ADD COLUMN state TEXT DEFAULT ''`,
+		`ALTER TABLE migrations ADD COLUMN operation_id TEXT DEFAULT ''`,
 		// Add columns for zero-downtime migration metadata.
 		`ALTER TABLE migrations ADD COLUMN config TEXT DEFAULT '{}'`,
 		`ALTER TABLE migrations ADD COLUMN risk_score REAL DEFAULT 0`,
@@ -543,6 +545,7 @@ func Migrate(db *sql.DB) error {
 		`CREATE INDEX IF NOT EXISTS idx_migrations_status_created ON migrations(status, created_at)`,
 		`CREATE INDEX IF NOT EXISTS idx_migrations_source ON migrations(source_id)`,
 		`CREATE INDEX IF NOT EXISTS idx_migrations_target ON migrations(target_id)`,
+		`CREATE INDEX IF NOT EXISTS idx_migrations_operation_id ON migrations(operation_id)`,
 		`CREATE INDEX IF NOT EXISTS idx_migration_steps_migration ON migration_steps(migration_id, status)`,
 		`CREATE INDEX IF NOT EXISTS idx_events_migration_seq ON migration_events(migration_id, sequence)`,
 		`CREATE INDEX IF NOT EXISTS idx_migration_stages_migration ON migration_stages(migration_id, stage_index)`,

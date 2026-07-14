@@ -105,6 +105,7 @@ type Migration struct {
 	CreatedAt    string         `json:"createdAt"`
 	CompletedAt  string         `json:"completedAt,omitempty"`
 	RolledBackAt string         `json:"rolledBackAt,omitempty"`
+	OperationID  string         `json:"operationId,omitempty"`
 }
 
 // MigrationStepRecord is the DB model for a migration step.
@@ -141,6 +142,10 @@ type PlanRequest struct {
 	Categories      []string        `json:"categories"`
 	ConfigPaths     []string        `json:"configPaths,omitempty"`
 	DatabaseConfig  *DatabaseConfig `json:"databaseConfig,omitempty"`
+	// OperationID is a client-generated idempotency key for the whole create-plan
+	// attempt. The backend dedups against an existing recoverable migration with
+	// the same key, so a refresh/retry/reconnect never inserts a second plan.
+	OperationID string `json:"operationId,omitempty"`
 }
 
 type MigrationResponse struct {
@@ -153,6 +158,7 @@ type MigrationResponse struct {
 	Error       string          `json:"error,omitempty"`
 	CreatedAt   string          `json:"createdAt"`
 	CompletedAt string          `json:"completedAt,omitempty"`
+	OperationID string          `json:"operationId,omitempty"`
 	Steps       []MigrationStepRecord `json:"steps,omitempty"`
 }
 
