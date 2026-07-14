@@ -13,8 +13,6 @@ import (
 	"sync"
 	"testing"
 	"time"
-
-	"meshium/internal/mod/migration"
 )
 
 // --- Mock SSH Executer ---
@@ -954,6 +952,6 @@ func TestComputeChecksumRemote(t *testing.T) {
 // --- Helper to create migration.StepContext ---
 
 // migrationStepContext creates a migration.StepContext for testing.
-func migrationStepContext(ctx context.Context) migration.StepContext {
-	return migration.StepContext{Ctx: ctx}
+func migrationStepContext(ctx context.Context) StepContext {
+	return StepContext{Ctx: ctx}
 }

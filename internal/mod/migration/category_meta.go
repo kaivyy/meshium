@@ -42,16 +42,36 @@ const (
 // legitimately claim GIVEN the current capability gates. It is intentionally
 // conservative: the global zero-downtime gate must be satisfied, otherwise the
 // category caps at minimal (or offline if it has no replication path at all).
+//
+// Phase 5E (G): database/docker default to offline_copy (honest snapshot
+// copy / volume move), NOT minimal_downtime — minimal implies a cutover stage
+// that is not the default execution path. zero_downtime is unreachable while
+// zeroDowntimeCapable is false.
 func DowntimeClassFor(cat string, zeroCapable bool) DowntimeClass {
 	if cat == "database" || cat == "docker" {
 		if zeroCapable {
 			return DowntimeZero
 		}
-		return DowntimeMinimal
+		return DowntimeOfflineCopy
 	}
 	// packages / configs / services / users are offline copies (no replication
 	// path exists for them), regardless of the global gate.
 	return DowntimeOfflineCopy
+}
+
+// DatabaseResumable reports whether a specific engine's default migration path
+// can resume after interruption (Phase 5E, D5). File-path engines (PostgreSQL,
+// Redis) resume the upload leg from a partial; streaming engines (MySQL,
+// MongoDB) currently RESTART the transfer after interruption — they must NOT be
+// shown a generic "resumable" badge.
+func DatabaseResumable(engine string) bool {
+	switch engine {
+	case "postgres", "redis":
+		return true
+	case "mysql", "mongodb":
+		return false
+	}
+	return false
 }
 
 // CategoryMeta is the per-category contract persisted into the plan step so the

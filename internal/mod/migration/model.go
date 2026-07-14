@@ -43,12 +43,63 @@ type SSHExecuter = transport.SSHExecuter
 type StepCallback func(msg WSMessage)
 
 // WSMessage is the WebSocket message format for migration progress.
+//
+// The structured fields below (BytesCompleted, BytesTotal, ResumeState, …) are
+// optional and additive: older consumers that only read Step/Status/Value keep
+// working. They exist so the FE can render honest, non-collapsed transfer state
+// (Phase 5E, D1/D2) — distinguishing a fresh transfer, a resuming upload, a
+// restarting download, a refused resume, and a verified-complete — without
+// parsing the free-text Value.
 type WSMessage struct {
 	Step   string `json:"step"`
 	Status string `json:"status"`
 	Value  string `json:"value,omitempty"`
 	Error  string `json:"error,omitempty"`
+
+	// MigrationID ties progress to a specific migration (for multi-pipeline UIs).
+	MigrationID int `json:"migrationId,omitempty"`
+	// TransferID identifies one resumable transfer (db:<id>:<db>, config path, …).
+	TransferID string `json:"transferId,omitempty"`
+	// Direction distinguishes source→local download vs local→target upload legs.
+	Direction string `json:"direction,omitempty"` // "download" | "upload"
+	// TransferMethod is the real mechanism in use.
+	TransferMethod string `json:"transferMethod,omitempty"` // "scp" | "rsync" | "stream" | "sftp"
+	// BytesCompleted / BytesTotal are the live progress for this leg.
+	BytesCompleted int64 `json:"bytesCompleted,omitempty"`
+	BytesTotal     int64 `json:"bytesTotal,omitempty"`
+	// ThroughputBPS / ETASeconds are best-effort, emitted only when calculable.
+	ThroughputBPS int64 `json:"throughputBps,omitempty"`
+	ETASeconds    int64 `json:"etaSeconds,omitempty"`
+	// CheckpointStatus records whether a persisted checkpoint drove this leg.
+	CheckpointStatus string `json:"checkpointStatus,omitempty"` // "loaded" | "none" | "deleted"
+	// ResumeState is the explicit, non-collapsed resume classification (D2).
+	ResumeState string `json:"resumeState,omitempty"`
+	// ResumeReason explains a refused/non-resumable decision.
+	ResumeReason string `json:"resumeReason,omitempty"`
+	// SourceFingerprint is the size:mtime (or hash) used to detect source drift.
+	SourceFingerprint string `json:"sourceFingerprint,omitempty"`
+	// Attempt is the 1-based retry attempt for this transfer.
+	Attempt int `json:"attempt,omitempty"`
+	// IsResumable reports whether THIS engine/path supports resume.
+	IsResumable bool `json:"isResumable,omitempty"`
+	// DowntimeClass is the honest downtime model for this category/engine.
+	DowntimeClass string `json:"downtimeClass,omitempty"`
 }
+
+// ResumeState values (Phase 5E, D2). These are explicit so the FE never has to
+// collapse every transfer into a generic "running" state.
+const (
+	ResumeFreshTransfer            = "fresh_transfer"
+	ResumeResumingUpload           = "resuming_upload"
+	ResumeRestartingDownload       = "restarting_download"
+	ResumeRefusedSourceChanged     = "resume_refused_source_changed"
+	ResumeRefusedPartialInvalid    = "resume_refused_partial_invalid"
+	ResumeNotSupported             = "resume_not_supported"
+	ResumeManualIntervention       = "manual_intervention_required"
+	ResumeVerificationInProgress    = "verification_in_progress"
+	ResumeVerifiedComplete          = "verified_complete"
+)
+
 
 // --- Data types ---
 

@@ -20,6 +20,11 @@ type DatabaseCollectData struct {
 	MigrationMode string          `json:"migrationMode,omitempty"` // snapshot_copy | live_replication
 	Databases    []DBCatalogEntry `json:"databases"`
 	DetectedAt   string           `json:"detectedAt,omitempty"`
+	// EstimatedBytes is the sum of selected DB sizes (bytes), used by the wizard
+	// to show "Estimated size: N GB" honestly (Phase 5E, J). 0 = unknown.
+	EstimatedBytes int64 `json:"estimatedBytes,omitempty"`
+	// ResumeNote is the honest per-engine resume disclosure (Phase 5E, D3/D5).
+	ResumeNote string `json:"resumeNote,omitempty"`
 	// AllUserDBs is true when the user left DatabaseName empty (meaning "every
 	// user database"). The FE shows the enumerated list before execute.
 	AllUserDBs bool `json:"allUserDbs,omitempty"`
@@ -106,6 +111,22 @@ func (c *DatabaseCollector) Collect(ctx context.Context, ssh SSHExecuter) (Categ
 		Databases:    dbs,
 		DetectedAt:   time.Now().UTC().Format(time.RFC3339),
 		AllUserDBs:   allUser,
+	}
+	// EstimatedBytes (Phase 5E, J): total dump size across selected databases, so
+	// the wizard can show "Estimated size: N GB" instead of a fake 0. SizeMb is
+	// the engine-reported estimate; convert to bytes honestly (0 if unknown).
+	var totalMB int64
+	for _, d := range dbs {
+		totalMB += d.SizeMB
+	}
+	data.EstimatedBytes = totalMB * 1024 * 1024
+	// D3 honesty: file-path engines download the dump to an ephemeral local temp
+	// that is NOT persisted, so a killed transfer re-downloads the source dump.
+	// Surfaced to the operator so the resume claim is not overstated.
+	if migrator.Streaming() {
+		data.ResumeNote = "Streaming transfer: restarts from the beginning after an interruption (no resumable artifact yet)."
+	} else {
+		data.ResumeNote = "Target upload can resume after a network interruption when the source artifact is unchanged. If the local/source dump is unavailable, the source dump/download stage runs again."
 	}
 	raw, _ := json.Marshal(data)
 	return CategoryData{Type: "database", Data: raw}, nil
@@ -285,6 +306,19 @@ func (a *DatabaseApplier) applyStream(ctx context.Context, ssh SSHExecuter, m Da
 	if err != nil {
 		return fmt.Errorf("restore (exit %d): %s", exit, stderr)
 	}
+	if onProgress != nil {
+		onProgress(WSMessage{
+			Step: "database:apply", Status: "progress",
+			Value:           fmt.Sprintf("Streamed %s → target (restart-on-interrupt, not resumable)", db),
+			MigrationID:     a.migrationID,
+			TransferID:      fmt.Sprintf("db:%d:%s", a.migrationID, sanitizeName(db)),
+			TransferMethod:  "stream",
+			ResumeState:     ResumeNotSupported,
+			IsResumable:     false,
+			ResumeReason:    "streaming engines restart the transfer after interruption; no resumable artifact path yet",
+			DowntimeClass:   string(DowntimeClassFor("database", false)),
+		})
+	}
 	return nil
 }
 
@@ -296,6 +330,10 @@ func (a *DatabaseApplier) applyFile(ctx context.Context, ssh SSHExecuter, m Data
 		return fmt.Errorf("file transfer requires source SSH")
 	}
 	safe := sanitizeName(db)
+	// ExecMode (host/container/compose) selects WHERE the engine runs; every
+	// engine command is wrapped via execPrefix so container/compose exec actually
+	// runs in-container (Phase 5E, D5/H10). The creds already carry ExecMode.
+	creds.ExecMode = resolveExecMode(creds.ExecMode)
 	// Deterministic dump paths keyed on (migrationID, db) — NOT time-based. A
 	// killed multi-GB transfer must leave a findable partial on the TARGET so a
 	// later attempt resumes from it (transfer.SCPStrategy resumes via --partial /
@@ -305,12 +343,23 @@ func (a *DatabaseApplier) applyFile(ctx context.Context, ssh SSHExecuter, m Data
 	tgtDumpPath := fmt.Sprintf("/tmp/meshium_dump_%d_%s", a.migrationID, safe)
 	transferID := fmt.Sprintf("db:%d:%s", a.migrationID, safe)
 
+	emit := func(msg WSMessage) {
+		if onProgress == nil {
+			return
+		}
+		msg.MigrationID = a.migrationID
+		msg.TransferID = transferID
+		msg.TransferMethod = "scp"
+		msg.IsResumable = true
+		msg.Direction = "upload"
+		onProgress(msg)
+	}
+
 	// 1. Dump on source (cap-free via execLongOrContext). Re-dump ONLY when the
 	//    dump file is absent — reusing a surviving dump keeps the snapshot stable
 	//    and lets the upload leg resume instead of re-dumping a multi-GB DB.
-	if onProgress != nil {
-		onProgress(WSMessage{Step: "database:apply", Status: "progress", Value: fmt.Sprintf("Dumping %s on source", db)})
-	}
+	emit(WSMessage{Step: "database:apply", Status: "progress",
+		Value: fmt.Sprintf("Dumping %s on source (%s)", db, creds.ExecMode), ResumeState: ResumeFreshTransfer})
 	srcTarget := transfer.TransferTarget{Path: srcDumpPath, SSHClient: a.sourceSSH}
 	srcExists, _ := transfer.FileExists(ctx, srcTarget)
 	if !srcExists {
@@ -322,9 +371,8 @@ func (a *DatabaseApplier) applyFile(ctx context.Context, ssh SSHExecuter, m Data
 
 	// 2. Download source dump to a local temp. meshium's local temp is ephemeral
 	//    (cleared on function return / process restart), so this leg is never
-	//    resumable — it is re-downloaded on retry. The download leg is LAN-fast;
-	//    the slow WAN leg (upload to target) is what resumes. ponytail: persist
-	//    the local dump to also resume the download leg (costs 2x dump disk).
+	//    resumable — it is re-downloaded on retry (Phase 5E, D3). The download
+	//    leg is LAN-fast; the slow WAN leg (upload to target) is what resumes.
 	localFile, err := os.CreateTemp("", "meshium-dbdump-*")
 	if err != nil {
 		return fmt.Errorf("create temp: %w", err)
@@ -335,9 +383,8 @@ func (a *DatabaseApplier) applyFile(ctx context.Context, ssh SSHExecuter, m Data
 		return err
 	}
 	localTarget := transfer.TransferTarget{Path: localPath, IsLocal: true}
-	if onProgress != nil {
-		onProgress(WSMessage{Step: "database:apply", Status: "progress", Value: fmt.Sprintf("Downloading %s dump", db)})
-	}
+	emit(WSMessage{Step: "database:apply", Status: "progress",
+		Value: fmt.Sprintf("Downloading %s dump", db), Direction: "download", ResumeState: ResumeRestartingDownload})
 	dlResult, err := transfer.NewSCPStrategy().Transfer(ctx, srcTarget, localTarget, transfer.TransferOptions{
 		Resume:          false,
 		ProgressCallback: dbTransferProgress(onProgress, db, "download"),
@@ -353,17 +400,27 @@ func (a *DatabaseApplier) applyFile(ctx context.Context, ssh SSHExecuter, m Data
 	//    the source snapshot moved or the partial target is inconsistent — we never
 	//    blind-resume onto unverified state.
 	tgtTarget := transfer.TransferTarget{Path: tgtDumpPath, SSHClient: ssh}
+	resumeState := ResumeFreshTransfer
 	if a.checkpointStore != nil {
 		if verdict, fail := a.reconcileOrFail(ctx, transferID, safe, srcTarget, tgtTarget); fail {
+			emit(WSMessage{Step: "database:apply", Status: "error",
+				Value:    fmt.Sprintf("Resume of %s refused: source or partial changed", db),
+				ResumeState: ResumeRefusedSourceChanged,
+				ResumeReason: "source fingerprint mismatch or invalid partial target",
+				Direction:    "upload"})
 			return fmt.Errorf("transfer reconcile for %s refused resume (source/partial changed): %w", db, transfer.ErrTransferReconcileFailed)
 		} else if verdict == transfer.VerdictFreshStart {
-			// No usable partial — fall through to a clean full upload (Resume=false).
-			tgtTarget = transfer.TransferTarget{Path: tgtDumpPath, SSHClient: ssh}
+			// No usable partial — clean full upload (Resume=false).
+			resumeState = ResumeFreshTransfer
+		} else {
+			resumeState = ResumeResumingUpload
 		}
+	} else {
+		resumeState = ResumeFreshTransfer
 	}
-	if onProgress != nil {
-		onProgress(WSMessage{Step: "database:apply", Status: "progress", Value: fmt.Sprintf("Uploading %s dump to target", db)})
-	}
+	emit(WSMessage{Step: "database:apply", Status: "progress",
+		Value: fmt.Sprintf("Uploading %s dump to target", db), ResumeState: resumeState,
+		CheckpointStatus: cpStatus(a.checkpointStore != nil)})
 	resume := a.checkpointStore != nil
 	ulResult, err := transfer.NewSCPStrategy().Transfer(ctx, localTarget, tgtTarget, transfer.TransferOptions{
 		Resume:          resume,
@@ -378,9 +435,8 @@ func (a *DatabaseApplier) applyFile(ctx context.Context, ssh SSHExecuter, m Data
 	defer func() { _, _, _, _ = ssh.ExecContext(ctx, "rm -f "+tgtDumpPath) }()
 
 	// 4. Restore (cap-free, idempotent via --clean/--drop).
-	if onProgress != nil {
-		onProgress(WSMessage{Step: "database:apply", Status: "progress", Value: fmt.Sprintf("Restoring %s on target", db)})
-	}
+	emit(WSMessage{Step: "database:apply", Status: "progress",
+		Value: fmt.Sprintf("Restoring %s on target", db), ResumeState: ResumeVerificationInProgress})
 	if _, stderr, exit, err := execLongOrContext(ctx, ssh, m.RestoreCommand(creds, db, tgtDumpPath)); err != nil || exit != 0 {
 		return fmt.Errorf("restore (exit %d): %s", exit, stderr)
 	}
@@ -388,8 +444,22 @@ func (a *DatabaseApplier) applyFile(ctx context.Context, ssh SSHExecuter, m Data
 	// partial upload is outstanding.
 	if a.checkpointStore != nil {
 		_ = a.checkpointStore.DeleteCheckpoints(transferID)
+		emit(WSMessage{Step: "database:apply", Status: "progress",
+			Value: fmt.Sprintf("Restored %s (checkpoint cleared)", db),
+			ResumeState: ResumeVerifiedComplete, CheckpointStatus: "deleted"})
+	} else {
+		emit(WSMessage{Step: "database:apply", Status: "progress",
+			Value: fmt.Sprintf("Restored %s", db), ResumeState: ResumeVerifiedComplete})
 	}
 	return nil
+}
+
+// cpStatus reports whether a checkpoint was available to drive a leg.
+func cpStatus(hasStore bool) string {
+	if hasStore {
+		return "loaded"
+	}
+	return "none"
 }
 
 // reconcileOrFail consults the persisted checkpoint for a resume and returns
