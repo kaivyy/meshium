@@ -1588,6 +1588,33 @@ the visual/interaction layer changed. No logic edits.
   never fabricated. Stale copy claiming the backend "does not track per-item
   execution/verification state yet" corrected to reflect Phase 6C-BE.
 
+### Phase 6C-FE — Configs Collect Bug Fix (plan hang) + Pipeline Stale Guard
+
+Two backend/frontend reliability fixes closing hangs and false-disabled state
+found while driving a live plan end-to-end.
+
+- **Configs collection no longer hangs the plan** — `ConfigsCollector.Collect`
+  ran `find /etc | tar | base64` unboundedly; the ~100MB+ archive overflowed the
+  1 MiB `ExecContext` stdout cap and fell back to a per-file SFTP loop with no
+  timeout, which could hang indefinitely on a large `/etc`. Now bounded:
+  `-maxdepth 4`, prune the known huge subtrees (`/etc/ssl`, `/etc/fonts`,
+  `/etc/terminfo`, `/etc/share`, …) via `buildPruneArgs`, per-file size cap
+  aligned to `maxConfigFileSize` (1 MiB), so the archive stays under the capture
+  cap and never overflows. The `collectSlow` fallback and `Backup` are now
+  themselves bounded: shallow find, 2000-file cap (`maxConfigFiles`), per-file
+  1 MiB size guard, and a 30s per-download timeout via a racing goroutine — so no
+  code path can block a plan. `parseTarArchive` re-checks the size as a final
+  guard. OS-critical exclusions (`configExclusions`) preserved; `ConfigsApplier`
+  re-anchors tar-stripped relative paths and `mkdir -p` missing parents before
+  upload. Test mock updated to the new bounded find command.
+- **Pipeline "Next" no longer falsely disabled** — `wsPipelineConnect` flagged a
+  healthy-but-idle WebSocket as `stale` after 15s, but the server only pongs a
+  client ping every 30s (heartbeat), so a planned migration (server streams
+  history once, then waits) falsely disabled Next. `staleTimeout` raised to 45s
+  (must exceed the 30s heartbeat + margin); on each heartbeat the socket now
+  disarms/re-arms the stale timer, so a live socket that can still send a ping is
+  never reported stale purely for lacking a data frame.
+
 ---
 
 ## [1.4.2] — 2026-07-03

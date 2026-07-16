@@ -8,8 +8,9 @@ import (
 
 func TestConfigsCollector(t *testing.T) {
 	ssh := newMockSSH()
-	// Path is shell-quoted in the find command
-	ssh.execOutput["find '/etc/nginx' -type f 2>/dev/null"] = "/etc/nginx/nginx.conf\n/etc/nginx/conf.d/default.conf\n"
+	// The primary tar|base64 command is not matched by the mock, so Collect
+	// falls back to collectSlow, whose bounded find is what we stub here.
+	ssh.execOutput["find '/etc/nginx' -maxdepth 4 -type f 2>/dev/null"] = "/etc/nginx/nginx.conf\n/etc/nginx/conf.d/default.conf\n"
 	ssh.downloadData["/etc/nginx/nginx.conf"] = []byte("worker_processes auto;\n")
 	ssh.downloadData["/etc/nginx/conf.d/default.conf"] = []byte("server { listen 80; }\n")
 

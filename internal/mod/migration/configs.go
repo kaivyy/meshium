@@ -10,6 +10,7 @@ import (
 	"io"
 	"path/filepath"
 	"strings"
+	"time"
 
 	"meshium/internal/shared"
 )
@@ -99,19 +100,26 @@ func (c *ConfigsCollector) Collect(ctx context.Context, ssh SSHExecuter) (Catego
 			cleanPath = "/etc"
 		}
 
-		// Build a find command that excludes OS-critical files and oversized
-		// files, then tar the result. The -size cap keeps logs/caches/state DBs
-		// out of the archive so the plan step doesn't pull and store ~100MB+
-		// per /etc scan. parseTarArchive re-checks the size as a guard.
+		// Build a bounded find: stay shallow (-maxdepth 4, real config lives
+		// near the top of /etc), prune the known huge subtrees (cert stores,
+		// font/terminfo databases) that contain tens of thousands of files and
+		// would otherwise produce a ~100MB+ archive, and cap per-file size to
+		// maxConfigFileSize so a single large file can't blow the capture. The
+		// archive stays well under the 1 MiB ExecContext output cap, so this
+		// path never overflows into the slow per-file fallback. parseTarArchive
+		// re-checks the size as a final guard.
 		excludeArgs := buildExcludeArgs()
+		pruneArgs := buildPruneArgs()
+		sizeCap := fmt.Sprintf("-size -%dM", maxConfigFileSize>>20)
 		cmd := fmt.Sprintf(
-			`find %s -type f -size -2M %s 2>/dev/null | tar -cf - -T - 2>/dev/null | base64`,
-			shared.ShellQuote(cleanPath), excludeArgs,
+			`find %s -maxdepth 4 %s %s %s 2>/dev/null | tar -cf - -T - 2>/dev/null | base64`,
+			shared.ShellQuote(cleanPath), pruneArgs, sizeCap, excludeArgs,
 		)
 
 		stdout, _, _, err := ssh.ExecContext(ctx, cmd)
 		if err != nil {
-			// Fallback: try individual file download (old method)
+			// Fallback: try individual file download (old method). collectSlow
+			// is itself bounded, so even this path can never hang.
 			c.collectSlow(ctx, ssh, cleanPath, &data)
 			continue
 		}
@@ -144,20 +152,49 @@ func (c *ConfigsCollector) Collect(ctx context.Context, ssh SSHExecuter) (Catego
 	return CategoryData{Type: "configs", Data: raw}, nil
 }
 
+// maxConfigFiles caps the number of files the slow fallback will download.
+// A pathological /etc (hundreds of thousands of files) must never turn this
+// fallback into an unbounded SFTP loop — once we hit the cap we stop, leaving
+// the plan able to proceed with what it has rather than hanging.
+const maxConfigFiles = 2000
+
 // collectSlow is the fallback method that downloads files one-by-one via SFTP.
+// It is itself bounded: a shallow find, a per-file size guard, a hard file
+// count cap, and a per-download context timeout — so it can never hang even
+// if the primary tar pipeline failed on a very large /etc.
 func (c *ConfigsCollector) collectSlow(ctx context.Context, ssh SSHExecuter, path string, data *ConfigsData) {
-	stdout, _, _, err := ssh.ExecContext(ctx, fmt.Sprintf("find %s -type f 2>/dev/null", shared.ShellQuote(path)))
+	stdout, _, _, err := ssh.ExecContext(ctx, fmt.Sprintf("find %s -maxdepth 4 -type f 2>/dev/null", shared.ShellQuote(path)))
 	if err != nil {
 		return
 	}
 
 	for _, file := range strings.Split(strings.TrimSpace(stdout), "\n") {
+		if len(data.Files) >= maxConfigFiles {
+			break
+		}
 		file = strings.TrimSpace(file)
 		if file == "" || isExcluded(file) {
 			continue
 		}
+		// Per-download timeout: a single stuck SFTP transfer must not block the
+		// whole plan. If the context fires we bail out of the loop.
+		dlCtx, cancel := context.WithTimeout(ctx, 30*time.Second)
 		buf := new(bytes.Buffer)
-		if err := ssh.Download(file, buf); err != nil {
+		// Download has no context param on the interface, so honor the timeout
+		// by racing it against the parent context via a short goroutine.
+		done := make(chan error, 1)
+		go func() { done <- ssh.Download(file, buf) }()
+		select {
+		case <-dlCtx.Done():
+			cancel()
+			return
+		case derr := <-done:
+			cancel()
+			if derr != nil {
+				continue
+			}
+		}
+		if buf.Len() > maxConfigFileSize {
 			continue
 		}
 		data.Files[file] = buf.Bytes()
@@ -173,6 +210,29 @@ func buildExcludeArgs() string {
 		} else {
 			args = append(args, fmt.Sprintf("-not -name '%s'", filepath.Base(excl)))
 		}
+	}
+	return strings.Join(args, " ")
+}
+
+// hugeConfigDirs are subtrees of /etc that contain tens of thousands of files
+// (certificate stores, font/terminfo databases) which are not real config to
+// migrate and would otherwise dominate the archive. Prune them so the find
+// stays shallow and fast.
+var hugeConfigDirs = []string{
+	"/etc/ssl",
+	"/etc/ssl/certs",
+	"/etc/fonts",
+	"/etc/terminfo",
+	"/etc/share",
+}
+
+// buildPruneArgs builds find -prune arguments for the huge subtrees. Pruning
+// (rather than -not -path) stops find from even descending into them, which is
+// what keeps a large /etc scan from enumerating hundreds of thousands of files.
+func buildPruneArgs() string {
+	var args []string
+	for _, d := range hugeConfigDirs {
+		args = append(args, fmt.Sprintf("-path '%s' -prune -o", d))
 	}
 	return strings.Join(args, " ")
 }
@@ -228,13 +288,18 @@ func (a *ConfigsApplier) Backup(ctx context.Context, ssh SSHExecuter) (BackupDat
 		Files: make(map[string][]byte),
 	}
 
-	// Backup /etc/ on the target
-	stdout, _, _, err := ssh.ExecContext(ctx, "find /etc -type f 2>/dev/null")
+	// Backup /etc/ on the target. Bounded the same way as collectSlow: a shallow
+	// find, the OS-critical exclusion, a size guard and a per-download timeout so
+	// a large target /etc can never turn the backup into an unbounded SFTP loop.
+	stdout, _, _, err := ssh.ExecContext(ctx, "find /etc -maxdepth 4 -type f 2>/dev/null")
 	if err != nil {
 		return BackupData{}, err
 	}
 
 	for _, file := range strings.Split(strings.TrimSpace(stdout), "\n") {
+		if len(backup.Files) >= maxConfigFiles {
+			break
+		}
 		file = strings.TrimSpace(file)
 		if file == "" {
 			continue
@@ -243,8 +308,21 @@ func (a *ConfigsApplier) Backup(ctx context.Context, ssh SSHExecuter) (BackupDat
 		if isExcluded(file) {
 			continue
 		}
+		dlCtx, cancel := context.WithTimeout(ctx, 30*time.Second)
 		buf := new(bytes.Buffer)
-		if err := ssh.Download(file, buf); err != nil {
+		done := make(chan error, 1)
+		go func() { done <- ssh.Download(file, buf) }()
+		select {
+		case <-dlCtx.Done():
+			cancel()
+			return BackupData{}, nil
+		case derr := <-done:
+			cancel()
+			if derr != nil {
+				continue
+			}
+		}
+		if buf.Len() > maxConfigFileSize {
 			continue
 		}
 		backup.Files[file] = buf.Bytes()

@@ -704,7 +704,11 @@ export function wsPipelineConnect(
   const initialDelay = opts?.initialDelay ?? 1000;
   const maxDelay = opts?.maxDelay ?? 30000;
   const heartbeatInterval = opts?.heartbeatInterval ?? 30000;
-  const staleTimeout = opts?.staleTimeout ?? 15000;
+  // Must exceed the heartbeat interval: the server answers a client ping with a
+  // pong data-frame only every `heartbeatInterval`, so a window shorter than
+  // that flags a healthy-but-idle connection (e.g. a planned migration with no
+  // live pipeline) as `stale` and disables Next. 45s > 30s heartbeat + margin.
+  const staleTimeout = opts?.staleTimeout ?? 45000;
 
   let retries = 0;
   let lastSequence = 0;
@@ -766,7 +770,12 @@ export function wsPipelineConnect(
       // Start heartbeat
       heartbeatTimer = setInterval(() => {
         if (ws && ws.readyState === WebSocket.OPEN) {
+          // A ping we can still send proves the socket is alive — disarm stale
+          // so an idle migration (server streams history once, then waits) is
+          // never reported as stale purely for lacking a data frame.
+          disarmStaleTimer();
           ws.send(JSON.stringify({ action: 'ping' }));
+          armStaleTimer();
         }
       }, heartbeatInterval);
     };
