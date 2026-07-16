@@ -16,6 +16,72 @@ Phase 5 delivers *minimal* downtime, measured by the live test matrix (see
 Phase 5 below). Immutable baselines are preserved. Full reports under
 `docs/superpowers/specs/`.
 
+### Phase 6B — Compare → Select → Apply → Verify (item-level parity + selective apply)
+
+Implements the compare/select/apply/verify leg of the canonical flow as an
+extension of the existing pipeline (no new execution path). Source of truth for
+compare/apply is `migration_steps.data` (plan-time collect), never the onboarding
+`discovery_snapshots`. All changes green: `go build ./...`, `go vet`,
+`go test ./internal/mod/migration/`, `npm run check`.
+
+- **Contract hardening (6B1):** `parity.go` defines `ParityStatus` (same,
+  missing_on_target, different, stale, unsupported, selected_for_apply,
+  accepted_target, skipped_by_user, manual_required, applied, verified,
+  unresolved), `ParityAction` (apply_from_source, keep_target, skip,
+  review_manual), `ApplyLevel` (Safe=1/Warn=2/Guarded=3/Manual=4),
+  `DependencyKind` (hard/recommended/verify_post), `SelectionDecision`.
+- **Backend parity (6B2):** `parity_engine.go` `ComputeParity` derives the
+  source side from persisted plan collect steps and the target side from a
+  LIVE target collect; only the target SSH connection is opened. Per-category
+  compare functions assign `ApplyLevel` per spec (packages=Safe, configs=Warn,
+  services/users/docker/database=Guarded).
+- **Dependency graph (6B2):** `depmap.go` resolves hard/recommended edges
+  (service→config+runtime, config→backing service, docker container→image,
+  database→engine runtime); `buildDeps` merges heuristics with extra edges.
+- **FE compare experience (6B3):** `web/src/routes/migrations/[id]/compare/+page.svelte`
+  renders grouped item matrix (status/level badges, dependency + warning
+  display) and a per-item drawer (source/target values, suggested action,
+  apply level, freshness, deps, decision radios).
+- **Selective apply (6B4):** `pipeline.go` `initialSyncStage` loads
+  `selectionByCat`; a category where every item is keep_target/skip is
+  skipped via `StepStatusSkipped`; mixed forces apply + warning (appliers are
+  category-granular). `repo.go` adds `migration_selections` persistence
+  (`UpsertSelection/GetSelections/GetSelection/ClearSelections`).
+- **Verification layering (6B5):** `ComputeParitySummary` returns three
+  independent scores (infra / runtime / app-health) so "file copied" ≠ "app
+  healthy"; `deriveMigrationStatus` sets honest terminal status
+  (`completed_partial` / `completed_with_manual_gaps`) — never a bare
+  "completed" when gaps remain.
+- **Guarded automation (6B6):** `BulkApply` with conservative policies
+  `apply_safe` (apply_level ≤ Warn + satisfied hard deps) and
+  `accept_risky_unchanged` (keep_target for guarded items already `same`).
+  Never auto-applies guarded/different items; explicit operator selections are
+  never overwritten. FE bulk buttons on the compare page.
+- **Operator polish (6B7):** confirmation modal required when choosing
+  keep_target/skip on an item that is `different`/`missing_on_target`
+  (discards real source state / overwrites target) — honest guard.
+
+### Phase 6C — Item Identity + Selection Semantics Contract (spec only, no code)
+
+Three implementation-grade contracts finalizing the domain language shared by
+FE and BE for item-level compare/select/apply/verify:
+
+- `docs/superpowers/specs/phase-6c-item-identity-contract.md` — granularity
+  audit, final `itemKey` convention per category, item/group/category/
+  manual-placeholder boundary. `compose-file:<path>` identified as a missing
+  item (not yet emitted by `compareDocker`).
+- `docs/superpowers/specs/phase-6c-selection-semantics-contract.md` — final
+  action semantics, four non-merged state dimensions (Observed/Decision/
+  Execution/Verification), keep_target vs skip split, apply/rollback/verify
+  consequences, 8-status migration-success model, 5-axis honest parity score,
+  dependency/blocking policy, unsafe/deferred scope.
+- `docs/superpowers/specs/phase-6c-fe-be-contract.md` — FE row/interaction/
+  visual/stale contract, BE response/request shapes, endpoint list, and the
+  persistence recommendation: hybrid — keep `migration_selections` (extended
+  with reason/ack/followup), ADD `migration_item_results` (per-item execution
+  + verification evidence, required for honest rollback) + `migration_selection_history`
+  (audit). Do NOT put per-item state in `migration_steps`.
+
 ### Phase 4I.X — Pipeline Stepper BE/FE Fix (state-type blocking bug + anomaly states)
 
 Resolves the Phase 4I.X audit: 1 BLOCKING bug, several FE/BE sync gaps, and

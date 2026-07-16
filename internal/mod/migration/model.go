@@ -23,6 +23,19 @@ const (
 	StatusRollbackFailed = "rollback_failed"
 	StatusInterrupted    = "interrupted" // set when a running migration is detected after a crash
 	StatusResuming       = "resuming"    // set when an interrupted migration is being resumed
+
+	// Phase 6B (selective apply + verification) adds migration-level outcome
+	// statuses that honestly distinguish "done but not identical" from "done".
+	// These are ADDITIVE: the legacy StatusCompleted is still emitted when a
+	// migration has no unresolved drift, no manual gaps, and no failed items.
+	// None of these may be claimed when an app-health layer is unverified for a
+	// selected app item (see parity spec §D).
+	StatusCompletedWithDrift       = "completed_with_drift"        // selected applied but parity shows unresolved infra diffs
+	StatusCompletedWithManualGaps  = "completed_with_manual_gaps"  // done; skip/review_manual/L4 items remain
+	StatusCompletedPartial         = "completed_partial"          // some selected applied, some failed-but-nonfatal
+	StatusVerificationFailed       = "verification_failed"        // apply ok but runtime/app verification failed
+	StatusVerificationPartial      = "verification_partial"       // some checks passed, some unresolved
+	StatusManualFollowupRequired   = "manual_followup_required"   // L4 items present and unhandled
 )
 
 const (
@@ -31,6 +44,12 @@ const (
 	StepStatusCompleted = "completed"
 	StepStatusFailed    = "failed"
 	StepStatusApplied   = "applied" // step has been applied to the target (checkpoint marker)
+	// StepStatusSkipped marks a step the operator explicitly chose NOT to apply
+	// (selection action keep_target or skip). It is a terminal, non-applied
+	// state: rollback must leave it untouched (see initialSyncStage selective
+	// apply, parity spec §C.2/§I.4). Distinct from StepStatusFailed: a skipped
+	// step is an intentional operator decision, not an error.
+	StepStatusSkipped = "skipped"
 )
 
 // --- SSH and progress types ---

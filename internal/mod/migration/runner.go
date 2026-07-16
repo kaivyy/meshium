@@ -45,6 +45,32 @@ func (r *CompositeRunner) Diff(ctx context.Context, sourceID, targetID int, cate
 	return ds.Diff(ctx, sourceID, targetID, categories, onProgress)
 }
 
+// Parity computes the per-item compare for one migration (Phase 6B2).
+func (r *CompositeRunner) Parity(ctx context.Context, migrationID int, onProgress StepCallback) (*ParityResult, error) {
+	pe := NewParityEngine(r.executor.Repo(), r.executor.registry, r.executor.srvRepo, r.executor.pool, r.executor.authSvc, r.executor.hosts)
+	return pe.ComputeParity(ctx, migrationID, onProgress)
+}
+
+// ParitySummary computes the post-apply verification report (6B5).
+func (r *CompositeRunner) ParitySummary(ctx context.Context, migrationID int) (*ParitySummary, error) {
+	pe := NewParityEngine(r.executor.Repo(), r.executor.registry, r.executor.srvRepo, r.executor.pool, r.executor.authSvc, r.executor.hosts)
+	parity, err := pe.ComputeParity(ctx, migrationID, nil)
+	if err != nil {
+		return nil, err
+	}
+	steps, err := r.executor.Repo().GetSteps(migrationID)
+	if err != nil {
+		return nil, err
+	}
+	return pe.ComputeParitySummary(ctx, migrationID, parity, steps)
+}
+
+// BulkApply runs a 6B6 progressive-automation sweep over the migration's items.
+func (r *CompositeRunner) BulkApply(ctx context.Context, migrationID int, policy BulkPolicy) (*BulkResult, error) {
+	pe := NewParityEngine(r.executor.Repo(), r.executor.registry, r.executor.srvRepo, r.executor.pool, r.executor.authSvc, r.executor.hosts)
+	return pe.BulkApply(ctx, migrationID, policy)
+}
+
 // Resume delegates to the Executor.
 func (r *CompositeRunner) Resume(ctx context.Context, migrationID int, onProgress StepCallback) error {
 	return r.executor.Resume(ctx, migrationID, onProgress)

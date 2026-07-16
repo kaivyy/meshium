@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"log"
 	"meshium/internal/mod/server"
+	"strings"
 	"sync"
 	"time"
 
@@ -47,6 +48,7 @@ func NewExecutor(
 
 // Registry returns the category registry.
 func (e *Executor) Registry() *CategoryRegistry { return e.registry }
+func (e *Executor) Repo() Repo { return e.repo }
 
 // SrvRepo returns the server repo.
 func (e *Executor) SrvRepo() server.Repo { return e.srvRepo }
@@ -379,6 +381,34 @@ func (e *Executor) executeWithSkip(ctx context.Context, migrationID int, onProgr
 			Status: "success",
 			Value:  "Backed up " + catName,
 		})
+	}
+
+	// 5b. Auto-provision Docker when the docker category is selected and the
+	//     target lacks it. The compat check flags "source has Docker, target
+	//     does not" as a blocker; the point of that check is to know what to
+	//     install, so we provision it here — before the apply phase tries to
+	//     recreate containers/images. Idempotent (no-op if already present) and
+	//     gated on the docker category, so we never surprise a target that was
+	//     deliberately chosen without it. The concrete *sqliteRepo satisfies
+	//     PipelineRepo (see cmd/server/main.go), which ProvisionEngine needs.
+	if containsCategory(categories, "docker") {
+		if out, _, _, dErr := sshClient.ExecContext(ctx, "which docker 2>/dev/null"); dErr != nil || strings.TrimSpace(out) == "" {
+			prepo, ok := e.repo.(PipelineRepo)
+			if !ok {
+				sendError(onProgress, "provision", "cannot provision docker: repo does not support provisioning")
+				return fmt.Errorf("repo does not implement PipelineRepo")
+			}
+			onProgress(WSMessage{Step: "provision", Status: "progress", Value: "Docker not found on target — provisioning Docker..."})
+			engine := NewProvisionEngine(sshClient, prepo)
+			if pErr := engine.Provision(ctx, migrationID, ProvisionConfig{Components: []string{"docker"}}); pErr != nil {
+				sendError(onProgress, "provision", "auto-provision docker failed: "+pErr.Error())
+				if err := e.repo.UpdateMigrationStatus(migrationID, StatusFailed, "auto-provision docker failed: "+pErr.Error()); err != nil {
+					log.Printf("failed to update migration %d status to failed: %v", migrationID, err)
+				}
+				return fmt.Errorf("auto-provision docker failed: %w", pErr)
+			}
+			onProgress(WSMessage{Step: "provision", Status: "success", Value: "Docker provisioned on target"})
+		}
 	}
 
 	// 6. Apply phase: apply collected data to target

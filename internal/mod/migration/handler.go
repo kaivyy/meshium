@@ -24,6 +24,12 @@ type MigrationRunner interface {
 	PreFlight(ctx context.Context, migrationID int, onProgress StepCallback) (*PreFlightResult, error)
 	DryRun(ctx context.Context, migrationID int, onProgress StepCallback) (*DryRunResult, error)
 	Diff(ctx context.Context, sourceID, targetID int, categories []string, onProgress StepCallback) (*DiffResult, error)
+	// Parity computes the per-item compare for one migration (Phase 6B2).
+	Parity(ctx context.Context, migrationID int, onProgress StepCallback) (*ParityResult, error)
+	// ParitySummary computes the post-apply verification report (spec §H.5, 6B5).
+	ParitySummary(ctx context.Context, migrationID int) (*ParitySummary, error)
+	// BulkApply runs a 6B6 progressive-automation sweep (apply-safe / accept-risky).
+	BulkApply(ctx context.Context, migrationID int, policy BulkPolicy) (*BulkResult, error)
 }
 
 // Handler exposes REST and WebSocket routes for migrations.
@@ -127,6 +133,33 @@ func (h *Handler) handleMigrationByID(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		h.handleExport(w, r, id)
+	case "parity":
+		if r.Method != http.MethodGet {
+			shared.WriteError(w, http.StatusMethodNotAllowed, "method not allowed", "METHOD_NOT_ALLOWED")
+			return
+		}
+		h.handleParity(w, r, id)
+	case "selection":
+		switch r.Method {
+		case http.MethodGet:
+			h.handleGetSelection(w, r, id)
+		case http.MethodPut:
+			h.handlePutSelection(w, r, id)
+		default:
+			shared.WriteError(w, http.StatusMethodNotAllowed, "method not allowed", "METHOD_NOT_ALLOWED")
+		}
+	case "parity-summary":
+		if r.Method != http.MethodGet {
+			shared.WriteError(w, http.StatusMethodNotAllowed, "method not allowed", "METHOD_NOT_ALLOWED")
+			return
+		}
+		h.handleParitySummary(w, r, id)
+	case "selection/bulk":
+		if r.Method != http.MethodPut {
+			shared.WriteError(w, http.StatusMethodNotAllowed, "method not allowed", "METHOD_NOT_ALLOWED")
+			return
+		}
+		h.handleBulkSelection(w, r, id)
 	default:
 		shared.WriteError(w, http.StatusNotFound, "not found", "NOT_FOUND")
 	}
@@ -585,6 +618,110 @@ func (h *Handler) handleExport(w http.ResponseWriter, r *http.Request, id int) {
 	w.Header().Set("Content-Type", "application/json")
 	w.Header().Set("Content-Disposition", fmt.Sprintf("attachment; filename=\"migration-%d.json\"", id))
 	json.NewEncoder(w).Encode(export)
+}
+
+// --- Parity + Selection handlers (Phase 6B2) ---
+
+func (h *Handler) handleParity(w http.ResponseWriter, r *http.Request, id int) {
+	if h == nil || h.runner == nil {
+		shared.WriteError(w, http.StatusServiceUnavailable, "service unavailable", "SERVICE_UNAVAILABLE")
+		return
+	}
+	result, err := h.runner.Parity(r.Context(), id, nil)
+	if err != nil {
+		shared.WriteError(w, http.StatusInternalServerError, "parity failed: "+err.Error(), "INTERNAL")
+		return
+	}
+	shared.WriteJSON(w, http.StatusOK, result)
+}
+
+// handleGetSelection returns all recorded selection decisions for a migration.
+func (h *Handler) handleGetSelection(w http.ResponseWriter, r *http.Request, id int) {
+	decisions, err := h.repo.GetSelections(r.Context(), id)
+	if err != nil {
+		shared.WriteError(w, http.StatusInternalServerError, "failed to load selections", "INTERNAL")
+		return
+	}
+	shared.WriteJSON(w, http.StatusOK, decisions)
+}
+
+// selectionRequest is the PUT body for one item decision (§C.2 actions).
+type selectionRequest struct {
+	ItemKey  string `json:"itemKey"`
+	Category string `json:"category"`
+	Action   string `json:"action"` // apply_from_source|keep_target|skip|review_manual
+}
+
+func (h *Handler) handlePutSelection(w http.ResponseWriter, r *http.Request, id int) {
+	shared.LimitRequestBody(r)
+	var req selectionRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		shared.WriteError(w, http.StatusBadRequest, "invalid request body", "VALIDATION_ERROR")
+		return
+	}
+	if req.ItemKey == "" || req.Action == "" {
+		shared.WriteError(w, http.StatusBadRequest, "itemKey and action are required", "VALIDATION_ERROR")
+		return
+	}
+	switch ParityAction(req.Action) {
+	case ActionApplyFromSource, ActionKeepTarget, ActionSkip, ActionReviewManual:
+	default:
+		shared.WriteError(w, http.StatusBadRequest, "invalid action", "VALIDATION_ERROR")
+		return
+	}
+	if err := h.repo.UpsertSelection(r.Context(), id, req.ItemKey, req.Category, req.Action); err != nil {
+		shared.WriteError(w, http.StatusInternalServerError, "failed to persist selection", "INTERNAL")
+		return
+	}
+	shared.WriteJSON(w, http.StatusOK, map[string]string{"status": "ok", "itemKey": req.ItemKey, "action": req.Action})
+}
+
+// handleParitySummary returns the post-apply verification report (spec §H.5):
+// 3 independent scores (infra / runtime / app health) + manual gaps + unresolved
+// drift. Derived from the compare items + step outcomes + selections.
+func (h *Handler) handleParitySummary(w http.ResponseWriter, r *http.Request, id int) {
+	if h == nil || h.runner == nil {
+		shared.WriteError(w, http.StatusServiceUnavailable, "service unavailable", "SERVICE_UNAVAILABLE")
+		return
+	}
+	summary, err := h.runner.ParitySummary(r.Context(), id)
+	if err != nil {
+		shared.WriteError(w, http.StatusInternalServerError, "parity summary failed: "+err.Error(), "INTERNAL")
+		return
+	}
+	shared.WriteJSON(w, http.StatusOK, summary)
+}
+
+// handleBulkSelection runs a 6B6 progressive-automation sweep (apply-safe /
+// accept-risky) and persists the resulting selection decisions. Explicit
+// operator selections are never overwritten.
+func (h *Handler) handleBulkSelection(w http.ResponseWriter, r *http.Request, id int) {
+	if h == nil || h.runner == nil {
+		shared.WriteError(w, http.StatusServiceUnavailable, "service unavailable", "SERVICE_UNAVAILABLE")
+		return
+	}
+	shared.LimitRequestBody(r)
+	var req struct {
+		Policy string `json:"policy"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		shared.WriteError(w, http.StatusBadRequest, "invalid request body", "VALIDATION_ERROR")
+		return
+	}
+	var policy BulkPolicy
+	switch req.Policy {
+	case string(BulkApplySafe), string(BulkAcceptRiskyUnchanged):
+		policy = BulkPolicy(req.Policy)
+	default:
+		shared.WriteError(w, http.StatusBadRequest, "invalid policy", "VALIDATION_ERROR")
+		return
+	}
+	res, err := h.runner.BulkApply(r.Context(), id, policy)
+	if err != nil {
+		shared.WriteError(w, http.StatusInternalServerError, "bulk apply failed: "+err.Error(), "INTERNAL")
+		return
+	}
+	shared.WriteJSON(w, http.StatusOK, res)
 }
 
 func (h *Handler) upgradeWebSocket(w http.ResponseWriter, r *http.Request) (*websocket.Conn, error) {

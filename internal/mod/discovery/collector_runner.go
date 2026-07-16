@@ -44,6 +44,14 @@ type CollectorRunner struct {
 	collectors []SnapshotCollector
 }
 
+// maxConcurrentCollectors caps how many collectors run simultaneously over the
+// single shared SSH connection. OpenSSH's default MaxSessions is 10; fanning
+// out all collectors at once opens more session channels than the server will
+// accept, and the overflow is rejected with "ssh: rejected: connect failed
+// (open failed)", which silently blanks whole categories (disk, docker_details,
+// port, CI) on EVERY scan. 8 leaves headroom for the transport's own channels.
+const maxConcurrentCollectors = 8
+
 // NewCollectorRunner creates a CollectorRunner with the given collectors.
 func NewCollectorRunner(collectors ...SnapshotCollector) *CollectorRunner {
 	return &CollectorRunner{collectors: collectors}
@@ -52,6 +60,9 @@ func NewCollectorRunner(collectors ...SnapshotCollector) *CollectorRunner {
 // Run executes all collectors in parallel and assembles the results
 // into a ServerSnapshot. Collectors that fail or timeout are recorded
 // in the snapshot's CollectionErrors field — the snapshot may be partial.
+//
+// Concurrency is bounded by maxConcurrentCollectors so we never exceed the
+// SSH server's MaxSessions and trigger channel-rejection errors.
 func (r *CollectorRunner) Run(ctx context.Context, exec transport.SSHExecuter) (*ServerSnapshot, error) {
 	if exec == nil {
 		return nil, fmt.Errorf("SSH executer is nil")
@@ -59,11 +70,14 @@ func (r *CollectorRunner) Run(ctx context.Context, exec transport.SSHExecuter) (
 
 	results := make([]CollectorResult, len(r.collectors))
 	var wg sync.WaitGroup
+	sem := make(chan struct{}, maxConcurrentCollectors)
 
 	for i, c := range r.collectors {
 		wg.Add(1)
+		sem <- struct{}{} // acquire a slot; blocks once maxConcurrentCollectors are in flight
 		go func(idx int, collector SnapshotCollector) {
 			defer wg.Done()
+			defer func() { <-sem }()
 			results[idx] = r.runCollector(ctx, exec, collector)
 		}(i, c)
 	}

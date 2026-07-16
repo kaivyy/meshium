@@ -126,6 +126,80 @@ export interface DiffResult {
   categories: DiffCategory[];
 }
 
+// --- Phase 6B: parity (compare) + selection (selective apply) ---
+
+export type ParityStatus =
+  | 'same' | 'missing_on_target' | 'different' | 'stale' | 'unsupported'
+  | 'selected_for_apply' | 'accepted_target' | 'skipped_by_user' | 'manual_required'
+  | 'applied' | 'verified' | 'unresolved';
+
+export type ParityAction = 'apply_from_source' | 'keep_target' | 'skip' | 'review_manual';
+
+// ApplyLevel classifies automation safety: 1 safe, 2 warn, 3 guarded, 4 manual.
+export type ApplyLevel = 1 | 2 | 3 | 4;
+
+export interface DependencyRef {
+  itemKey: string;
+  kind: 'hard' | 'recommended' | 'verify_post';
+  note: string;
+  satisfied: boolean;
+}
+
+export interface ParityItem {
+  category: string;
+  itemKey: string;
+  sourceValue: string;
+  targetValue: string;
+  status: ParityStatus;
+  suggested: ParityAction;
+  applyLevel: ApplyLevel;
+  deps?: DependencyRef[];
+  warnings?: string[];
+  freshness?: string;
+  verifyState?: string;
+}
+
+export interface ParityResult {
+  migrationId: number;
+  items: ParityItem[];
+  freshness: string; // fresh | stale
+  computedAt: string;
+}
+
+export interface SelectionDecision {
+  migrationId: number;
+  itemKey: string;
+  category: string;
+  action: ParityAction;
+  updatedAt?: string;
+}
+
+// ParitySummary is the post-apply verification report (spec §H.5): three
+// independent scores (infra / runtime / app health) + manual + unresolved gaps.
+export interface ParitySummary {
+  infraScore: number;
+  runtimeScore: number;
+  appHealthScore: number;
+  manualGaps: number;
+  unresolvedDrift: number;
+  passed: number;
+  failed: number;
+  migrationId: number;
+  computedAt: string;
+}
+
+// BulkPolicy mirrors internal/mod/migration/parity_engine.go (Phase 6B6).
+export type BulkPolicy = 'apply_safe' | 'accept_risky_unchanged';
+
+export interface BulkResult {
+  policy: BulkPolicy;
+  applied: number;
+  accepted: number;
+  skipped: number;
+  manual: number;
+  items: SelectionDecision[];
+}
+
 export const migrationApi = {
   list: () => api.get('/migrations') as Promise<MigrationPlan[]>,
   get: (id: number) => api.get(`/migrations/${id}`) as Promise<MigrationPlan>,
@@ -135,6 +209,15 @@ export const migrationApi = {
   dryRun: (id: number) => api.get(`/migrations/${id}/dryrun`) as Promise<DryRunResult>,
   diff: (sourceId: number, targetId: number, categories?: string[]) =>
     api.post('/diff', { sourceId, targetId, categories: categories || [] }) as Promise<DiffResult>,
+  // Phase 6B2: per-item parity compare.
+  parity: (id: number) => api.get(`/migrations/${id}/parity`) as Promise<ParityResult>,
+  getSelections: (id: number) => api.get(`/migrations/${id}/selection`) as Promise<SelectionDecision[]>,
+  putSelection: (id: number, itemKey: string, category: string, action: ParityAction) =>
+    api.put(`/migrations/${id}/selection`, { itemKey, category, action }) as Promise<{ status: string; itemKey: string; action: string }>,
+  paritySummary: (id: number) => api.get(`/migrations/${id}/parity-summary`) as Promise<ParitySummary>,
+  // Phase 6B6: progressive-automation sweep (apply-safe / accept-risky).
+  bulkApply: (id: number, policy: BulkPolicy) =>
+    api.put(`/migrations/${id}/selection/bulk`, { policy }) as Promise<BulkResult>,
 };
 
 function getWsToken(): string {

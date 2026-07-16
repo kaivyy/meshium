@@ -244,15 +244,15 @@ func (e *ProvisionEngine) InstallDocker(ctx context.Context, distro string) erro
 	switch distro {
 	case "debian":
 		cmd := `DEBIAN_FRONTEND=noninteractive apt-get update -qq && DEBIAN_FRONTEND=noninteractive apt-get install -y -qq ca-certificates curl gnupg && install -m 0755 -d /etc/apt/keyrings && curl -fsSL https://download.docker.com/linux/ubuntu/gpg | gpg --dearmor -o /etc/apt/keyrings/docker.gpg && chmod a+r /etc/apt/keyrings/docker.gpg && echo "deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/docker.gpg] https://download.docker.com/linux/ubuntu $(. /etc/os-release && echo $VERSION_CODENAME) stable" > /etc/apt/sources.list.d/docker.list && DEBIAN_FRONTEND=noninteractive apt-get update -qq && DEBIAN_FRONTEND=noninteractive apt-get install -y -qq docker-ce docker-ce-cli containerd.io docker-buildx-plugin docker-compose-plugin 2>&1`
-		_, _, _, err := e.targetSSH.ExecContext(ctx, cmd)
+		_, _, _, err := execLongOrContext(ctx, e.targetSSH, cmd)
 		return err
 	case "rhel":
 		cmd := `dnf config-manager --add-repo https://download.docker.com/linux/centos/docker-ce.repo && dnf install -y docker-ce docker-ce-cli containerd.io docker-buildx-plugin docker-compose-plugin 2>&1`
-		_, _, _, err := e.targetSSH.ExecContext(ctx, cmd)
+		_, _, _, err := execLongOrContext(ctx, e.targetSSH, cmd)
 		return err
 	default:
 		cmd := `curl -fsSL https://get.docker.com | sh 2>&1`
-		_, _, _, err := e.targetSSH.ExecContext(ctx, cmd)
+		_, _, _, err := execLongOrContext(ctx, e.targetSSH, cmd)
 		return err
 	}
 }
@@ -266,7 +266,7 @@ func (e *ProvisionEngine) InstallCompose(ctx context.Context, distro string) err
 	}
 	// If not available, install standalone
 	cmd := "mkdir -p /usr/local/lib/docker/cli-plugins && curl -SL https://github.com/docker/compose/releases/latest/download/docker-compose-linux-x86_64 -o /usr/local/lib/docker/cli-plugins/docker-compose && chmod +x /usr/local/lib/docker/cli-plugins/docker-compose 2>&1"
-	_, _, _, err := e.targetSSH.ExecContext(ctx, cmd)
+	_, _, _, err := execLongOrContext(ctx, e.targetSSH, cmd)
 	return err
 }
 

@@ -1,6 +1,7 @@
 package migration
 
 import (
+	"context"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -12,6 +13,7 @@ type mockRepo struct {
 	migrations []Migration
 	steps      []MigrationStepRecord
 	backups    []MigrationBackup
+	selections []SelectionDecision
 }
 
 func (m *mockRepo) CreateMigration(sourceID, targetID int, categories []string, operationID string) (int, error) {
@@ -158,6 +160,50 @@ func (m *mockRepo) GetAppliedCategories(migrationID int) ([]string, error) {
 		}
 	}
 	return result, nil
+}
+
+// --- Phase 6B selection persistence mocks (in-memory) ---
+
+func (m *mockRepo) UpsertSelection(ctx context.Context, migrationID int, itemKey, category, action string) error {
+	for i := range m.selections {
+		if m.selections[i].MigrationID == migrationID && m.selections[i].ItemKey == itemKey {
+			m.selections[i].Category = category
+			m.selections[i].Action = action
+			return nil
+		}
+	}
+	m.selections = append(m.selections, SelectionDecision{MigrationID: migrationID, ItemKey: itemKey, Category: category, Action: action})
+	return nil
+}
+
+func (m *mockRepo) GetSelections(ctx context.Context, migrationID int) ([]SelectionDecision, error) {
+	var out []SelectionDecision
+	for _, s := range m.selections {
+		if s.MigrationID == migrationID {
+			out = append(out, s)
+		}
+	}
+	return out, nil
+}
+
+func (m *mockRepo) GetSelection(ctx context.Context, migrationID int, itemKey string) (string, error) {
+	for _, s := range m.selections {
+		if s.MigrationID == migrationID && s.ItemKey == itemKey {
+			return s.Action, nil
+		}
+	}
+	return "", nil
+}
+
+func (m *mockRepo) ClearSelections(ctx context.Context, migrationID int) error {
+	var kept []SelectionDecision
+	for _, s := range m.selections {
+		if s.MigrationID != migrationID {
+			kept = append(kept, s)
+		}
+	}
+	m.selections = kept
+	return nil
 }
 
 func TestHandleList(t *testing.T) {

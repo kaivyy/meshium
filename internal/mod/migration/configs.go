@@ -282,15 +282,38 @@ func (a *ConfigsApplier) Apply(ctx context.Context, ssh SSHExecuter, data Catego
 			}
 			continue
 		}
-		if err := ssh.Upload(bytes.NewReader(content), path); err != nil {
+		// tar strips the leading "/" by default, so collected keys arrive as
+		// relative (e.g. "etc/host.conf"). The intended destination is the
+		// absolute system path, so re-anchor before upload — otherwise SFTP
+		// writes under the login cwd and fails with "file does not exist".
+		dst := path
+		if !strings.HasPrefix(dst, "/") {
+			dst = "/" + dst
+		}
+		// The target may not have the parent directory (e.g. the source ships
+		// /etc/nginx/... but the target never installed nginx). SFTP Create
+		// won't mkdir -p for us, so create the parent first; without this the
+		// whole config phase fails on the first missing directory.
+		if parent := filepath.Dir(dst); parent != "/" && parent != "." {
+			if _, _, _, mErr := ssh.ExecContext(ctx, "mkdir -p "+shared.ShellQuote(parent)); mErr != nil {
+				if onProgress != nil {
+					onProgress(WSMessage{
+						Step:   "configs:apply",
+						Status: "warning",
+						Value:  fmt.Sprintf("could not mkdir %s: %v", parent, mErr),
+					})
+				}
+			}
+		}
+		if err := ssh.Upload(bytes.NewReader(content), dst); err != nil {
 			if onProgress != nil {
 				onProgress(WSMessage{
 					Step:   "configs:apply",
 					Status: "error",
-					Error:  fmt.Sprintf("failed to upload %s: %v", path, err),
+					Error:  fmt.Sprintf("failed to upload %s: %v", dst, err),
 				})
 			}
-			return fmt.Errorf("failed to upload %s: %w", path, err)
+			return fmt.Errorf("failed to upload %s: %w", dst, err)
 		}
 		count++
 		if onProgress != nil && count%10 == 0 {

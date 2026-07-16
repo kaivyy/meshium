@@ -215,6 +215,12 @@
           <Badge variant="success">{summary.added} added</Badge>
           <Badge variant="error">{summary.removed} removed</Badge>
           <Badge variant="warning">{summary.changed} changed</Badge>
+          <a
+            href="/migrations/{migrationId}/compare"
+            class="inline-flex items-center gap-1 rounded-lg bg-surface-muted px-3 py-2 hover:bg-surface transition-colors"
+          >
+            <ArrowRightLeft size={16} /> Compare &amp; Select
+          </a>
         </div>
       </div>
 

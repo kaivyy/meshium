@@ -27,6 +27,15 @@ func (stubRunner) DryRun(ctx context.Context, migrationID int, onProgress StepCa
 func (stubRunner) Diff(ctx context.Context, sourceID, targetID int, categories []string, onProgress StepCallback) (*DiffResult, error) {
 	return nil, nil
 }
+func (stubRunner) Parity(ctx context.Context, migrationID int, onProgress StepCallback) (*ParityResult, error) {
+	return nil, nil
+}
+func (stubRunner) ParitySummary(ctx context.Context, migrationID int) (*ParitySummary, error) {
+	return nil, nil
+}
+func (stubRunner) BulkApply(ctx context.Context, migrationID int, policy BulkPolicy) (*BulkResult, error) {
+	return nil, nil
+}
 
 func newTestHandler() (*Handler, *mockRepo) {
 	repo := &mockRepo{}

@@ -1,6 +1,7 @@
 package migration
 
 import (
+	"context"
 	"database/sql"
 	"encoding/json"
 	"errors"
@@ -39,6 +40,16 @@ type Repo interface {
 	// persisted previews (e.g. dry-run results) across page refreshes.
 	GetLatestStep(migrationID int, action string) (*MigrationStepRecord, error)
 	GetAppliedCategories(migrationID int) ([]string, error) // categories with StepStatusApplied
+
+	// --- Phase 6B selective-apply selection persistence ---
+	// UpsertSelection records (or updates) the operator's decision for one item.
+	UpsertSelection(ctx context.Context, migrationID int, itemKey, category, action string) error
+	// GetSelections returns all recorded decisions for a migration.
+	GetSelections(ctx context.Context, migrationID int) ([]SelectionDecision, error)
+	// GetSelection returns the decision for a single item, or "" if none.
+	GetSelection(ctx context.Context, migrationID int, itemKey string) (string, error)
+	// ClearSelections removes all decisions for a migration (used on reset).
+	ClearSelections(ctx context.Context, migrationID int) error
 
 	CreateBackup(migrationID, serverID int, category, data string) (int, error)
 	GetBackups(migrationID int) ([]MigrationBackup, error)
@@ -401,6 +412,67 @@ func (r *sqliteRepo) GetAppliedCategories(migrationID int) ([]string, error) {
 		categories = append(categories, cat)
 	}
 	return categories, nil
+}
+
+// --- Phase 6B selective-apply selection persistence ---
+
+// UpsertSelection records (or updates) the operator's decision for one item.
+func (r *sqliteRepo) UpsertSelection(ctx context.Context, migrationID int, itemKey, category, action string) error {
+	_, err := r.db.Exec(
+		`INSERT INTO migration_selections (migration_id, item_key, category, action, updated_at)
+		 VALUES (?, ?, ?, ?, CURRENT_TIMESTAMP)
+		 ON CONFLICT(migration_id, item_key)
+		 DO UPDATE SET category = excluded.category, action = excluded.action, updated_at = CURRENT_TIMESTAMP`,
+		migrationID, itemKey, category, action,
+	)
+	return err
+}
+
+// GetSelections returns all recorded decisions for a migration.
+func (r *sqliteRepo) GetSelections(ctx context.Context, migrationID int) ([]SelectionDecision, error) {
+	rows, err := r.db.Query(
+		`SELECT migration_id, item_key, category, action, updated_at
+		 FROM migration_selections WHERE migration_id = ? ORDER BY id ASC`,
+		migrationID,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	sel := make([]SelectionDecision, 0)
+	for rows.Next() {
+		var d SelectionDecision
+		var updatedAt string
+		if err := rows.Scan(&d.MigrationID, &d.ItemKey, &d.Category, &d.Action, &updatedAt); err != nil {
+			return nil, err
+		}
+		d.UpdatedAt = updatedAt
+		sel = append(sel, d)
+	}
+	return sel, nil
+}
+
+// GetSelection returns the decision for a single item, or "" if none.
+func (r *sqliteRepo) GetSelection(ctx context.Context, migrationID int, itemKey string) (string, error) {
+	var action string
+	err := r.db.QueryRow(
+		`SELECT action FROM migration_selections WHERE migration_id = ? AND item_key = ?`,
+		migrationID, itemKey,
+	).Scan(&action)
+	if errors.Is(err, sql.ErrNoRows) {
+		return "", nil
+	}
+	if err != nil {
+		return "", err
+	}
+	return action, nil
+}
+
+// ClearSelections removes all decisions for a migration (used on reset).
+func (r *sqliteRepo) ClearSelections(ctx context.Context, migrationID int) error {
+	_, err := r.db.Exec(`DELETE FROM migration_selections WHERE migration_id = ?`, migrationID)
+	return err
 }
 
 // Helper: check if a string is in a slice

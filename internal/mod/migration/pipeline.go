@@ -1509,7 +1509,36 @@ func (s *preparationStage) Execute(ctx context.Context, pc *PipelineContext) err
 	}
 
 	pc.OnProgress(WSMessage{Step: "preparation", Status: "success", Value: "All backups created"})
+
+	// Auto-provision Docker when the docker category is selected and the target
+	// lacks it. The compat check flags "source has Docker, target does not" as a
+	// blocker, but the whole point of that check is to know what to install — so
+	// we provision it here (before initialSyncStage applies docker state). The
+	// installer is idempotent (no-op if already present) and we only attempt it
+	// when docker is an explicit migration category, so we never surprise a
+	// target that was deliberately chosen without it.
+	if containsCategory(categories, "docker") {
+		if out, _, _, dErr := pc.TargetSSH.ExecContext(ctx, "which docker 2>/dev/null"); dErr != nil || strings.TrimSpace(out) == "" {
+			pc.OnProgress(WSMessage{Step: "preparation", Status: "progress", Value: "Docker not found on target — provisioning..."})
+			engine := NewProvisionEngine(pc.TargetSSH, pc.Repo)
+			if pErr := engine.Provision(ctx, pc.MigrationID, ProvisionConfig{Components: []string{"docker"}}); pErr != nil {
+				return fmt.Errorf("auto-provision docker failed: %w", pErr)
+			}
+			pc.OnProgress(WSMessage{Step: "preparation", Status: "success", Value: "Docker provisioned on target"})
+		}
+	}
+
 	return nil
+}
+
+// containsCategory reports whether the category list includes the given name.
+func containsCategory(categories []string, name string) bool {
+	for _, c := range categories {
+		if c == name {
+			return true
+		}
+	}
+	return false
 }
 
 func (s *preparationStage) Rollback(ctx context.Context, pc *PipelineContext) error {
@@ -1551,6 +1580,16 @@ func (s *initialSyncStage) Execute(ctx context.Context, pc *PipelineContext) err
 	appliedOrder := make([]string, 0)
 	skippedSet := make(map[string]struct{})
 
+	// Phase 6B4: load operator selections once, bucket by category. Category
+	// appliers are granular at the CATEGORY level (a packages applier installs
+	// the whole list, not one package), so the category-level decision is derived
+	// from the items the operator chose:
+	//   - no selections for the category → apply (backward-compatible default)
+	//   - every item keep_target/skip     → skip the whole category
+	//   - mixed (some apply, some keep/skip) → apply the category, but surface a
+	//     warning: the applier cannot honor per-item skip within a category.
+	selectionsByCat := loadSelectionBuckets(ctx, pc)
+
 	for _, step := range steps {
 		if ctx.Err() != nil {
 			return ctx.Err()
@@ -1562,6 +1601,18 @@ func (s *initialSyncStage) Execute(ctx context.Context, pc *PipelineContext) err
 		// restore flags (--clean/--drop) are defense-in-depth.
 		if step.Action != "collect" || step.Status != StepStatusCompleted {
 			continue
+		}
+
+		// Phase 6B4: honor the operator's category-level decision.
+		if decision := selectionsByCat[step.Category]; decision == catSkip {
+			if err := pc.JobRepo.UpdateStepStatus(step.ID, StepStatusSkipped, "operator chose keep_target/skip for all items in category"); err != nil {
+				log.Printf("warning: failed to persist skipped step for %s: %v", step.Category, err)
+			}
+			skippedSet[step.Category] = struct{}{}
+			pc.OnProgress(WSMessage{Step: "initial_sync", Status: "warning", Value: fmt.Sprintf("Skipped %s: operator selected keep_target/skip for all items", step.Category)})
+			continue
+		} else if decision == catMixed {
+			pc.OnProgress(WSMessage{Step: "initial_sync", Status: "warning", Value: fmt.Sprintf("%s: per-item skip not supported by the applier — applying whole category; some selected-skip items were applied", step.Category)})
 		}
 
 		// Get the category module
@@ -1633,6 +1684,61 @@ func (s *initialSyncStage) Execute(ctx context.Context, pc *PipelineContext) err
 
 	pc.OnProgress(WSMessage{Step: "initial_sync", Status: "success", Value: "Collected data applied to target"})
 	return nil
+}
+
+// --- Phase 6B4: selective-apply category decision ---
+
+// categoryDecision is the derived per-category apply decision, since the
+// appliers operate at category granularity (see loadSelectionBuckets).
+type categoryDecisionKind int
+
+const (
+	catApply categoryDecisionKind = iota // default: apply the category
+	catSkip                              // every item keep_target/skip → skip
+	catMixed                             // some keep/skip, some apply → apply + warn
+)
+
+// loadSelectionBuckets reads the operator's item selections for the migration
+// and buckets them by category, classifying each category's decision. Items
+// with action apply_from_source (or no selection) count as "apply"; keep_target
+// and skip count as "skip". A category is skipped only when ALL its selected
+// items are skip; a mix forces an apply with a warning because category appliers
+// cannot honor per-item skips.
+func loadSelectionBuckets(ctx context.Context, pc *PipelineContext) map[string]categoryDecisionKind {
+	out := map[string]categoryDecisionKind{}
+	decisions, err := pc.JobRepo.GetSelections(ctx, pc.MigrationID)
+	if err != nil {
+		// No selections persisted (legacy migration) → every category applies.
+		return out
+	}
+	type acc struct {
+		apply, skip int
+	}
+	byCat := map[string]*acc{}
+	for _, d := range decisions {
+		a := byCat[d.Category]
+		if a == nil {
+			a = &acc{}
+			byCat[d.Category] = a
+		}
+		switch ParityAction(d.Action) {
+		case ActionApplyFromSource:
+			a.apply++
+		case ActionKeepTarget, ActionSkip:
+			a.skip++
+		}
+	}
+	for cat, a := range byCat {
+		switch {
+		case a.skip > 0 && a.apply == 0:
+			out[cat] = catSkip
+		case a.skip > 0 && a.apply > 0:
+			out[cat] = catMixed
+		default:
+			out[cat] = catApply
+		}
+	}
+	return out
 }
 
 func syncConfigFromPipelineContext(pc *PipelineContext) SyncConfig {
@@ -2421,8 +2527,75 @@ func (s *finalizationStage) Execute(ctx context.Context, pc *PipelineContext) er
 		Passed:           true,
 	})
 
+	// Phase 6B5: set the honest migration outcome status from selections + step
+	// outcomes (spec §D, §C.2). Never claim bare "completed" when there are
+	// manual gaps (skip/review_manual) or failures — those force the
+	// *-with_manual_gaps / *_partial variants so the FE can't mask them.
+	if status, reason := deriveMigrationStatus(ctx, pc); status != "" {
+		if err := pc.JobRepo.UpdateMigrationStatus(pc.MigrationID, status, reason); err != nil {
+			log.Printf("warning: failed to set honest status %s for migration %d: %v", status, pc.MigrationID, err)
+		} else {
+			pc.OnProgress(WSMessage{Step: "finalization", Status: "progress", Value: "Outcome: " + status})
+		}
+	}
+
 	pc.OnProgress(WSMessage{Step: "finalization", Status: "success", Value: "Migration finalized"})
 	return nil
+}
+
+// deriveMigrationStatus computes the honest terminal status from the operator's
+// selections and the actual step outcomes. Returning "" leaves the status
+// untouched (legacy migrations with no selection data keep their prior status).
+//
+// Rules (spec §D):
+//   - keep_target for an item → accepted (success-neutral, not drift, not a gap)
+//   - skip / review_manual / manual_required → manual gap (→ *_with_manual_gaps)
+//   - any failed/errored step → completed_partial (or verification_failed if only
+//     verification-level failures)
+//   - otherwise → completed
+func deriveMigrationStatus(ctx context.Context, pc *PipelineContext) (string, string) {
+	steps, err := pc.JobRepo.GetSteps(pc.MigrationID)
+	if err != nil {
+		return "", ""
+	}
+	selections, err := pc.JobRepo.GetSelections(ctx, pc.MigrationID)
+	if err != nil {
+		// No selections → legacy migration: status decided by step failures only.
+		selections = nil
+	}
+
+	var failedSteps, skippedSteps, appliedSteps int
+	for _, s := range steps {
+		switch s.Status {
+		case StepStatusFailed:
+			failedSteps++
+		case StepStatusSkipped:
+			skippedSteps++
+		case StepStatusApplied, StepStatusCompleted:
+			appliedSteps++
+		}
+	}
+
+	manualGap := 0
+	for _, d := range selections {
+		switch ParityAction(d.Action) {
+		case ActionSkip, ActionReviewManual:
+			manualGap++
+		}
+	}
+
+	switch {
+	case failedSteps > 0:
+		// A failed step means an apply errored; surface it honestly.
+		return StatusCompletedPartial,
+			fmt.Sprintf("%d step(s) failed; %d applied, %d skipped", failedSteps, appliedSteps, skippedSteps)
+	case manualGap > 0:
+		return StatusCompletedWithManualGaps,
+			fmt.Sprintf("%d item(s) skipped/review_manual requiring follow-up; %d applied, %d skipped", manualGap, appliedSteps, skippedSteps)
+	default:
+		// Clean: all selected applied/accepted, no failures, no manual gaps.
+		return StatusCompleted, ""
+	}
 }
 
 func (s *finalizationStage) Rollback(ctx context.Context, pc *PipelineContext) error {

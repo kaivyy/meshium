@@ -169,6 +169,19 @@ func Migrate(db *sql.DB) error {
 			started_at   DATETIME,
 			completed_at DATETIME
 		);`,
+		// Phase 6B selective-apply: operator decisions per comparable item.
+		// One row per (migration_id, item_key). Survives reload/reconnect/reopen
+		// (SQL), auditable (rows = decision log), and supports optimistic FE
+		// updates (PUT upserts). See parity spec §I.3.
+		`CREATE TABLE IF NOT EXISTS migration_selections (
+			id           INTEGER PRIMARY KEY AUTOINCREMENT,
+			migration_id INTEGER NOT NULL REFERENCES migrations(id) ON DELETE CASCADE,
+			item_key     TEXT NOT NULL,
+			category     TEXT NOT NULL,
+			action       TEXT NOT NULL,
+			updated_at   DATETIME DEFAULT CURRENT_TIMESTAMP,
+			UNIQUE(migration_id, item_key)
+		);`,
 		`CREATE TABLE IF NOT EXISTS migration_backups (
 			id           INTEGER PRIMARY KEY AUTOINCREMENT,
 			migration_id INTEGER NOT NULL REFERENCES migrations(id) ON DELETE CASCADE,
