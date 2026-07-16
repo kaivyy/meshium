@@ -16,6 +16,31 @@ Phase 5 delivers *minimal* downtime, measured by the live test matrix (see
 Phase 5 below). Immutable baselines are preserved. Full reports under
 `docs/superpowers/specs/`.
 
+### Phase UI-A — Canonical Migration UI Audit (Onboarding → Wizard → Pipeline)
+
+Audit-only (no code): maps the FE against the canonical flow and flags
+misleading UX. Two reports under `docs/superpowers/specs/`:
+`ui-canonical-flow-audit.md` (screen map, boundary checks, 5 top mismatches)
+and `ui-wording-and-state-audit.md` (terminology, state-semantics, badge
+confusion, copy recommendations).
+
+- Confirms: `servers/new` (register) + `servers/[id]` (test/discovery) are
+  correctly scoped as onboarding; `/migrations/new` wizard is source/target/
+  category/plan with no premature compare; pipeline `initial_sync` (apply) and
+  `health_verification` (verify) stages are correct; `/compare` already
+  separates observed/decision/apply-level and guards destructive choices.
+- Mismatches found: (1) `/migrations/:id/compare` (item-level select) is NOT
+  linked from the pipeline — only reachable via the raw `/diff` page; (2) the
+  `/diff` "Compare & Select" button conflates raw diff with selection; (3)
+  wizard shows zero compare feedback; (4) "Discovery" is overloaded (onboarding
+  inventory vs pipeline stage `discovery`); (5) item-level applied-vs-verified
+  not yet reflected in UI (blocked on `migration_item_results`, Phase 6C).
+- Terminology risks: three different "compare" surfaces, "Server Diff" driving
+  selection, `accepted_target` and `verified` both rendered success-toned.
+- Explicit gaps needing live run / code check documented (terminal status for
+  selective-apply migrations; whether `initial_sync` blocks items with
+  unsatisfied hard deps; post-apply observed-vs-verified distinction).
+
 ### Phase 6B — Compare → Select → Apply → Verify (item-level parity + selective apply)
 
 Implements the compare/select/apply/verify leg of the canonical flow as an
