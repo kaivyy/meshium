@@ -71,6 +71,18 @@ func (r *CompositeRunner) BulkApply(ctx context.Context, migrationID int, policy
 	return pe.BulkApply(ctx, migrationID, policy)
 }
 
+// RecomputeParity re-runs the live compare for one migration (POST parity/recompute).
+func (r *CompositeRunner) RecomputeParity(ctx context.Context, migrationID int, onProgress StepCallback) (*ParityResult, error) {
+	pe := NewParityEngine(r.executor.Repo(), r.executor.registry, r.executor.srvRepo, r.executor.pool, r.executor.authSvc, r.executor.hosts)
+	return pe.ComputeParity(ctx, migrationID, onProgress)
+}
+
+// GetFollowUp returns the items still requiring operator follow-up.
+func (r *CompositeRunner) GetFollowUp(ctx context.Context, migrationID int) (*ParityResult, error) {
+	pe := NewParityEngine(r.executor.Repo(), r.executor.registry, r.executor.srvRepo, r.executor.pool, r.executor.authSvc, r.executor.hosts)
+	return pe.GetFollowUp(ctx, migrationID)
+}
+
 // Resume delegates to the Executor.
 func (r *CompositeRunner) Resume(ctx context.Context, migrationID int, onProgress StepCallback) error {
 	return r.executor.Resume(ctx, migrationID, onProgress)

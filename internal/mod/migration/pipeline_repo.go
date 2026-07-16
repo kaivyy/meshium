@@ -76,6 +76,19 @@ type PipelineRepo interface {
 	GetAuditTrail(migrationID int, limit int) ([]AuditEntry, error)
 	GetAuditEntryByIdempotencyKey(ctx context.Context, migrationID int, key string) (*AuditEntry, error)
 
+	// --- Phase 6B selective-apply selection persistence ---
+	UpsertSelection(ctx context.Context, migrationID int, itemKey, category, action, reason string, riskAck bool, manualFollowup string) error
+	GetSelections(ctx context.Context, migrationID int) ([]SelectionDecision, error)
+	GetSelection(ctx context.Context, migrationID int, itemKey string) (string, error)
+	ClearSelections(ctx context.Context, migrationID int) error
+
+	// --- Phase 6C-BE per-item execution + verification evidence ---
+	UpsertItemResult(ctx context.Context, migrationID int, res ItemResult) error
+	GetItemResults(ctx context.Context, migrationID int) ([]ItemResult, error)
+	GetItemResult(ctx context.Context, migrationID int, itemKey string) (ItemResult, bool, error)
+	AppendSelectionHistory(ctx context.Context, migrationID int, h SelectionHistory) error
+	GetSelectionHistory(ctx context.Context, migrationID int) ([]SelectionHistory, error)
+
 	// --- Diagnostic bundle (Phase2D-4) ---
 	BuildDiagnosticBundle(ctx context.Context, migrationID int) (*DiagnosticBundle, error)
 

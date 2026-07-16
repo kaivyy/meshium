@@ -385,7 +385,7 @@
   }
 </script>
 
-<div class="p-4 sm:p-6 max-w-3xl mx-auto">
+<div class="page-gutter max-w-3xl">
   <div class="flex items-center gap-2 mb-6">
     <a href="/migrations" class="text-sm text-fg-muted hover:text-fg flex items-center gap-1">
       <ArrowLeft size={16} /> Back to Migrations
@@ -685,6 +685,11 @@
             {/each}
           </div>
         </div>
+        <div class="bg-surface-muted border border-border rounded-lg p-3 text-xs text-fg-subtle">
+          Detailed comparison and selection happen in the pipeline after the plan is created —
+          the <strong>Compare &amp; select items</strong> step lets you review per-item source vs
+          target differences and choose what to apply before running the initial sync.
+        </div>
         {#if configPaths}
           <div>
             <p class="text-sm text-fg-subtle">Config Paths</p>
@@ -789,7 +794,7 @@
         <button
           type="button"
           on:click={startPlanning}
-          class="w-full px-4 py-3 bg-accent text-accent-fg rounded-lg font-medium hover:bg-accent-hover"
+          class="btn btn-primary btn-md w-full"
         >
           Retry Migration Plan
         </button>
@@ -798,13 +803,13 @@
           <button
             type="button"
             on:click={startPlanning}
-            class="w-full px-4 py-3 bg-accent text-accent-fg rounded-lg font-medium hover:bg-accent-hover"
+            class="btn btn-primary btn-md w-full"
           >
             Retry Migration Plan
           </button>
           <a
             href="/migrations"
-            class="block w-full text-center px-4 py-2 text-sm text-fg-muted hover:text-fg border border-border rounded-lg"
+            class="btn btn-secondary btn-md w-full"
           >
             Go to Migration History
           </a>
@@ -818,7 +823,7 @@
         <button
           type="button"
           on:click={startPlanning}
-          class="w-full px-4 py-3 bg-accent text-accent-fg rounded-lg font-medium hover:bg-accent-hover"
+          class="btn btn-primary btn-md w-full"
         >
           Create Migration Plan
         </button>
@@ -832,14 +837,14 @@
       <button
         on:click={prevStep}
         disabled={step === 1}
-        class="flex items-center gap-1 px-4 py-2 text-sm text-fg-muted hover:text-fg disabled:opacity-50"
+        class="btn btn-secondary btn-sm"
       >
         <ArrowLeft size={16} /> Back
       </button>
       <button
         on:click={nextStep}
         disabled={!canProceed}
-        class="flex items-center gap-1 px-4 py-2 bg-accent text-accent-fg rounded-lg text-sm hover:bg-accent-hover disabled:opacity-50"
+        class="btn btn-primary btn-sm disabled:opacity-50"
       >
         Next <ArrowRight size={16} />
       </button>

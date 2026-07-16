@@ -36,6 +36,12 @@ func (stubRunner) ParitySummary(ctx context.Context, migrationID int) (*ParitySu
 func (stubRunner) BulkApply(ctx context.Context, migrationID int, policy BulkPolicy) (*BulkResult, error) {
 	return nil, nil
 }
+func (stubRunner) RecomputeParity(ctx context.Context, migrationID int, onProgress StepCallback) (*ParityResult, error) {
+	return nil, nil
+}
+func (stubRunner) GetFollowUp(ctx context.Context, migrationID int) (*ParityResult, error) {
+	return nil, nil
+}
 
 func newTestHandler() (*Handler, *mockRepo) {
 	repo := &mockRepo{}

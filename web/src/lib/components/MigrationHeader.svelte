@@ -53,6 +53,41 @@
     return ['completed', 'committed', 'archived', 'rolled_back', 'cancelled', 'needs_manual_intervention', 'rollback_degraded'].includes(s);
   }
 
+  // statusVisual maps a raw backend status to an honest dot color + human label.
+  // Only a fully clean "completed" is full green. Every "done but not identical"
+  // outcome (drift / manual gaps / partial / verification issues) is amber/red —
+  // never green — so the header never reads as "healthy" when it isn't.
+  function statusVisual(state: string): { dot: string; label: string } {
+    const s = (state || '').toLowerCase();
+    const pretty = s.replace(/_/g, ' ').replace(/\b\w/g, (c) => c.toUpperCase());
+    switch (s) {
+      case 'completed':
+        return { dot: 'bg-success', label: 'Completed' };
+      case 'completed_with_drift':
+        return { dot: 'bg-warning', label: 'Completed — drift accepted' };
+      case 'completed_with_manual_gaps':
+        return { dot: 'bg-warning', label: 'Completed — manual follow-up' };
+      case 'completed_partial':
+        return { dot: 'bg-warning', label: 'Partially applied' };
+      case 'manual_followup_required':
+        return { dot: 'bg-warning', label: 'Manual follow-up required' };
+      case 'verification_failed':
+        return { dot: 'bg-error', label: 'Verification failed' };
+      case 'verification_partial':
+        return { dot: 'bg-warning', label: 'Verification partial' };
+      case 'failed':
+      case 'rollback_failed':
+        return { dot: 'bg-error', label: pretty };
+      case 'rolled_back':
+        return { dot: 'bg-fg-subtle', label: 'Rolled back' };
+      case 'needs_manual_intervention':
+      case 'rollback_degraded':
+        return { dot: 'bg-error', label: pretty };
+      default:
+        return { dot: 'bg-fg-subtle', label: pretty || 'Ready' };
+    }
+  }
+
   // operatorGuidance returns actionable copy for the two P0-2 states a raw
   // status string cannot explain. Empty string = no special guidance.
   function operatorGuidance(state: string): string {
@@ -69,6 +104,8 @@
         return '';
     }
   }
+
+  // statusVisual is called inline in markup (legacy `export let` mode — no runes).
 </script>
 
 <div class="border-b border-border px-3 sm:px-4 py-2.5 flex items-center justify-between shrink-0 bg-bg gap-2">
@@ -89,8 +126,8 @@
   <div class="flex items-center gap-2 sm:gap-3 shrink-0 overflow-x-auto">
     <!-- Status -->
     <div class="flex items-center gap-1.5">
-      <div class="w-2 h-2 rounded-full {pipelineRunning ? 'bg-accent animate-pulse' : isTerminalState(currentState) ? 'bg-success' : 'bg-fg-subtle'}"></div>
-      <span class="text-xs font-medium text-fg-muted">{currentState || 'Ready'}</span>
+      <div class="w-2 h-2 rounded-full {pipelineRunning ? 'bg-accent animate-pulse' : statusVisual(currentState).dot}"></div>
+      <span class="text-xs font-medium text-fg-muted">{statusVisual(currentState).label}</span>
       {#if operatorGuidance(currentState)}
         <span class="text-xs text-warning hidden lg:inline" title={operatorGuidance(currentState)}>⚠</span>
       {/if}

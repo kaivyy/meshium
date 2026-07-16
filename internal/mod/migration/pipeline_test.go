@@ -898,6 +898,35 @@ func (m *mockPipelineRepo) GetSession(ctx context.Context, id int) (*Migration, 
 	return nil, nil
 }
 
+// Phase 6B/6C-BE selection + item-result stubs for PipelineRepo.
+func (m *mockPipelineRepo) UpsertSelection(ctx context.Context, migrationID int, itemKey, category, action, reason string, riskAck bool, manualFollowup string) error {
+	return nil
+}
+func (m *mockPipelineRepo) GetSelections(ctx context.Context, migrationID int) ([]SelectionDecision, error) {
+	return nil, nil
+}
+func (m *mockPipelineRepo) GetSelection(ctx context.Context, migrationID int, itemKey string) (string, error) {
+	return "", nil
+}
+func (m *mockPipelineRepo) ClearSelections(ctx context.Context, migrationID int) error {
+	return nil
+}
+func (m *mockPipelineRepo) UpsertItemResult(ctx context.Context, migrationID int, res ItemResult) error {
+	return nil
+}
+func (m *mockPipelineRepo) GetItemResults(ctx context.Context, migrationID int) ([]ItemResult, error) {
+	return nil, nil
+}
+func (m *mockPipelineRepo) GetItemResult(ctx context.Context, migrationID int, itemKey string) (ItemResult, bool, error) {
+	return ItemResult{}, false, nil
+}
+func (m *mockPipelineRepo) AppendSelectionHistory(ctx context.Context, migrationID int, h SelectionHistory) error {
+	return nil
+}
+func (m *mockPipelineRepo) GetSelectionHistory(ctx context.Context, migrationID int) ([]SelectionHistory, error) {
+	return nil, nil
+}
+
 // --- Helpers ---
 
 func containsInStr(s, substr string) bool {

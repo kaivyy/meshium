@@ -53,7 +53,7 @@
     {
       label: 'Compare',
       items: [
-        { href: '/servers/compare', label: 'Compare', icon: GitCompare },
+        { href: '/servers/compare', label: 'Compare servers', icon: GitCompare },
         { href: '/drift', label: 'Drift', icon: GitBranch },
       ]
     },

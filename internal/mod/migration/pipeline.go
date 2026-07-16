@@ -1546,6 +1546,295 @@ func (s *preparationStage) Rollback(ctx context.Context, pc *PipelineContext) er
 	return nil
 }
 
+// Phase 6C-BE: filterCategoryToApplySet returns a CategoryData containing
+// ONLY the items the operator chose to apply (apply_from_source + not blocked),
+// so a coarse category Applier (which installs the whole list) never applies a
+// keep_target/skip item. Non-selectable sub-fields (user groups/cron/firewall,
+// config metadata) are preserved as-is — only the itemized, parity-addressable
+// arrays are filtered. Returns the original data unchanged when applySet is empty
+// (meaning "apply everything", the backward-compatible default).
+//
+// Key prefixes mirror parity_engine.go compareCategory exactly so an item's
+// ItemKey matches its position in the collected data.
+func filterCategoryToApplySet(category string, raw json.RawMessage, applySet map[string]bool) CategoryData {
+	keep := func(key string) bool {
+		if len(applySet) == 0 {
+			return true // no explicit selection ⇒ apply whole category (legacy default)
+		}
+		return applySet[key]
+	}
+	switch category {
+	case "packages":
+		var d PackagesData
+		if err := json.Unmarshal(raw, &d); err != nil {
+			return CategoryData{Type: "packages", Data: raw}
+		}
+		out := make([]string, 0, len(d.Packages))
+		for _, p := range d.Packages {
+			if keep("package:" + p) {
+				out = append(out, p)
+			}
+		}
+		d.Packages = out
+		b, _ := json.Marshal(d)
+		return CategoryData{Type: "packages", Data: b}
+	case "configs":
+		var d ConfigsData
+		if err := json.Unmarshal(raw, &d); err != nil {
+			return CategoryData{Type: "configs", Data: raw}
+		}
+		files := map[string][]byte{}
+		for path, content := range d.Files {
+			if keep("config:" + path) {
+				files[path] = content
+			}
+		}
+		d.Files = files
+		b, _ := json.Marshal(d)
+		return CategoryData{Type: "configs", Data: b}
+	case "services":
+		var d ServicesData
+		if err := json.Unmarshal(raw, &d); err != nil {
+			return CategoryData{Type: "services", Data: raw}
+		}
+		out := make([]string, 0, len(d.Services))
+		for _, s := range d.Services {
+			if keep("service:" + s) {
+				out = append(out, s)
+			}
+		}
+		d.Services = out
+		b, _ := json.Marshal(d)
+		return CategoryData{Type: "services", Data: b}
+	case "users":
+		var d UsersData
+		if err := json.Unmarshal(raw, &d); err != nil {
+			return CategoryData{Type: "users", Data: raw}
+		}
+		out := make([]UserData, 0, len(d.Users))
+		for _, u := range d.Users {
+			if keep("user:" + u.Name) {
+				out = append(out, u)
+			}
+		}
+		d.Users = out
+		b, _ := json.Marshal(d)
+		return CategoryData{Type: "users", Data: b}
+	case "docker":
+		var d DockerData
+		if err := json.Unmarshal(raw, &d); err != nil {
+			return CategoryData{Type: "docker", Data: raw}
+		}
+		imgs := make([]string, 0, len(d.Images))
+		for _, img := range d.Images {
+			if keep("docker-image:" + img) {
+				imgs = append(imgs, img)
+			}
+		}
+		d.Images = imgs
+		vols := make([]DockerVolume, 0, len(d.Volumes))
+		for _, v := range d.Volumes {
+			if keep("docker-volume:" + v.Name) {
+				vols = append(vols, v)
+			}
+		}
+		d.Volumes = vols
+		cts := make([]DockerContainer, 0, len(d.Containers))
+		for _, c := range d.Containers {
+			if keep("docker-container:" + c.Name) {
+				cts = append(cts, c)
+			}
+		}
+		d.Containers = cts
+		comps := make([]DockerComposeFile, 0, len(d.ComposeFiles))
+		for _, c := range d.ComposeFiles {
+			if keep("docker-compose:" + c.Path) {
+				comps = append(comps, c)
+			}
+		}
+		d.ComposeFiles = comps
+		b, _ := json.Marshal(d)
+		return CategoryData{Type: "docker", Data: b}
+	case "database":
+		var d DatabaseCollectData
+		if err := json.Unmarshal(raw, &d); err != nil {
+			return CategoryData{Type: "database", Data: raw}
+		}
+		dbs := make([]DBCatalogEntry, 0, len(d.Databases))
+		for _, db := range d.Databases {
+			if keep("database:" + d.Engine + ":" + db.Name) {
+				dbs = append(dbs, db)
+			}
+		}
+		d.Databases = dbs
+		b, _ := json.Marshal(d)
+		return CategoryData{Type: "database", Data: b}
+	default:
+		return CategoryData{Type: category, Data: raw}
+	}
+}
+
+// itemKeysFor returns the parity ItemKeys present in a collected CategoryData,
+// mirroring the key prefixes in parity_engine.go compareCategory. Used to
+// enumerate per-item decisions + hard-block at apply time.
+func itemKeysFor(category string, data CategoryData) []string {
+	switch category {
+	case "packages":
+		var d PackagesData
+		if json.Unmarshal(data.Data, &d) != nil {
+			return nil
+		}
+		keys := make([]string, 0, len(d.Packages))
+		for _, p := range d.Packages {
+			keys = append(keys, "package:"+p)
+		}
+		return keys
+	case "configs":
+		var d ConfigsData
+		if json.Unmarshal(data.Data, &d) != nil {
+			return nil
+		}
+		keys := make([]string, 0, len(d.Files))
+		for path := range d.Files {
+			keys = append(keys, "config:"+path)
+		}
+		return keys
+	case "services":
+		var d ServicesData
+		if json.Unmarshal(data.Data, &d) != nil {
+			return nil
+		}
+		keys := make([]string, 0, len(d.Services))
+		for _, s := range d.Services {
+			keys = append(keys, "service:"+s)
+		}
+		return keys
+	case "users":
+		var d UsersData
+		if json.Unmarshal(data.Data, &d) != nil {
+			return nil
+		}
+		keys := make([]string, 0, len(d.Users))
+		for _, u := range d.Users {
+			keys = append(keys, "user:"+u.Name)
+		}
+		return keys
+	case "docker":
+		var d DockerData
+		if json.Unmarshal(data.Data, &d) != nil {
+			return nil
+		}
+		keys := make([]string, 0, len(d.Images)+len(d.Volumes)+len(d.Containers)+len(d.ComposeFiles))
+		for _, img := range d.Images {
+			keys = append(keys, "docker-image:"+img)
+		}
+		for _, v := range d.Volumes {
+			keys = append(keys, "docker-volume:"+v.Name)
+		}
+		for _, c := range d.Containers {
+			keys = append(keys, "docker-container:"+c.Name)
+		}
+		for _, c := range d.ComposeFiles {
+			keys = append(keys, "docker-compose:"+c.Path)
+		}
+		return keys
+	case "database":
+		var d DatabaseCollectData
+		if json.Unmarshal(data.Data, &d) != nil {
+			return nil
+		}
+		keys := make([]string, 0, len(d.Databases))
+		for _, db := range d.Databases {
+			keys = append(keys, "database:"+d.Engine+":"+db.Name)
+		}
+		return keys
+	default:
+		return nil
+	}
+}
+
+// buildTargetInventory does a live target collect for the migration's categories so
+// hard-dependency satisfaction can be recomputed at apply time (defense-in-depth:
+// the FE already blocks apply decisions on hard deps, but selections may also
+// arrive via API/bulk, so the backend must re-verify). Mirrors the target
+// loop in ParityEngine.ComputeParity.
+func buildTargetInventory(ctx context.Context, pc *PipelineContext) *targetInventory {
+	inv := newTargetInventory()
+	if pc.TargetSSH == nil || pc.Registry == nil || pc.Migration == nil {
+		return inv
+	}
+	for _, catName := range pc.Migration.Categories {
+		mod, ok := pc.Registry.Get(catName)
+		if !ok {
+			continue
+		}
+		td, err := mod.Collector.Collect(ctx, pc.TargetSSH)
+		if err != nil {
+			continue
+		}
+		mergeInventory(inv, catName, td)
+	}
+	return inv
+}
+
+// itemHardBlocked recomputes whether one item's hard dependencies are unsatisfied
+// against the live target inventory (parity_engine.go hasUnsatisfiedHardDep
+// operates on a ParityItem; here we derive deps directly so no parity re-run is
+// needed in the apply stage).
+func itemHardBlocked(category, itemKey string, inv *targetInventory) bool {
+	for _, d := range depsFor(category, itemKey, inv) {
+		if d.Kind == DepHard && !d.Satisfied {
+			return true
+		}
+	}
+	return false
+}
+
+// applyItemPlan classifies every item in a category against the operator's
+// per-item decisions + hard-dep enforcement, producing:
+//   - applySet: keys to actually send to the (coarse) Applier after filtering
+//   - results:  one ItemResult row per item (blocked / skipped / not_applicable
+//     / pending). Applied rows are finalized to ExecApplied by the caller after a
+//     successful Applier.Apply.
+// Honest rules (contract §F/G): a hard-blocked item is NEVER in applySet and
+// is recorded ExecBlocked even if its decision was apply_from_source; keep_target
+// / skip → ExecSkipped; review_manual → ExecNotApplicable.
+func applyItemPlan(ctx context.Context, pc *PipelineContext, step MigrationStepRecord,
+	decisions map[string]ParityAction, inv *targetInventory) (applySet map[string]bool, results []ItemResult) {
+
+	applySet = map[string]bool{}
+	now := time.Now().UTC().Format(time.RFC3339)
+	for _, key := range itemKeysFor(step.Category, CategoryData{Data: json.RawMessage(step.Data)}) {
+		action := decisions[key] // "" ⇒ undecided
+		hard := itemHardBlocked(step.Category, key, inv)
+		rec := ItemResult{
+			MigrationID:    pc.MigrationID,
+			ItemKey:        key,
+			Category:       step.Category,
+			LastExecutionAt: now,
+		}
+		switch {
+		case hard:
+			// Unsatisfied hard dep → blocked, never applied (spec §G).
+			rec.ExecutionState = ExecBlocked
+			rec.ExecutionNotes = "hard dependency unsatisfied at apply time"
+		case action == ActionKeepTarget || action == ActionSkip:
+			rec.ExecutionState = ExecSkipped
+		case action == ActionReviewManual:
+			rec.ExecutionState = ExecNotApplicable
+		case action == ActionApplyFromSource || action == "":
+			// apply_from_source (or undecided ⇒ legacy apply-whole default).
+			applySet[key] = true
+			rec.ExecutionState = ExecPending
+		default:
+			applySet[key] = true
+			rec.ExecutionState = ExecPending
+		}
+		results = append(results, rec)
+	}
+	return applySet, results
+}
+
 // initialSyncStage applies the data collected during the collect phase to the
 // target by replaying each category's Applier.Apply. Despite the stage name,
 // this is NOT a file-level rsync transfer: the SyncEngine (InitialSync /
@@ -1586,9 +1875,13 @@ func (s *initialSyncStage) Execute(ctx context.Context, pc *PipelineContext) err
 	// from the items the operator chose:
 	//   - no selections for the category → apply (backward-compatible default)
 	//   - every item keep_target/skip     → skip the whole category
-	//   - mixed (some apply, some keep/skip) → apply the category, but surface a
-	//     warning: the applier cannot honor per-item skip within a category.
-	selectionsByCat := loadSelectionBuckets(ctx, pc)
+	// Phase 6C-BE: per-item decisions + a live target inventory so hard
+	// dependencies can be re-verified at apply time (defense-in-depth). The
+	// coarse category Applier applies whatever we hand it, so we filter the
+	// collected data to the apply-set and persist one honest ItemResult row
+	// per item (blocked / skipped / not_applicable / applied / failed).
+	decisions := loadItemDecisions(ctx, pc)
+	inv := buildTargetInventory(ctx, pc)
 
 	for _, step := range steps {
 		if ctx.Err() != nil {
@@ -1603,16 +1896,23 @@ func (s *initialSyncStage) Execute(ctx context.Context, pc *PipelineContext) err
 			continue
 		}
 
-		// Phase 6B4: honor the operator's category-level decision.
-		if decision := selectionsByCat[step.Category]; decision == catSkip {
-			if err := pc.JobRepo.UpdateStepStatus(step.ID, StepStatusSkipped, "operator chose keep_target/skip for all items in category"); err != nil {
+		applySet, itemResults := applyItemPlan(ctx, pc, step, decisions, inv)
+
+		// Whole category skipped when NOTHING is in the apply-set (every item
+		// keep_target/skip/blocked/review_manual) — honest, no silent apply.
+		if len(applySet) == 0 {
+			// Persist the per-item results (blocked/skipped/not_applicable).
+			for _, r := range itemResults {
+				if err := pc.JobRepo.UpsertItemResult(ctx, pc.MigrationID, r); err != nil {
+					log.Printf("warning: failed to persist item result for %s/%s: %v", step.Category, r.ItemKey, err)
+				}
+			}
+			if err := pc.JobRepo.UpdateStepStatus(step.ID, StepStatusSkipped, "no items selected to apply (all keep_target/skip/blocked/review_manual)"); err != nil {
 				log.Printf("warning: failed to persist skipped step for %s: %v", step.Category, err)
 			}
 			skippedSet[step.Category] = struct{}{}
-			pc.OnProgress(WSMessage{Step: "initial_sync", Status: "warning", Value: fmt.Sprintf("Skipped %s: operator selected keep_target/skip for all items", step.Category)})
+			pc.OnProgress(WSMessage{Step: "initial_sync", Status: "warning", Value: fmt.Sprintf("Skipped %s: no items selected to apply", step.Category)})
 			continue
-		} else if decision == catMixed {
-			pc.OnProgress(WSMessage{Step: "initial_sync", Status: "warning", Value: fmt.Sprintf("%s: per-item skip not supported by the applier — applying whole category; some selected-skip items were applied", step.Category)})
 		}
 
 		// Get the category module
@@ -1647,17 +1947,45 @@ func (s *initialSyncStage) Execute(ctx context.Context, pc *PipelineContext) err
 			dba.SetCheckpointStore(pc.MigrationID, pc.CheckpointStore)
 		}
 
-		pc.OnProgress(WSMessage{Step: "initial_sync", Status: "progress", Value: fmt.Sprintf("Applying %s...", step.Category)})
+		// Phase 6C-BE: hand the coarse Applier ONLY the apply-set items.
+		// Non-applied items (keep_target/skip/blocked/review_manual) are
+		// excluded here so they are never silently applied (fixes the old
+		// catMixed "applied whole category" bug).
+		filtered := filterCategoryToApplySet(step.Category, data.Data, applySet)
+
+		pc.OnProgress(WSMessage{Step: "initial_sync", Status: "progress", Value: fmt.Sprintf("Applying %s (%d of %d items)...", step.Category, len(applySet), len(itemResults))})
 
 		// Apply
-		err := mod.Applier.Apply(ctx, pc.TargetSSH, data, func(msg WSMessage) {
+		err := mod.Applier.Apply(ctx, pc.TargetSSH, filtered, func(msg WSMessage) {
 			msg.Step = "initial_sync:" + step.Category + ":" + msg.Step
 			pc.OnProgress(msg)
 		})
 		if err != nil {
+			// Mark the apply-set items failed; persist all per-item rows.
+			for i := range itemResults {
+				if applySet[itemResults[i].ItemKey] {
+					itemResults[i].ExecutionState = ExecFailed
+					itemResults[i].ExecutionNotes = "apply failed: " + err.Error()
+				}
+				if uerr := pc.JobRepo.UpsertItemResult(ctx, pc.MigrationID, itemResults[i]); uerr != nil {
+					log.Printf("warning: failed to persist item result for %s/%s: %v", step.Category, itemResults[i].ItemKey, uerr)
+				}
+			}
 			// Roll back already-applied categories
 			s.rollbackApplied(ctx, pc, appliedOrder)
 			return fmt.Errorf("apply %s failed: %w", step.Category, err)
+		}
+
+		// Success: finalize apply-set rows to ExecApplied; persist all rows.
+		for i := range itemResults {
+			if applySet[itemResults[i].ItemKey] {
+				itemResults[i].ExecutionState = ExecApplied
+				itemResults[i].LastExecutionAt = time.Now().UTC().Format(time.RFC3339)
+				itemResults[i].StepRefs = []int{step.ID}
+			}
+			if uerr := pc.JobRepo.UpsertItemResult(ctx, pc.MigrationID, itemResults[i]); uerr != nil {
+				log.Printf("warning: failed to persist item result for %s/%s: %v", step.Category, itemResults[i].ItemKey, uerr)
+			}
 		}
 
 		// Checkpoint
@@ -1686,57 +2014,21 @@ func (s *initialSyncStage) Execute(ctx context.Context, pc *PipelineContext) err
 	return nil
 }
 
-// --- Phase 6B4: selective-apply category decision ---
+// --- Phase 6C-BE: per-item selective apply ---
 
-// categoryDecision is the derived per-category apply decision, since the
-// appliers operate at category granularity (see loadSelectionBuckets).
-type categoryDecisionKind int
-
-const (
-	catApply categoryDecisionKind = iota // default: apply the category
-	catSkip                              // every item keep_target/skip → skip
-	catMixed                             // some keep/skip, some apply → apply + warn
-)
-
-// loadSelectionBuckets reads the operator's item selections for the migration
-// and buckets them by category, classifying each category's decision. Items
-// with action apply_from_source (or no selection) count as "apply"; keep_target
-// and skip count as "skip". A category is skipped only when ALL its selected
-// items are skip; a mix forces an apply with a warning because category appliers
-// cannot honor per-item skips.
-func loadSelectionBuckets(ctx context.Context, pc *PipelineContext) map[string]categoryDecisionKind {
-	out := map[string]categoryDecisionKind{}
+// loadItemDecisions reads the operator's per-item selections for the migration
+// and returns them keyed by ItemKey. An absent key means "undecided" → the
+// apply stage treats it as apply (legacy default), but only after hard-dep
+// re-verification (applyItemPlan).
+func loadItemDecisions(ctx context.Context, pc *PipelineContext) map[string]ParityAction {
+	out := map[string]ParityAction{}
 	decisions, err := pc.JobRepo.GetSelections(ctx, pc.MigrationID)
 	if err != nil {
-		// No selections persisted (legacy migration) → every category applies.
+		// No selections persisted (legacy migration) → every item applies.
 		return out
 	}
-	type acc struct {
-		apply, skip int
-	}
-	byCat := map[string]*acc{}
 	for _, d := range decisions {
-		a := byCat[d.Category]
-		if a == nil {
-			a = &acc{}
-			byCat[d.Category] = a
-		}
-		switch ParityAction(d.Action) {
-		case ActionApplyFromSource:
-			a.apply++
-		case ActionKeepTarget, ActionSkip:
-			a.skip++
-		}
-	}
-	for cat, a := range byCat {
-		switch {
-		case a.skip > 0 && a.apply == 0:
-			out[cat] = catSkip
-		case a.skip > 0 && a.apply > 0:
-			out[cat] = catMixed
-		default:
-			out[cat] = catApply
-		}
+		out[d.ItemKey] = ParityAction(d.Action)
 	}
 	return out
 }
@@ -1808,6 +2100,22 @@ func (s *initialSyncStage) Rollback(ctx context.Context, pc *PipelineContext) er
 }
 
 func (s *initialSyncStage) rollbackApplied(ctx context.Context, pc *PipelineContext, appliedOrder []string) {
+	// Phase 6C-BE: honest rollback scope. The coarse Applier.Rollback is
+	// per-category, but the ITEM-LEVEL applied subset is the only thing that
+	// was actually written to the target. keep_target / skip / review_manual /
+	// blocked / failed items were never applied, so they are excluded by
+	// construction (they have no ExecApplied row). We roll back ONLY the
+	// categories that contain at least one ExecApplied item, and record the
+	// rolled-back items as ExecRolledBack.
+	appliedCats := map[string]bool{}
+	if itemResults, err := pc.JobRepo.GetItemResults(ctx, pc.MigrationID); err == nil {
+		for _, r := range itemResults {
+			if r.ExecutionState == ExecApplied {
+				appliedCats[r.Category] = true
+			}
+		}
+	}
+
 	// Load backups from DB
 	backups, err := pc.JobRepo.GetBackups(pc.MigrationID)
 	if err != nil {
@@ -1823,6 +2131,10 @@ func (s *initialSyncStage) rollbackApplied(ctx context.Context, pc *PipelineCont
 
 	for i := len(appliedOrder) - 1; i >= 0; i-- {
 		catName := appliedOrder[i]
+		// Only roll back categories that actually had applied items.
+		if !appliedCats[catName] {
+			continue
+		}
 		backup, ok := backupMap[catName]
 		if !ok {
 			continue
@@ -1834,6 +2146,18 @@ func (s *initialSyncStage) rollbackApplied(ctx context.Context, pc *PipelineCont
 		pc.OnProgress(WSMessage{Step: "rollback", Status: "progress", Value: fmt.Sprintf("Rolling back %s...", catName)})
 		if err := mod.Applier.Rollback(ctx, pc.TargetSSH, backup); err != nil {
 			pc.OnProgress(WSMessage{Step: "rollback", Status: "warning", Value: fmt.Sprintf("Rollback warning: %v", err)})
+		} else {
+			// Mark applied items in this category as rolled back.
+			if itemResults, gerr := pc.JobRepo.GetItemResults(ctx, pc.MigrationID); gerr == nil {
+				for _, r := range itemResults {
+					if r.Category == catName && r.ExecutionState == ExecApplied {
+						r.ExecutionState = ExecRolledBack
+						if uerr := pc.JobRepo.UpsertItemResult(ctx, pc.MigrationID, r); uerr != nil {
+							log.Printf("warning: failed to record rollback for %s: %v", r.ItemKey, uerr)
+						}
+					}
+				}
+			}
 		}
 	}
 }
@@ -1989,28 +2313,98 @@ func (s *healthVerificationStage) Name() PipelineStageName { return StageHealthV
 func (s *healthVerificationStage) Execute(ctx context.Context, pc *PipelineContext) error {
 	pc.OnProgress(WSMessage{Step: "health_verification", Status: "progress", Value: "Verifying health on target..."})
 
-	// Basic health check: verify target is responsive
+	// Phase 6C-BE: load the applied item results so we can record honest
+	// per-item verification evidence. Items NOT in the applied set (keep_target /
+	// skip / review_manual / blocked) are deliberately left unresolved — they
+	// were never applied, so verifying them would be a false green.
+	applied, err := s.repo.GetItemResults(ctx, pc.MigrationID)
+	if err != nil {
+		log.Printf("warning: health_verification could not load item results: %v", err)
+		applied = nil
+	}
+	appliedByCat := map[string][]ItemResult{}
+	for _, r := range applied {
+		if r.ExecutionState == ExecApplied {
+			appliedByCat[r.Category] = append(appliedByCat[r.Category], r)
+		}
+	}
+
+	// Basic health check: verify target is responsive. A responsive target
+	// proves the INFRA layer (item reachable / applied state exists) — NOT
+	// runtime or app health, which need deeper probes (below).
 	output, _, _, err := pc.TargetSSH.ExecContext(ctx, "echo ok")
 	if err != nil {
+		s.failVerification(ctx, pc, appliedByCat, "target unreachable: "+err.Error())
 		return fmt.Errorf("target health check failed: %w", err)
 	}
 	if output != "ok\n" {
-		// err is nil here, so don't wrap it (would render as %!w(<nil>)).
+		s.failVerification(ctx, pc, appliedByCat, "target health check returned unexpected output")
 		return fmt.Errorf("target health check failed: unexpected output %q", output)
 	}
+	// Honest infra-level attestation for every applied item.
+	s.attestVerification(ctx, pc, appliedByCat, VerifyInfra, "infra",
+		"target responsive; item applied and present")
 
-	// Check Docker containers if docker category is included
+	// Check Docker containers if docker category is included. A container
+	// reporting "Up" is a RUNTIME-level attestation (active/listening).
 	for _, cat := range pc.Migration.Categories {
 		if cat == "docker" {
 			dockerOutput, _, _, err := pc.TargetSSH.ExecContext(ctx, "docker ps --format '{{.Names}} {{.Status}}' 2>/dev/null")
 			if err == nil && dockerOutput != "" {
 				pc.OnProgress(WSMessage{Step: "health_verification", Status: "progress", Value: fmt.Sprintf("Docker containers: %s", dockerOutput)})
+				// Upgrade applied docker items to runtime_verified when their
+				// container shows Up; leave others at infra_verified (honest).
+				for _, r := range appliedByCat["docker"] {
+					if strings.Contains(dockerOutput, strings.TrimPrefix(r.ItemKey, "docker-container:")) &&
+						strings.Contains(dockerOutput, "Up") {
+						s.attestVerification(ctx, pc, appliedByCat, VerifyRuntime, "runtime",
+							"container reported Up")
+					}
+				}
 			}
 		}
 	}
 
 	pc.OnProgress(WSMessage{Step: "health_verification", Status: "success", Value: "Health verification passed"})
 	return nil
+}
+
+// attestVerification records an honest verification level for every applied item
+// in the given category buckets. It only ever RAISES the level (infra →
+// runtime) and never fabricates app_verified, which needs a real /health probe
+// this stage does not perform (those items stay infra/runtime, i.e. NOT green).
+func (s *healthVerificationStage) attestVerification(ctx context.Context, pc *PipelineContext, byCat map[string][]ItemResult, state VerificationState, level, evidence string) {
+	for _, items := range byCat {
+		for _, r := range items {
+			// Never downgrade an already-stronger attestation.
+			if r.VerificationState == VerifyRuntime || r.VerificationState == VerifyApp {
+				continue
+			}
+			r.VerificationState = state
+			r.VerificationLevel = level
+			r.VerifyEvidence = evidence
+			r.VerifyNotes = ""
+			if uerr := s.repo.UpsertItemResult(ctx, pc.MigrationID, r); uerr != nil {
+				log.Printf("warning: failed to record verification for %s: %v", r.ItemKey, uerr)
+			}
+		}
+	}
+}
+
+// failVerification marks applied items verify_failed with the given reason, so a
+// broken target is never reported green.
+func (s *healthVerificationStage) failVerification(ctx context.Context, pc *PipelineContext, byCat map[string][]ItemResult, reason string) {
+	for _, items := range byCat {
+		for _, r := range items {
+			r.VerificationState = VerifyFailed
+			r.VerificationLevel = ""
+			r.VerifyEvidence = ""
+			r.VerifyNotes = reason
+			if uerr := s.repo.UpsertItemResult(ctx, pc.MigrationID, r); uerr != nil {
+				log.Printf("warning: failed to record verification failure for %s: %v", r.ItemKey, uerr)
+			}
+		}
+	}
 }
 
 func (s *healthVerificationStage) Rollback(ctx context.Context, pc *PipelineContext) error {
@@ -2576,6 +2970,16 @@ func deriveMigrationStatus(ctx context.Context, pc *PipelineContext) (string, st
 		}
 	}
 
+	// Phase 6C-BE: honest terminal status from PER-ITEM evidence. When
+	// migration_item_results rows exist, they are authoritative; the four
+	// state dimensions stay separate so a migration can never read "green"
+	// while items are unresolved / manual / verify_failed.
+	itemResults, rerr := pc.JobRepo.GetItemResults(ctx, pc.MigrationID)
+	if rerr == nil && len(itemResults) > 0 {
+		return deriveStatusFromItems(itemResults, selections, failedSteps, skippedSteps, appliedSteps)
+	}
+
+	// Legacy fallback (no item results persisted): coarse step + selection view.
 	manualGap := 0
 	for _, d := range selections {
 		switch ParityAction(d.Action) {
@@ -2594,6 +2998,94 @@ func deriveMigrationStatus(ctx context.Context, pc *PipelineContext) (string, st
 			fmt.Sprintf("%d item(s) skipped/review_manual requiring follow-up; %d applied, %d skipped", manualGap, appliedSteps, skippedSteps)
 	default:
 		// Clean: all selected applied/accepted, no failures, no manual gaps.
+		return StatusCompleted, ""
+	}
+}
+
+// deriveStatusFromItems computes the terminal status purely from per-item
+// execution + verification evidence (contract §M). Honest rules:
+//   - verify_failed present            → verification_failed
+//   - applied but not verified/unresolved → verification_partial
+//   - any ExecFailed                 → completed_partial
+//   - open skip/unknown (no apply)  → completed_with_unresolved_drift
+//   - review_manual present          → completed_with_manual_gaps
+//   - keep_target present, no gaps  → completed_with_drift
+//   - all applied + verified, no gaps → completed (true green)
+func deriveStatusFromItems(results []ItemResult, selections []SelectionDecision, failedSteps, skippedSteps, appliedSteps int) (string, string) {
+	var blocked, applied, failed, verifyFailed, unresolved, keepTarget, skipReview, intendedApplied int
+	selByKey := map[string]ParityAction{}
+	for _, d := range selections {
+		selByKey[d.ItemKey] = ParityAction(d.Action)
+	}
+	for _, r := range results {
+		// A hard-blocked item is a real gap: it was never applied.
+		if r.ExecutionState == ExecBlocked {
+			blocked++
+			continue
+		}
+		switch r.ExecutionState {
+		case ExecPending:
+			// was intended to apply but never executed (interrupted/incomplete).
+			intendedApplied++
+		case ExecFailed:
+			failed++
+			intendedApplied++
+		case ExecSkipped:
+			// keep_target or skip decision.
+			if selByKey[r.ItemKey] == ActionKeepTarget {
+				keepTarget++
+			} else {
+				skipReview++
+			}
+		case ExecNotApplicable:
+			// review_manual / non-executable placeholder.
+			skipReview++
+		case ExecApplied:
+			applied++
+			intendedApplied++
+			switch r.VerificationState {
+			case VerifyFailed:
+				verifyFailed++
+			case VerifyInfra, VerifyRuntime, VerifyApp, VerifyPartial:
+				// at least one layer verified — not a gap
+			default:
+				// not_verified / unresolved / empty → probed-inconclusive
+				unresolved++
+			}
+		}
+	}
+
+	// A pure skip/review_manual/keep_target migration (nothing intended to apply)
+	// must NOT be reported as verification_partial — it is honest drift, not a
+	// verification gap. Only flag "applied but unverified" when something was
+	// actually meant to be applied.
+	switch {
+	case verifyFailed > 0:
+		return StatusVerificationFailed,
+			fmt.Sprintf("%d item(s) failed verification; %d applied, %d skipped/blocked", verifyFailed, applied, blocked+skipReview)
+	case unresolved > 0 || (intendedApplied > 0 && applied == 0):
+		// Applied items that were never verified (no probe) are NOT green.
+		verified := applied - unresolved
+		if verified < 0 {
+			verified = 0
+		}
+		return StatusVerificationPartial,
+			fmt.Sprintf("%d applied item(s) unverified/unresolved; %d verified, %d skipped/blocked", unresolved, verified, blocked+skipReview)
+	case failed > 0 || failedSteps > 0:
+		return StatusCompletedPartial,
+			fmt.Sprintf("%d item(s) failed to apply; %d applied, %d skipped/blocked", failed+failedSteps, applied, blocked+skipReview)
+	case skipReview > 0:
+		// open skip/unknown or review_manual ⇒ drift the operator must resolve.
+		return StatusCompletedWithUnresolvedDrift,
+			fmt.Sprintf("%d item(s) skipped/review_manual (unresolved drift); %d applied, %d keep_target", skipReview, applied, keepTarget)
+	case blocked > 0:
+		return StatusCompletedWithUnresolvedDrift,
+			fmt.Sprintf("%d item(s) hard-blocked (unresolved); %d applied, %d keep_target", blocked, applied, keepTarget)
+	case keepTarget > 0:
+		return StatusCompletedWithDrift,
+			fmt.Sprintf("%d item(s) accepted as drift (keep_target); %d applied", keepTarget, applied)
+	default:
+		// All applied items verified, no gaps ⇒ true green.
 		return StatusCompleted, ""
 	}
 }

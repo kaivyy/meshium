@@ -180,7 +180,7 @@
   <title>Server Diff</title>
 </svelte:head>
 
-<div class="p-4 sm:p-6 max-w-6xl mx-auto">
+<div class="page-gutter max-w-6xl">
   <a href={migration ? `/migrations/${migration.id}` : `/migrations/${migrationId}`} class="mb-4 inline-flex items-center gap-2 text-sm text-fg-muted transition-colors hover:text-fg">
     <ArrowLeft size={16} />
     Back to migration
@@ -205,7 +205,7 @@
     <div class="space-y-6">
       <div class="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
         <div>
-          <h1 class="text-2xl font-semibold text-fg">Server Diff</h1>
+          <h1 class="text-2xl font-semibold text-fg">Source/target diff</h1>
           <p class="mt-1 text-sm text-fg-subtle">
             {migration ? `${migration.sourceId ?? migration.sourceServerId} → ${migration.targetId ?? migration.targetServerId}` : `Migration ${migrationId}`}
           </p>
@@ -218,11 +218,18 @@
           <a
             href="/migrations/{migrationId}/compare"
             class="inline-flex items-center gap-1 rounded-lg bg-surface-muted px-3 py-2 hover:bg-surface transition-colors"
+            title="Open the item-level compare page to choose what to apply"
           >
-            <ArrowRightLeft size={16} /> Compare &amp; Select
+            <ArrowRightLeft size={16} /> Open item-level compare
           </a>
         </div>
       </div>
+
+      <p class="mt-2 text-xs text-fg-subtle">
+        This page shows the <strong>raw</strong> source&ndash;target differences (added / removed / changed).
+        Use <a href="/migrations/{migrationId}/compare" class="underline hover:text-fg">item-level compare</a>
+        to review selectable items and decide what to apply.
+      </p>
 
       <Card padding="lg">
         <div class="flex flex-wrap items-center gap-3 text-sm text-fg-muted">

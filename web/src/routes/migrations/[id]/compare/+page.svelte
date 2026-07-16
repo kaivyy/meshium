@@ -1,7 +1,7 @@
 <script lang="ts">
   import { onMount } from 'svelte';
   import { page } from '$app/state';
-  import { ArrowLeft, ArrowRightLeft, RefreshCw, ShieldAlert, ShieldCheck, CircleSlash, Eye } from 'lucide-svelte';
+  import { ArrowLeft, ArrowRightLeft, RefreshCw, ShieldAlert, ShieldCheck, CircleSlash, Eye, X } from 'lucide-svelte';
   import {
     migrationApi,
     type ParityResult,
@@ -39,6 +39,14 @@
     { value: 'review_manual', label: 'Review manual' },
   ];
 
+  // A hard dependency that is not satisfied blocks apply — an item must not be
+  // transferred to target while something it strictly requires is missing/broken.
+  // keep_target / skip / review_manual are always allowed (they don't transfer).
+  function hardDepUnsatisfied(it: ParityItem | null): boolean {
+    if (!it?.deps) return false;
+    return it.deps.some((d) => d.kind === 'hard' && !d.satisfied);
+  }
+
   async function persistSelection(it: ParityItem | null, action: ParityAction) {
     if (!it) return;
     saving = true;
@@ -60,6 +68,10 @@
 
   function requestAction(it: ParityItem | null, action: ParityAction) {
     if (!it) return;
+    if (action === 'apply_from_source' && hardDepUnsatisfied(it)) {
+      toast.error('Apply blocked: a required (hard) dependency is unsatisfied.');
+      return;
+    }
     const destructive = (action === 'keep_target' || action === 'skip') &&
       it.status !== 'same' && it.status !== 'accepted_target';
     if (destructive) {
@@ -117,11 +129,17 @@
     4: 'Manual',
   };
 
+  // ObservedState tones. Keep "Keep target" (accepted_target) NEUTRAL — it is a
+  // deliberate non-apply decision, not a success/healthy signal. Only "verified"
+  // (post-apply verification passed) earns success. "same" is observed==target,
+  // acceptable as success but must never be conflated with "verified".
   function statusTone(s: ParityStatus): 'success' | 'warning' | 'error' | 'info' | 'neutral' {
-    if (s === 'same' || s === 'verified' || s === 'accepted_target') return 'success';
+    if (s === 'verified') return 'success';
+    if (s === 'same') return 'success';
     if (s === 'missing_on_target' || s === 'different') return 'warning';
-    if (s === 'unresolved' || s === 'manual_required') return 'error';
-    if (s === 'skipped_by_user' || s === 'stale' || s === 'unsupported') return 'neutral';
+    if (s === 'unresolved') return 'warning';
+    if (s === 'manual_required') return 'error';
+    if (s === 'skipped_by_user' || s === 'stale' || s === 'unsupported' || s === 'accepted_target') return 'neutral';
     return 'info';
   }
 
@@ -136,6 +154,33 @@
     if (kind === 'hard') return 'error';
     if (kind === 'recommended') return 'warning';
     return 'info';
+  }
+
+  // Phase 6C-BE: real per-item execution + verification evidence from the
+  // backend. Only rendered when present (omitempties); never synthesized.
+  const execLabel: Record<string, string> = {
+    pending: 'Execution pending',
+    running: 'Executing',
+    succeeded: 'Executed',
+    failed: 'Execution failed',
+  };
+  const verifyLabel: Record<string, string> = {
+    pending: 'Verification pending',
+    running: 'Verifying',
+    passed: 'Verified',
+    failed: 'Verification failed',
+  };
+  function execTone(s: string): 'success' | 'error' | 'warning' | 'info' | 'neutral' {
+    if (s === 'succeeded') return 'success';
+    if (s === 'failed') return 'error';
+    if (s === 'running') return 'info';
+    return 'neutral';
+  }
+  function verifyTone(s: string): 'success' | 'error' | 'warning' | 'info' | 'neutral' {
+    if (s === 'passed') return 'success';
+    if (s === 'failed') return 'error';
+    if (s === 'running') return 'info';
+    return 'neutral';
   }
 
   let bulking = $state(false);
@@ -182,7 +227,7 @@
   onMount(load);
 </script>
 
-<div class="max-w-5xl mx-auto p-4 sm:p-6">
+<div class="page-gutter max-w-5xl">
   <div class="flex items-center justify-between mb-4">
     <div class="flex items-center gap-3">
       <a href="/migrations/{migrationId}" class="text-fg-subtle hover:text-fg">
@@ -200,7 +245,7 @@
     <button
       on:click={load}
       disabled={loading}
-      class="flex items-center gap-2 px-3 py-2 bg-surface-muted hover:bg-surface rounded-lg text-sm transition-colors disabled:opacity-50"
+      class="btn btn-secondary btn-sm"
     >
       <RefreshCw size={16} class={loading ? 'animate-spin' : ''} /> Refresh
     </button>
@@ -214,7 +259,7 @@
           title={b.hint}
           on:click={() => runBulk(b.policy)}
           disabled={bulking}
-          class="px-3 py-1.5 rounded-lg border border-border bg-surface-muted hover:bg-surface text-sm transition-colors disabled:opacity-50"
+          class="btn btn-secondary btn-sm"
         >
           {b.label}
         </button>
@@ -225,7 +270,7 @@
   {#if loading}
     <div class="flex justify-center py-16"><Spinner label="Loading parity" /></div>
   {:else if error}
-    <div class="rounded-xl border border-error/40 bg-error/10 p-6 text-center text-danger">{error}</div>
+    <div class="rounded-xl border border-error/40 bg-error/10 p-6 text-center text-error">{error}</div>
   {:else if !result || !result.items.length}
     <EmptyState
       title="Nothing to compare"
@@ -243,6 +288,13 @@
         computed {new Date(result.computedAt).toLocaleString()}
       </span>
     </div>
+
+    <p class="mb-4 text-xs text-fg-subtle">
+      Per-item badges above show <strong>observed</strong> parity and your <strong>decision</strong>.
+      Once an item is applied, the backend reports real per-item <strong>execution</strong> and
+      <strong>verification</strong> evidence (when it has run) &mdash; shown only where present, never
+      fabricated. Full apply + health verification lives in the pipeline.
+    </p>
 
     {#each grouped as [category, items] (category)}
       <div class="mb-4 overflow-hidden rounded-xl border border-border">
@@ -267,6 +319,12 @@
               <div class="flex flex-col items-end gap-1 shrink-0">
                 <Badge variant={statusTone(it.status)}>{statusLabel[it.status] ?? it.status}</Badge>
                 <Badge variant={levelTone(it.applyLevel)}>{levelLabel[it.applyLevel]}</Badge>
+                {#if it.executionState}
+                  <Badge variant={execTone(it.executionState)}>{execLabel[it.executionState] ?? it.executionState}</Badge>
+                {/if}
+                {#if it.verificationState}
+                  <Badge variant={verifyTone(it.verificationState)}>{verifyLabel[it.verificationState] ?? it.verificationState}</Badge>
+                {/if}
                 {#if selections[it.itemKey]}
                   <Badge variant="info">→ {selections[it.itemKey]}</Badge>
                 {/if}
@@ -324,7 +382,7 @@
           <div class="text-xs text-fg-subtle uppercase tracking-wide">Parity item</div>
           <div class="font-mono text-sm break-all">{selected.itemKey}</div>
         </div>
-        <button class="text-fg-subtle hover:text-fg" on:click={() => (selected = null)} aria-label="Close">✕</button>
+        <button class="text-fg-subtle hover:text-fg" on:click={() => (selected = null)} aria-label="Close"><X size={18} /></button>
       </div>
 
       <div class="grid grid-cols-2 gap-3 mb-4">
@@ -344,6 +402,16 @@
           <div class="text-xs text-fg-subtle mb-1">Freshness</div>
           <span class="text-sm">{selected.freshness ?? 'fresh'}</span>
         </div>
+        {#if selected.executionState}
+          <div class="rounded-lg bg-surface-muted p-3">
+            <div class="text-xs text-fg-subtle mb-1">Execution (backend)</div>
+            <Badge variant={execTone(selected.executionState)}>{execLabel[selected.executionState] ?? selected.executionState}</Badge>
+          </div>
+          <div class="rounded-lg bg-surface-muted p-3">
+            <div class="text-xs text-fg-subtle mb-1">Verification (backend)</div>
+            <Badge variant={verifyTone(selected.verificationState ?? 'pending')}>{verifyLabel[selected.verificationState ?? 'pending'] ?? selected.verificationState}</Badge>
+          </div>
+        {/if}
       </div>
 
       <div class="mb-4">
@@ -351,15 +419,20 @@
         <div class="flex flex-wrap gap-2">
           {#each actionOptions as opt}
             <button
-              class="px-3 py-1.5 rounded-lg border text-sm transition-colors disabled:opacity-50 {actionFor(selected) === opt.value ? 'bg-accent text-accent-fg border-accent' : 'bg-surface-muted border-border hover:bg-surface'}"
-              disabled={saving}
+              class="btn btn-sm {actionFor(selected) === opt.value ? 'btn-primary' : 'btn-secondary'}"
+              disabled={saving || (opt.value === 'apply_from_source' && hardDepUnsatisfied(selected))}
+              title={opt.value === 'apply_from_source' && hardDepUnsatisfied(selected) ? 'Blocked: a required dependency is unsatisfied' : undefined}
               on:click={() => requestAction(selected, opt.value)}
             >
               {opt.label}
             </button>
           {/each}
         </div>
-        {#if actionFor(selected) !== selected.suggested}
+        {#if hardDepUnsatisfied(selected)}
+          <p class="text-xs text-error mt-2 flex items-center gap-1">
+            <CircleSlash size={12} /> Apply blocked until the required dependency is satisfied.
+          </p>
+        {:else if actionFor(selected) !== selected.suggested}
           <p class="text-xs text-fg-subtle mt-2">Overrides suggested <code>{selected.suggested}</code>.</p>
         {/if}
       </div>
@@ -392,7 +465,7 @@
               <li class="flex items-start gap-2 text-sm">
                 <span class="mt-0.5">
                   {#if d.kind === 'hard' && !d.satisfied}
-                    <CircleSlash size={14} class="text-danger" />
+                    <CircleSlash size={14} class="text-error" />
                   {:else if d.satisfied}
                     <ShieldCheck size={14} class="text-success" />
                   {:else}
@@ -424,7 +497,7 @@
       class="w-full max-w-md rounded-xl border border-error/40 bg-surface p-6 shadow-2xl"
       on:click|stopPropagation
     >
-      <div class="flex items-center gap-2 mb-3 text-danger">
+      <div class="flex items-center gap-2 mb-3 text-error">
         <ShieldAlert size={18} />
         <h2 class="text-base font-semibold">Confirm {pendingConfirm.action}</h2>
       </div>
@@ -441,13 +514,13 @@
       </p>
       <div class="flex justify-end gap-2">
         <button
-          class="px-3 py-1.5 rounded-lg bg-surface-muted hover:bg-surface text-sm"
+          class="btn btn-secondary btn-sm"
           on:click={() => (pendingConfirm = null)}
         >
           Cancel
         </button>
         <button
-          class="px-3 py-1.5 rounded-lg bg-error text-error-fg hover:opacity-90 text-sm font-medium disabled:opacity-50"
+          class="btn btn-danger btn-sm disabled:opacity-50"
           disabled={saving}
           on:click={confirmDestructive}
         >

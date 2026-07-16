@@ -30,6 +30,10 @@ type MigrationRunner interface {
 	ParitySummary(ctx context.Context, migrationID int) (*ParitySummary, error)
 	// BulkApply runs a 6B6 progressive-automation sweep (apply-safe / accept-risky).
 	BulkApply(ctx context.Context, migrationID int, policy BulkPolicy) (*BulkResult, error)
+	// RecomputeParity re-runs the live compare (POST parity/recompute).
+	RecomputeParity(ctx context.Context, migrationID int, onProgress StepCallback) (*ParityResult, error)
+	// GetFollowUp returns the items still requiring operator follow-up.
+	GetFollowUp(ctx context.Context, migrationID int) (*ParityResult, error)
 }
 
 // Handler exposes REST and WebSocket routes for migrations.
@@ -160,6 +164,18 @@ func (h *Handler) handleMigrationByID(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		h.handleBulkSelection(w, r, id)
+	case "parity/recompute":
+		if r.Method != http.MethodPost {
+			shared.WriteError(w, http.StatusMethodNotAllowed, "method not allowed", "METHOD_NOT_ALLOWED")
+			return
+		}
+		h.handleParityRecompute(w, r, id)
+	case "follow-up":
+		if r.Method != http.MethodGet {
+			shared.WriteError(w, http.StatusMethodNotAllowed, "method not allowed", "METHOD_NOT_ALLOWED")
+			return
+		}
+		h.handleFollowUp(w, r, id)
 	default:
 		shared.WriteError(w, http.StatusNotFound, "not found", "NOT_FOUND")
 	}
@@ -647,9 +663,12 @@ func (h *Handler) handleGetSelection(w http.ResponseWriter, r *http.Request, id 
 
 // selectionRequest is the PUT body for one item decision (§C.2 actions).
 type selectionRequest struct {
-	ItemKey  string `json:"itemKey"`
-	Category string `json:"category"`
-	Action   string `json:"action"` // apply_from_source|keep_target|skip|review_manual
+	ItemKey           string `json:"itemKey"`
+	Category          string `json:"category"`
+	Action            string `json:"action"` // apply_from_source|keep_target|skip|review_manual
+	DecisionReason    string `json:"decisionReason,omitempty"`     // Phase 6C-BE
+	RiskAcknowledged  bool   `json:"riskAcknowledged"`            // Phase 6C-BE
+	ManualFollowup    string `json:"manualFollowup,omitempty"`    // Phase 6C-BE
 }
 
 func (h *Handler) handlePutSelection(w http.ResponseWriter, r *http.Request, id int) {
@@ -669,7 +688,20 @@ func (h *Handler) handlePutSelection(w http.ResponseWriter, r *http.Request, id 
 		shared.WriteError(w, http.StatusBadRequest, "invalid action", "VALIDATION_ERROR")
 		return
 	}
-	if err := h.repo.UpsertSelection(r.Context(), id, req.ItemKey, req.Category, req.Action); err != nil {
+	// Append-only audit: record the prior action so the decision change is
+	// tamper-evident (Phase 6C-BE §F.2). A new item has no prior action.
+	prevAction, _ := h.repo.GetSelection(r.Context(), id, req.ItemKey)
+	if err := h.repo.AppendSelectionHistory(r.Context(), id, SelectionHistory{
+		ItemKey:    req.ItemKey,
+		FromAction: prevAction,
+		ToAction:   req.Action,
+		Reason:     req.DecisionReason,
+		Actor:      "operator",
+	}); err != nil {
+		shared.WriteError(w, http.StatusInternalServerError, "failed to record selection history", "INTERNAL")
+		return
+	}
+	if err := h.repo.UpsertSelection(r.Context(), id, req.ItemKey, req.Category, req.Action, req.DecisionReason, req.RiskAcknowledged, req.ManualFollowup); err != nil {
 		shared.WriteError(w, http.StatusInternalServerError, "failed to persist selection", "INTERNAL")
 		return
 	}
@@ -710,7 +742,8 @@ func (h *Handler) handleBulkSelection(w http.ResponseWriter, r *http.Request, id
 	}
 	var policy BulkPolicy
 	switch req.Policy {
-	case string(BulkApplySafe), string(BulkAcceptRiskyUnchanged):
+	case string(BulkApplySafe), string(BulkAcceptRiskyUnchanged),
+		string(BulkSkipSelected), string(BulkReviewManualSelected), string(BulkClear):
 		policy = BulkPolicy(req.Policy)
 	default:
 		shared.WriteError(w, http.StatusBadRequest, "invalid policy", "VALIDATION_ERROR")
@@ -722,6 +755,37 @@ func (h *Handler) handleBulkSelection(w http.ResponseWriter, r *http.Request, id
 		return
 	}
 	shared.WriteJSON(w, http.StatusOK, res)
+}
+
+// handleParityRecompute re-runs the live compare for a migration (POST
+// parity/recompute). Useful after a target change or a manual fix so the
+// per-item state refreshes without a full re-plan.
+func (h *Handler) handleParityRecompute(w http.ResponseWriter, r *http.Request, id int) {
+	if h == nil || h.runner == nil {
+		shared.WriteError(w, http.StatusServiceUnavailable, "service unavailable", "SERVICE_UNAVAILABLE")
+		return
+	}
+	result, err := h.runner.RecomputeParity(r.Context(), id, func(WSMessage) {})
+	if err != nil {
+		shared.WriteError(w, http.StatusInternalServerError, "parity recompute failed: "+err.Error(), "INTERNAL")
+		return
+	}
+	shared.WriteJSON(w, http.StatusOK, result)
+}
+
+// handleFollowUp returns the items still requiring operator follow-up
+// (skip / review_manual / unknown / verify_failed) for a migration.
+func (h *Handler) handleFollowUp(w http.ResponseWriter, r *http.Request, id int) {
+	if h == nil || h.runner == nil {
+		shared.WriteError(w, http.StatusServiceUnavailable, "service unavailable", "SERVICE_UNAVAILABLE")
+		return
+	}
+	result, err := h.runner.GetFollowUp(r.Context(), id)
+	if err != nil {
+		shared.WriteError(w, http.StatusInternalServerError, "follow-up failed: "+err.Error(), "INTERNAL")
+		return
+	}
+	shared.WriteJSON(w, http.StatusOK, result)
 }
 
 func (h *Handler) upgradeWebSocket(w http.ResponseWriter, r *http.Request) (*websocket.Conn, error) {

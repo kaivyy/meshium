@@ -182,6 +182,43 @@ func Migrate(db *sql.DB) error {
 			updated_at   DATETIME DEFAULT CURRENT_TIMESTAMP,
 			UNIQUE(migration_id, item_key)
 		);`,
+		// Phase 6C-BE: per-item execution + verification evidence. One row per
+		// (migration_id, item_key) — the honest source of truth that FE badges
+		// and terminal status read. Applied != verified is enforced here by keeping
+		// the two states in separate columns. See 6C contract §F.3/F.4.
+		`CREATE TABLE IF NOT EXISTS migration_item_results (
+			id               INTEGER PRIMARY KEY AUTOINCREMENT,
+			migration_id     INTEGER NOT NULL REFERENCES migrations(id) ON DELETE CASCADE,
+			item_key         TEXT NOT NULL,
+			category         TEXT NOT NULL DEFAULT '',
+			execution_state  TEXT NOT NULL DEFAULT 'not_applicable',
+			last_execution_at DATETIME,
+			step_refs        TEXT DEFAULT '[]',
+			execution_notes  TEXT DEFAULT '',
+			verification_state TEXT NOT NULL DEFAULT 'not_verified',
+			verification_level TEXT NOT NULL DEFAULT '',
+			verify_evidence  TEXT DEFAULT '',
+			verify_notes     TEXT DEFAULT '',
+			backup_ref       TEXT DEFAULT '',
+			created_at       DATETIME DEFAULT CURRENT_TIMESTAMP,
+			updated_at       DATETIME DEFAULT CURRENT_TIMESTAMP,
+			UNIQUE(migration_id, item_key)
+		);`,
+		`CREATE INDEX IF NOT EXISTS idx_item_results_migration ON migration_item_results(migration_id, execution_state)`,
+		// Phase 6C-BE: append-only audit of decision changes. Never updated,
+		// only inserted — gives a tamper-evident record of why an item moved
+		// from one action to another. See 6C contract §F.2.
+		`CREATE TABLE IF NOT EXISTS migration_selection_history (
+			id           INTEGER PRIMARY KEY AUTOINCREMENT,
+			migration_id INTEGER NOT NULL REFERENCES migrations(id) ON DELETE CASCADE,
+			item_key     TEXT NOT NULL,
+			from_action  TEXT NOT NULL DEFAULT '',
+			to_action    TEXT NOT NULL DEFAULT '',
+			reason       TEXT DEFAULT '',
+			actor        TEXT DEFAULT 'operator',
+			created_at   DATETIME DEFAULT CURRENT_TIMESTAMP
+		);`,
+		`CREATE INDEX IF NOT EXISTS idx_sel_history_migration ON migration_selection_history(migration_id, item_key)`,
 		`CREATE TABLE IF NOT EXISTS migration_backups (
 			id           INTEGER PRIMARY KEY AUTOINCREMENT,
 			migration_id INTEGER NOT NULL REFERENCES migrations(id) ON DELETE CASCADE,
@@ -640,6 +677,11 @@ func Migrate(db *sql.DB) error {
 		`ALTER TABLE audit_trail ADD COLUMN traffic_verify_summary TEXT DEFAULT ''`,
 		`ALTER TABLE audit_trail ADD COLUMN approval_ref          TEXT DEFAULT ''`,
 		`ALTER TABLE audit_trail ADD COLUMN result                TEXT DEFAULT ''`,
+		// Phase 6C-BE: decision metadata on selections. All nullable-defaulted
+		// so rows written before this migration stay valid (backward compat).
+		`ALTER TABLE migration_selections ADD COLUMN decision_reason   TEXT DEFAULT ''`,
+		`ALTER TABLE migration_selections ADD COLUMN risk_acknowledged INTEGER DEFAULT 0`,
+		`ALTER TABLE migration_selections ADD COLUMN manual_followup   TEXT DEFAULT ''`,
 	}
 	for _, stmt := range alterPhase2D {
 		if _, err := tx.Exec(stmt); err != nil && !strings.Contains(err.Error(), "duplicate column") {

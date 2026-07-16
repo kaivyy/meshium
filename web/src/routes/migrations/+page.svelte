@@ -64,31 +64,33 @@
 
   function statusBadge(status: string): string {
     switch (status) {
-      case 'completed': return 'bg-success/15 text-success';
-      case 'failed': return 'bg-error/15 text-error';
-      case 'running': return 'bg-info/15 text-info';
-      case 'planned': return 'bg-surface-muted text-fg-muted';
-      case 'rolled_back': return 'bg-warning/15 text-warning';
-      case 'awaiting_cutover': return 'bg-accent/15 text-accent';
-      case 'needs_manual_intervention': return 'bg-error/15 text-error';
-      case 'rollback_degraded': return 'bg-warning/15 text-warning';
-      case 'interrupted': return 'bg-error/15 text-error';
-      default: return 'bg-surface-muted text-fg-muted';
+      case 'completed': return 'status-success';
+      case 'failed': return 'status-error';
+      case 'running': return 'status-info';
+      case 'planned': return 'status-neutral';
+      case 'rolled_back': return 'status-warning';
+      case 'awaiting_cutover': return 'status-info';
+      case 'needs_manual_intervention': return 'status-error';
+      case 'rollback_degraded': return 'status-warning';
+      case 'interrupted': return 'status-error';
+      default: return 'status-neutral';
     }
   }
 
+  // running pulses to signal liveness; error/anomaly states stay static and
+  // strong so a failed/interrupted migration is never mistaken for "in progress".
   function statusDot(status: string): string {
     switch (status) {
-      case 'completed': return 'bg-success';
-      case 'failed': return 'bg-error';
-      case 'running': return 'bg-info animate-pulse';
-      case 'planned': return 'bg-fg-subtle';
-      case 'rolled_back': return 'bg-warning';
-      case 'awaiting_cutover': return 'bg-accent animate-pulse';
-      case 'needs_manual_intervention': return 'bg-error';
-      case 'rollback_degraded': return 'bg-warning';
-      case 'interrupted': return 'bg-error animate-pulse';
-      default: return 'bg-fg-subtle';
+      case 'completed': return 'status-dot-success';
+      case 'failed': return 'status-dot-error';
+      case 'running': return 'status-dot-info animate-pulse';
+      case 'planned': return 'status-dot-neutral';
+      case 'rolled_back': return 'status-dot-warning';
+      case 'awaiting_cutover': return 'status-dot-info animate-pulse';
+      case 'needs_manual_intervention': return 'status-dot-error';
+      case 'rollback_degraded': return 'status-dot-warning';
+      case 'interrupted': return 'status-dot-error';
+      default: return 'status-dot-neutral';
     }
   }
 
@@ -110,19 +112,19 @@
   $: readinessPercent = (readinessCount / readinessSteps.length) * 100;
 </script>
 
-<div class="p-4 sm:p-6 max-w-5xl mx-auto">
+<div class="page-gutter max-w-5xl">
   <PageHeader title="Migrations" subtitle="Prepare, run, and monitor assisted server migrations.">
     {#snippet actions()}
       {#if hasMultipleServers}
-        <a href="/migrations/new" class="flex items-center gap-1 px-4 py-2 bg-accent text-accent-fg rounded-lg hover:bg-accent-hover text-sm font-medium transition-colors">
+        <a href="/migrations/new" class="btn btn-primary btn-md">
           <Plus size={16} /> New Migration
         </a>
       {:else if hasServers}
-        <a href="/servers/new" class="flex items-center gap-1 px-4 py-2 bg-accent text-accent-fg rounded-lg hover:bg-accent-hover text-sm font-medium transition-colors">
+        <a href="/servers/new" class="btn btn-primary btn-md">
           <Plus size={16} /> Add Target Server
         </a>
       {:else}
-        <a href="/servers/new" class="flex items-center gap-1 px-4 py-2 bg-accent text-accent-fg rounded-lg hover:bg-accent-hover text-sm font-medium transition-colors">
+        <a href="/servers/new" class="btn btn-primary btn-md">
           <Plus size={16} /> Add Server
         </a>
       {/if}
@@ -353,7 +355,7 @@
           <p class="text-sm text-fg-muted mb-1">No migrations yet.</p>
           <p class="text-xs text-fg-subtle">Once you create a migration, it will appear here with status, health, progress, and rollback availability.</p>
           {#if hasMultipleServers}
-            <a href="/migrations/new" class="mt-4 inline-flex items-center justify-center gap-2 rounded-lg bg-accent px-4 py-2 text-sm font-medium text-accent-fg transition hover:bg-accent-hover">
+            <a href="/migrations/new" class="btn btn-primary btn-md mt-4">
               <Plus size={18} /> Create Migration
             </a>
           {/if}

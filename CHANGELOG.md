@@ -41,6 +41,53 @@ confusion, copy recommendations).
   selective-apply migrations; whether `initial_sync` blocks items with
   unsatisfied hard deps; post-apply observed-vs-verified distinction).
 
+### Phase UI-B — Canonical Migration Flow Enhancement (UI tidy-up, no redesign)
+
+Implementation following the UI-A audit. Rapikan (tidy) the canonical flow so
+the three "compare" surfaces, discovery, and terminal status read honestly.
+No new executor/route; compare/select stays a pre-`initial_sync` decision
+surface; `initial_sync`/cutover/commit/rollback flow unchanged. Backend
+semantics unchanged. Reports under `docs/superpowers/specs/`:
+`phase-ui-b-canonical-flow-enhancement-report.md` and
+`phase-ui-b-canonical-flow-acceptance.md`.
+
+- **Pipeline on-ramp to compare:** `migrations/[id]/pipeline` now shows a
+  persistent "Compare & select items" banner with a "Open item-level compare"
+  link to `/migrations/:id/compare`, plus a live selection summary (to apply /
+  keep target / deferred / manual / blocked / stale) loaded from saved
+  selections + parity. Non-blocking.
+- **Raw diff stays raw diff:** `/migrations/:id/diff` retitled "Source/target
+  diff"; its button relabeled "Open item-level compare" and a helper line
+  clarifies this page is the raw diff, selection happens on the compare page.
+- **Wizard light copy:** `/migrations/new` step 4 adds an honest note that
+  detailed comparison/selection happen in the pipeline after the plan is
+  created (no fake pre-plan counts — parity isn't computable before planning).
+- **Discovery disambiguation:** pipeline stage label "Discovery" → "Migration
+  pre-flight" (button "Run Discovery" → "Run pre-flight"); server detail
+  "Re-scan" → "Scan server inventory" with helper text clarifying inventory ≠
+  migration plan. Backend stage constant `discovery` unchanged.
+- **Three compare surfaces named distinctly:** sidebar `/servers/compare` →
+  "Compare servers"; `/diff` → "Source/target diff"; `/compare` → "Compare &
+  select items".
+- **Honest compare state separation:** `accepted_target` (Keep target) now
+  renders neutral tone (not success) — it is a deliberate non-apply decision,
+  not healthy/verified. `verified` stays success; `unresolved` = warning;
+  `manual_required` = error. Added an honest banner: per-item execution and
+  verification state are not tracked by the backend yet (`migration_item_results`
+  from Phase 6C not built), so no "applied"/"verified" badge is fabricated.
+- **Dependency / action honesty:** `apply_from_source` is disabled (and blocked
+  in `requestAction`) when an item has an unsatisfied hard dependency, with an
+  inline reason. `keep_target`/`skip` on `different`/`missing_on_target` still
+  require the 6B7 confirm modal; `review_manual` stays manual. Bulk
+  "apply safe" already skips explicit decisions, ApplyLevel > Warn, and
+  unsatisfied hard deps.
+- **Honest terminal status:** `MigrationHeader` now maps backend outcome
+  statuses to honest colors/labels — only a clean `completed` is full green;
+  `completed_with_drift` / `completed_with_manual_gaps` / `completed_partial` /
+  `manual_followup_required` render amber; `verification_failed` / `failed` /
+  `rollback_degraded` render red; `rolled_back` renders neutral. Previously
+  every terminal state showed a green dot + raw string.
+
 ### Phase 6B — Compare → Select → Apply → Verify (item-level parity + selective apply)
 
 Implements the compare/select/apply/verify leg of the canonical flow as an
@@ -106,6 +153,43 @@ FE and BE for item-level compare/select/apply/verify:
   with reason/ack/followup), ADD `migration_item_results` (per-item execution
   + verification evidence, required for honest rollback) + `migration_selection_history`
   (audit). Do NOT put per-item state in `migration_steps`.
+
+### Phase 6C-BE — Per-item Execution, Verification & Enforcement (backend)
+
+Implements the Phase 6C FE/BE contract on the backend: real per-item state
+(applied ≠ verified), honest rollback scope, and correct hard-dependency
+enforcement at apply time. No FE/product-flow redesign.
+
+- **Schema:** new `migration_item_results` (one row per `(migration_id, item_key)`
+  with execution_state, verification_state/level/evidence, backup_ref, step_refs)
+  + `migration_selection_history` (append-only audit). `migration_selections`
+  extended with `decision_reason`, `risk_acknowledged`, `manual_followup`
+  (nullable/defaulted, old rows still scan). `Migrate()` idempotent.
+- **Four non-merged dimensions** on each `ParityItem`: ObservedState, DecisionState,
+  ExecutionState, VerificationState — never collapsed into one "done" flag.
+- **Apply-time enforcement:** `applyItemPlan` re-verifies hard deps against a live
+  `targetInventory`; a hard-blocked item is `ExecBlocked` and never applied even
+  if the decision was `apply_from_source`. `catMixed` now applies **only** the
+  selected items (`filterCategoryToApplySet` pre-filters `CategoryData.Data`
+  before the coarse `Applier.Apply` — fixes the prior "applies all items" bug).
+  keep_target/skip → `ExecSkipped`; review_manual → `ExecNotApplicable`.
+- **Verification evidence:** `healthVerificationStage` attests infra/runtime/app
+  layers from probes, never downgrading; no-probe item stays `unresolved` (not
+  green).
+- **Honest rollback:** `rollbackApplied` scopes to categories with ≥1 `ExecApplied`
+  item; keep_target/skip/review_manual excluded.
+- **Honest terminal status:** `deriveStatusFromItems` reads only per-item evidence;
+  priority verify_failed → unresolved/unverified → apply_failed → skip/review_manual
+  → blocked → keep_target → all-verified. A pure-skip/review migration is reported
+  as drift, never as `verification_partial`.
+- **API:** `GET /parity-summary` now returns 5 axes (observedParity,
+  decisionCoverage, executionCompletion, verificationConfidence,
+  manualDeferredBurden) + counters; bulk policies `skip_selected`,
+  `review_manual_selected`, `clear` added; `POST /parity/recompute` and
+  `GET /follow-up` endpoints added; `PUT /selection` records `SelectionHistory`.
+- **Reports:** `docs/superpowers/specs/phase-6c-be-execution-verification-report.md`
+  and `…-acceptance.md`. 18 new tests in `internal/mod/migration/phase6c_test.go`;
+  full package green.
 
 ### Phase 4I.X — Pipeline Stepper BE/FE Fix (state-type blocking bug + anomaly states)
 
@@ -1471,6 +1555,38 @@ and no such claim is made. See the release notes for the validation checklist.
 
 - `go test ./...` passes; Go backend and web frontend rebuilt.
 - Verified live on port 9527 across `/ws/connect`, `/ws/terminal`, and `/ws/monitoring`: same-origin → `101`, cross-origin without proxy header → `403`, cross-origin with `X-Forwarded-Host` → `101`.
+
+---
+
+### Phase 6C-FE — Migration Route Visual Redesign (visual layer only)
+
+Visual-only redesign of the migration pages following the UI audit. All
+routes, imports, data flow, event handlers, WebSocket logic, API calls, the
+`ui` component library, and the `app.css` token system are preserved — only
+the visual/interaction layer changed. No logic edits.
+
+- **Unified page shell:** `.page-gutter` (consistent gutter + centering) added
+  to `app.css` and applied to `/migrations`, `/migrations/[id]/compare`,
+  `/migrations/[id]/diff`, `/migrations/new`; each paired with its existing
+  `max-w-*` width. The `/pipeline` full-height shell is intentionally left
+  untouched (`.page-gutter` would break its `h-full` flex layout).
+- **Standardized buttons:** hand-rolled CTAs across the four routes now use the
+  unified `.btn` vocabulary (`.btn-primary/.btn-secondary/.btn-danger` +
+  `.btn-sm/.btn-md`) mirroring `ui/Button`, replacing inline
+  `bg-accent text-accent-fg rounded-lg` styles. The compare refresh / bulk /
+  decision / confirm buttons and the wizard's Create/Retry/Next/Back CTAs
+  converted.
+- **Token status helpers:** `app.css` gains `.status-success/.status-error/
+  .status-info/.status-warning/.status-neutral` badge fills and `.status-dot-*`
+  status dots, replacing duplicated inline `bg-*/15 text-*` strings. The
+  migrations list `statusBadge()`/`statusDot()` and the compare copy now use
+  them; `text-danger` → `text-error` corrected (no such token existed).
+- **6C-BE evidence surfaced (honest):** `ParityItem` (FE type) extended
+  additively with `executionState?`/`verificationState?` matching the backend
+  JSON tags. The compare item list and detail drawer render per-item execution
+  + verification badges **only when the backend reports them** (omitempties) —
+  never fabricated. Stale copy claiming the backend "does not track per-item
+  execution/verification state yet" corrected to reflect Phase 6C-BE.
 
 ---
 

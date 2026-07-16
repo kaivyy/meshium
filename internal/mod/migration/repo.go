@@ -43,13 +43,27 @@ type Repo interface {
 
 	// --- Phase 6B selective-apply selection persistence ---
 	// UpsertSelection records (or updates) the operator's decision for one item.
-	UpsertSelection(ctx context.Context, migrationID int, itemKey, category, action string) error
+	// reason/riskAck/manualFollowup are persisted when provided (Phase 6C-BE).
+	UpsertSelection(ctx context.Context, migrationID int, itemKey, category, action, reason string, riskAck bool, manualFollowup string) error
 	// GetSelections returns all recorded decisions for a migration.
 	GetSelections(ctx context.Context, migrationID int) ([]SelectionDecision, error)
 	// GetSelection returns the decision for a single item, or "" if none.
 	GetSelection(ctx context.Context, migrationID int, itemKey string) (string, error)
 	// ClearSelections removes all decisions for a migration (used on reset).
 	ClearSelections(ctx context.Context, migrationID int) error
+
+	// --- Phase 6C-BE per-item execution + verification evidence ---
+	// UpsertItemResult records (or updates) the per-item execution/verification
+	// evidence row keyed by (migration_id, item_key).
+	UpsertItemResult(ctx context.Context, migrationID int, res ItemResult) error
+	// GetItemResults returns all per-item result rows for a migration.
+	GetItemResults(ctx context.Context, migrationID int) ([]ItemResult, error)
+	// GetItemResult returns the result for a single item key, or false if none.
+	GetItemResult(ctx context.Context, migrationID int, itemKey string) (ItemResult, bool, error)
+	// AppendSelectionHistory appends one immutable decision-change audit row.
+	AppendSelectionHistory(ctx context.Context, migrationID int, h SelectionHistory) error
+	// GetSelectionHistory returns the decision-change audit rows for a migration.
+	GetSelectionHistory(ctx context.Context, migrationID int) ([]SelectionHistory, error)
 
 	CreateBackup(migrationID, serverID int, category, data string) (int, error)
 	GetBackups(migrationID int) ([]MigrationBackup, error)
@@ -417,13 +431,23 @@ func (r *sqliteRepo) GetAppliedCategories(migrationID int) ([]string, error) {
 // --- Phase 6B selective-apply selection persistence ---
 
 // UpsertSelection records (or updates) the operator's decision for one item.
-func (r *sqliteRepo) UpsertSelection(ctx context.Context, migrationID int, itemKey, category, action string) error {
+// reason/riskAck/manualFollowup are persisted when provided (Phase 6C-BE).
+// On conflict the metadata columns are also refreshed so a re-decision carries
+// its new rationale; legacy rows with empty metadata stay valid (nullable).
+func (r *sqliteRepo) UpsertSelection(ctx context.Context, migrationID int, itemKey, category, action, reason string, riskAck bool, manualFollowup string) error {
 	_, err := r.db.Exec(
-		`INSERT INTO migration_selections (migration_id, item_key, category, action, updated_at)
-		 VALUES (?, ?, ?, ?, CURRENT_TIMESTAMP)
+		`INSERT INTO migration_selections
+		   (migration_id, item_key, category, action, decision_reason, risk_acknowledged, manual_followup, updated_at)
+		 VALUES (?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
 		 ON CONFLICT(migration_id, item_key)
-		 DO UPDATE SET category = excluded.category, action = excluded.action, updated_at = CURRENT_TIMESTAMP`,
-		migrationID, itemKey, category, action,
+		 DO UPDATE SET
+		   category = excluded.category,
+		   action = excluded.action,
+		   decision_reason = excluded.decision_reason,
+		   risk_acknowledged = excluded.risk_acknowledged,
+		   manual_followup = excluded.manual_followup,
+		   updated_at = CURRENT_TIMESTAMP`,
+		migrationID, itemKey, category, action, reason, boolToInt(riskAck), manualFollowup,
 	)
 	return err
 }
@@ -431,7 +455,7 @@ func (r *sqliteRepo) UpsertSelection(ctx context.Context, migrationID int, itemK
 // GetSelections returns all recorded decisions for a migration.
 func (r *sqliteRepo) GetSelections(ctx context.Context, migrationID int) ([]SelectionDecision, error) {
 	rows, err := r.db.Query(
-		`SELECT migration_id, item_key, category, action, updated_at
+		`SELECT migration_id, item_key, category, action, decision_reason, risk_acknowledged, manual_followup, updated_at
 		 FROM migration_selections WHERE migration_id = ? ORDER BY id ASC`,
 		migrationID,
 	)
@@ -444,13 +468,134 @@ func (r *sqliteRepo) GetSelections(ctx context.Context, migrationID int) ([]Sele
 	for rows.Next() {
 		var d SelectionDecision
 		var updatedAt string
-		if err := rows.Scan(&d.MigrationID, &d.ItemKey, &d.Category, &d.Action, &updatedAt); err != nil {
+		var riskAck int
+		if err := rows.Scan(&d.MigrationID, &d.ItemKey, &d.Category, &d.Action, &d.DecisionReason, &riskAck, &d.ManualFollowup, &updatedAt); err != nil {
 			return nil, err
 		}
+		d.RiskAcknowledged = riskAck != 0
 		d.UpdatedAt = updatedAt
 		sel = append(sel, d)
 	}
 	return sel, nil
+}
+
+// GetItemResults returns all per-item result rows for a migration.
+func (r *sqliteRepo) GetItemResults(ctx context.Context, migrationID int) ([]ItemResult, error) {
+	rows, err := r.db.Query(
+		`SELECT migration_id, item_key, category, execution_state, last_execution_at, step_refs,
+		        execution_notes, verification_state, verification_level, verify_evidence, verify_notes, backup_ref, created_at, updated_at
+		 FROM migration_item_results WHERE migration_id = ? ORDER BY id ASC`,
+		migrationID,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	out := make([]ItemResult, 0)
+	for rows.Next() {
+		var ir ItemResult
+		var lastExec, created, updated sql.NullString
+		var stepRefs string
+		if err := rows.Scan(&ir.MigrationID, &ir.ItemKey, &ir.Category, &ir.ExecutionState, &lastExec, &stepRefs,
+			&ir.ExecutionNotes, &ir.VerificationState, &ir.VerificationLevel, &ir.VerifyEvidence, &ir.VerifyNotes, &ir.BackupRef, &created, &updated); err != nil {
+			return nil, err
+		}
+		ir.LastExecutionAt = lastExec.String
+		ir.CreatedAt = created.String
+		ir.UpdatedAt = updated.String
+		ir.StepRefs = parseStepRefs(stepRefs)
+		out = append(out, ir)
+	}
+	return out, nil
+}
+
+// GetItemResult returns the result for a single item key.
+func (r *sqliteRepo) GetItemResult(ctx context.Context, migrationID int, itemKey string) (ItemResult, bool, error) {
+	var ir ItemResult
+	var lastExec, created, updated sql.NullString
+	var stepRefs string
+	err := r.db.QueryRow(
+		`SELECT migration_id, item_key, category, execution_state, last_execution_at, step_refs,
+		        execution_notes, verification_state, verification_level, verify_evidence, verify_notes, backup_ref, created_at, updated_at
+		 FROM migration_item_results WHERE migration_id = ? AND item_key = ?`,
+		migrationID, itemKey,
+	).Scan(&ir.MigrationID, &ir.ItemKey, &ir.Category, &ir.ExecutionState, &lastExec, &stepRefs,
+		&ir.ExecutionNotes, &ir.VerificationState, &ir.VerificationLevel, &ir.VerifyEvidence, &ir.VerifyNotes, &ir.BackupRef, &created, &updated)
+	if errors.Is(err, sql.ErrNoRows) {
+		return ItemResult{}, false, nil
+	}
+	if err != nil {
+		return ItemResult{}, false, err
+	}
+	ir.LastExecutionAt = lastExec.String
+	ir.CreatedAt = created.String
+	ir.UpdatedAt = updated.String
+	ir.StepRefs = parseStepRefs(stepRefs)
+	return ir, true, nil
+}
+
+// UpsertItemResult records (or updates) a per-item execution/verification row.
+func (r *sqliteRepo) UpsertItemResult(ctx context.Context, migrationID int, res ItemResult) error {
+	stepRefs := encodeStepRefs(res.StepRefs)
+	_, err := r.db.Exec(
+		`INSERT INTO migration_item_results
+		   (migration_id, item_key, category, execution_state, last_execution_at, step_refs,
+		    execution_notes, verification_state, verification_level, verify_evidence, verify_notes, backup_ref, updated_at)
+		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
+		 ON CONFLICT(migration_id, item_key)
+		 DO UPDATE SET
+		   category = excluded.category,
+		   execution_state = excluded.execution_state,
+		   last_execution_at = excluded.last_execution_at,
+		   step_refs = excluded.step_refs,
+		   execution_notes = excluded.execution_notes,
+		   verification_state = excluded.verification_state,
+		   verification_level = excluded.verification_level,
+		   verify_evidence = excluded.verify_evidence,
+		   verify_notes = excluded.verify_notes,
+		   backup_ref = excluded.backup_ref,
+		   updated_at = CURRENT_TIMESTAMP`,
+		migrationID, res.ItemKey, res.Category, res.ExecutionState, nullIfEmpty(res.LastExecutionAt), stepRefs,
+		res.ExecutionNotes, res.VerificationState, res.VerificationLevel, res.VerifyEvidence, res.VerifyNotes, res.BackupRef,
+	)
+	return err
+}
+
+// AppendSelectionHistory appends one immutable decision-change audit row.
+func (r *sqliteRepo) AppendSelectionHistory(ctx context.Context, migrationID int, h SelectionHistory) error {
+	_, err := r.db.Exec(
+		`INSERT INTO migration_selection_history
+		   (migration_id, item_key, from_action, to_action, reason, actor, created_at)
+		 VALUES (?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)`,
+		migrationID, h.ItemKey, h.FromAction, h.ToAction, h.Reason, h.Actor,
+	)
+	return err
+}
+
+// GetSelectionHistory returns the decision-change audit rows for a migration.
+func (r *sqliteRepo) GetSelectionHistory(ctx context.Context, migrationID int) ([]SelectionHistory, error) {
+	rows, err := r.db.Query(
+		`SELECT migration_id, item_key, from_action, to_action, reason, actor, created_at
+		 FROM migration_selection_history WHERE migration_id = ? ORDER BY id ASC`,
+		migrationID,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	out := make([]SelectionHistory, 0)
+	for rows.Next() {
+		var h SelectionHistory
+		var created string
+		if err := rows.Scan(&h.MigrationID, &h.ItemKey, &h.FromAction, &h.ToAction, &h.Reason, &h.Actor, &created); err != nil {
+			return nil, err
+		}
+		h.CreatedAt = created
+		out = append(out, h)
+	}
+	return out, nil
 }
 
 // GetSelection returns the decision for a single item, or "" if none.
@@ -483,4 +628,39 @@ func contains(slice []string, s string) bool {
 		}
 	}
 	return false
+}
+
+// --- Phase 6C-BE small repo helpers ---
+// boolToInt already exists in pipeline_repo.go; reused.
+
+func nullIfEmpty(s string) interface{} {
+	if s == "" {
+		return nil
+	}
+	return s
+}
+
+// parseStepRefs decodes the JSON int-array stored in step_refs. Best-effort:
+// an empty/garbled value yields an empty slice rather than an error so a legacy
+// or hand-edited row never breaks the scan.
+func parseStepRefs(s string) []int {
+	if s == "" {
+		return []int{}
+	}
+	var refs []int
+	if err := json.Unmarshal([]byte(s), &refs); err != nil {
+		return []int{}
+	}
+	return refs
+}
+
+func encodeStepRefs(refs []int) string {
+	if len(refs) == 0 {
+		return "[]"
+	}
+	b, err := json.Marshal(refs)
+	if err != nil {
+		return "[]"
+	}
+	return string(b)
 }

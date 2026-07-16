@@ -661,6 +661,7 @@
             <div>
               <h2 class="text-sm font-semibold uppercase tracking-wide text-fg-subtle">System Information</h2>
               <p class="mt-1 text-sm text-fg-subtle">Cached data from the latest successful connection test.</p>
+              <p class="mt-1 text-xs text-fg-subtle">"Scan server inventory" refreshes this server's discovered inventory only — it is <strong>not</strong> a migration plan.</p>
             </div>
             <div class="grid grid-cols-2 items-center gap-2 sm:flex sm:flex-wrap">
               <button
@@ -670,7 +671,7 @@
                 class="flex w-full items-center justify-center gap-2 rounded-lg border border-border-strong bg-surface px-4 py-2 text-sm font-medium text-fg-muted transition hover:bg-surface-muted disabled:cursor-not-allowed disabled:opacity-50 sm:w-auto"
               >
                 <RefreshCw size={16} />
-                {rescanning ? 'Re-scanning...' : 'Re-scan'}
+                {rescanning ? 'Scanning inventory...' : 'Scan server inventory'}
               </button>
               <button
                 type="button"

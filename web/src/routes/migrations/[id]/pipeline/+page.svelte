@@ -67,6 +67,14 @@
   let strategy: StrategySelection | null = null;
   let warnings: PlannerWarning[] = [];
 
+  // UI-B: light selection summary shown in the pipeline on-ramp to /compare.
+  // Aggregated from saved selections + live parity; never blocks the pipeline.
+  type SelectionSummary = {
+    total: number; apply: number; keepTarget: number; defer: number;
+    manual: number; blocked: number; stale: number;
+  };
+  let selectionSummary: SelectionSummary | null = null;
+
   // ── Live Metrics ──
   let pipelineRunning = false;
   let pipelinePaused = false;
@@ -207,6 +215,8 @@
       restoreMetrics();
       // Load planner data in background
       loadPlannerResult().catch(() => {});
+      // Load the compare/select summary for the pipeline on-ramp (non-blocking).
+      loadSelectionSummary().catch(() => {});
     } catch {
       try {
         const plan = await migrationApi.get(migrationId);
@@ -252,6 +262,37 @@
     } catch { /* ignore */ } finally {
       plannerLoading = false;
     }
+  }
+
+  // UI-B: aggregate the compare/select summary for the pipeline on-ramp.
+  // Counts saved selections against live parity; silently no-ops on any error
+  // (the banner still links to /compare even without a summary).
+  async function loadSelectionSummary() {
+    try {
+      const [sel, parity] = await Promise.all([
+        migrationApi.getSelections(migrationId).catch(() => []),
+        migrationApi.parity(migrationId).catch(() => null),
+      ]);
+      const decisions = (sel ?? []) as { action: string }[];
+      const items = parity?.items ?? [];
+      const explicit = new Set(decisions.map((d) => (d as { itemKey?: string }).itemKey));
+      const sum: SelectionSummary = { total: items.length, apply: 0, keepTarget: 0, defer: 0, manual: 0, blocked: 0, stale: 0 };
+      for (const d of decisions) {
+        if (d.action === 'apply_from_source') sum.apply++;
+        else if (d.action === 'keep_target') sum.keepTarget++;
+        else if (d.action === 'skip') sum.defer++;
+        else if (d.action === 'review_manual') sum.manual++;
+      }
+      // Items with no saved decision but flagged by the engine as needing manual
+      // attention or blocked count toward the honest "manual/blocked" burden.
+      for (const it of items as { status?: string; deps?: { kind: string; satisfied: boolean }[] }[]) {
+        if (explicit.has((it as { itemKey?: string }).itemKey ?? '')) continue;
+        if (it.status === 'manual_required') sum.manual++;
+        else if (it.status === 'unsupported') sum.blocked++;
+        else if (it.status === 'stale') sum.stale++;
+      }
+      selectionSummary = sum;
+    } catch { /* ignore — banner still links to /compare */ }
   }
 
   function stopObservationTimer() {
@@ -1386,6 +1427,42 @@
         runbookHref="/migrations/{migrationId}/diff"
       />
 
+      <!-- 6B/UI-B: canonical on-ramp to item-level compare/select, which is the
+           decision surface that drives apply. Always visible so a user in the
+           pipeline can reach it without going through the raw /diff page. -->
+      <div class="mb-4 rounded-xl border border-border-strong bg-surface p-4 flex flex-wrap items-center justify-between gap-3">
+        <div class="min-w-0">
+          <h2 class="text-sm font-semibold text-fg flex items-center gap-2">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="18" cy="18" r="3"/><circle cx="6" cy="6" r="3"/><path d="M13 6h3a2 2 0 0 1 2 2v7"/><path d="M11 18H8a2 2 0 0 1-2-2V9"/></svg>
+            Compare &amp; select items
+          </h2>
+          <p class="text-xs text-fg-subtle mt-1">
+            Review per-item source vs live target parity and decide what to apply before running the initial sync.
+          </p>
+          {#if selectionSummary && selectionSummary.total > 0}
+            <div class="mt-2 flex flex-wrap gap-2 text-xs">
+              <span class="px-2 py-0.5 rounded bg-success/10 text-success">{selectionSummary.apply} to apply</span>
+              <span class="px-2 py-0.5 rounded bg-surface-muted text-fg-muted">{selectionSummary.keepTarget} keep target</span>
+              <span class="px-2 py-0.5 rounded bg-surface-muted text-fg-muted">{selectionSummary.defer} deferred / skip</span>
+              <span class="px-2 py-0.5 rounded bg-warning/10 text-warning">{selectionSummary.manual} manual follow-up</span>
+              {#if selectionSummary.blocked > 0}
+                <span class="px-2 py-0.5 rounded bg-error/10 text-error">{selectionSummary.blocked} blocked</span>
+              {/if}
+              {#if selectionSummary.stale > 0}
+                <span class="px-2 py-0.5 rounded bg-surface-muted text-fg-muted">{selectionSummary.stale} stale</span>
+              {/if}
+            </div>
+          {/if}
+        </div>
+        <a
+          href="/migrations/{migrationId}/compare"
+          class="inline-flex items-center gap-2 px-4 py-2 bg-accent hover:bg-accent-hover text-accent-fg rounded-lg text-sm font-medium transition-colors shrink-0"
+        >
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="m17 2 4 4-4 4"/><path d="M3 6h18"/><path d="m7 22-4-4 4-4"/><path d="M21 18H3"/></svg>
+          Open item-level compare
+        </a>
+      </div>
+
       {#if loading}
         <div class="flex items-center justify-center h-64 text-fg-subtle">
           <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" class="animate-spin mr-3"><path d="M21 12a9 9 0 1 1-6.219-8.56"/></svg>
@@ -1430,15 +1507,15 @@
               <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" class="text-info"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.3-4.3"/></svg>
             </div>
             <div>
-              <h2 class="text-lg font-semibold">Discovery</h2>
+              <h2 class="text-lg font-semibold">Migration pre-flight</h2>
               <p class="text-sm text-fg-subtle">Discover services, containers, and databases on source &amp; target servers</p>
             </div>
           </div>
           {#if stepStatuses[0] === 'pending' || stepStatuses[0] === 'failed'}
             <div class="text-center py-8">
-              <p class="text-fg-subtle mb-4">Run discovery to collect information about your source and target servers.</p>
+              <p class="text-fg-subtle mb-4">Run pre-flight to collect information about your source and target servers.</p>
               <button on:click={runDiscovery} disabled={actionLoading} class="px-6 py-2.5 bg-accent hover:bg-accent-hover text-accent-fg disabled:opacity-50 rounded-lg font-medium transition-colors">
-                {actionLoading ? 'Running Discovery...' : 'Run Discovery'}
+                {actionLoading ? 'Running pre-flight...' : 'Run pre-flight'}
               </button>
             </div>
           {:else if stepStatuses[0] === 'running'}

@@ -157,6 +157,11 @@ export interface ParityItem {
   warnings?: string[];
   freshness?: string;
   verifyState?: string;
+  // Phase 6C-BE: real per-item execution + verification evidence from the
+  // backend (migration_item_results). Omitted until the item has been applied,
+  // so render only when present.
+  executionState?: string;
+  verificationState?: string;
 }
 
 export interface ParityResult {

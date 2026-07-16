@@ -33,6 +33,7 @@ const (
 	StatusCompletedWithDrift       = "completed_with_drift"        // selected applied but parity shows unresolved infra diffs
 	StatusCompletedWithManualGaps  = "completed_with_manual_gaps"  // done; skip/review_manual/L4 items remain
 	StatusCompletedPartial         = "completed_partial"          // some selected applied, some failed-but-nonfatal
+	StatusCompletedWithUnresolvedDrift = "completed_with_unresolved_drift" // applied but verify failed / no probe available
 	StatusVerificationFailed       = "verification_failed"        // apply ok but runtime/app verification failed
 	StatusVerificationPartial      = "verification_partial"       // some checks passed, some unresolved
 	StatusManualFollowupRequired   = "manual_followup_required"   // L4 items present and unhandled

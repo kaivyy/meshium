@@ -115,11 +115,61 @@ func (e *ParityEngine) ComputeParity(ctx context.Context, migrationID int, onPro
 	}
 	result.Items = items
 
+	// Phase 6C-BE: enrich each item with the four independent state dimensions
+	// so the FE never has to guess. DecisionState derives from selections;
+	// HardBlocked is recomputed from the dependency graph; ExecutionState /
+	// VerificationState are read from migration_item_results when present
+	// (best-effort: legacy migrations without rows stay not_applicable /
+	// not_verified and are reported honestly, never green).
+	e.enrichItems(ctx, migrationID, items)
+
 	// Whole-result freshness: target collect is live, so fresh by construction.
 	result.Freshness = "fresh"
 
 	onProgress(WSMessage{Step: "parity", Status: "complete", Value: fmt.Sprintf("Compared %d items", len(items))})
 	return result, nil
+}
+
+// enrichItems lays the four independent state dimensions onto each ParityItem
+// (contract §F). It is read-only against selections + migration_item_results;
+// it never mutates persisted state. Best-effort for legacy migrations: if no
+// item result exists, ExecutionState stays not_applicable and VerificationState
+// stays not_verified (never fabricated green).
+func (e *ParityEngine) enrichItems(ctx context.Context, migrationID int, items []ParityItem) {
+	selByKey := map[string]SelectionDecision{}
+	if sels, err := e.repo.GetSelections(ctx, migrationID); err == nil {
+		for _, s := range sels {
+			selByKey[s.ItemKey] = s
+		}
+	}
+	resByKey := map[string]ItemResult{}
+	if res, err := e.repo.GetItemResults(ctx, migrationID); err == nil {
+		for _, r := range res {
+			resByKey[r.ItemKey] = r
+		}
+	}
+	for i := range items {
+		it := &items[i]
+		// DecisionState from selection; default undecided.
+		if sel, ok := selByKey[it.ItemKey]; ok {
+			it.DecisionState = DecisionState(sel.Action)
+			it.DecisionReason = sel.DecisionReason
+			it.RiskAcknowledged = sel.RiskAcknowledged
+			it.ManualFollowup = sel.ManualFollowup
+		} else {
+			it.DecisionState = DecisionUndecided
+		}
+		// HardBlocked: any unsatisfied hard dependency forces ExecBlocked.
+		it.HardBlocked = hasUnsatisfiedHardDep(*it)
+		// Execution/Verification from item results when present.
+		if r, ok := resByKey[it.ItemKey]; ok {
+			it.ExecutionState = string(r.ExecutionState)
+			it.LastExecutionAt = r.LastExecutionAt
+			it.VerificationState = string(r.VerificationState)
+			it.VerificationLevel = r.VerificationLevel
+			it.VerifyEvidence = r.VerifyEvidence
+		}
+	}
 }
 
 // ComputeParitySummary derives the post-apply verification report (spec §H.5)
@@ -137,9 +187,10 @@ func (e *ParityEngine) ComputeParity(ctx context.Context, migrationID int, onPro
 func (e *ParityEngine) ComputeParitySummary(ctx context.Context, migrationID int, parity *ParityResult, steps []MigrationStepRecord) (*ParitySummary, error) {
 	summary := &ParitySummary{MigrationID: migrationID, ComputedAt: time.Now().UTC().Format(time.RFC3339)}
 
-	// Re-derive item outcomes from selections + step statuses. Selected items that
-	// were skipped at apply time are manual gaps; applied steps that left the item
-	// missing_on_target are unresolved drift.
+	// Phase 6C-BE: derive the five honest axes + counters from the
+	// per-item execution + verification evidence when present, falling back to
+	// selections + parity for legacy migrations. Applied != Verified are
+	// tracked separately so "selected" never reads as "green".
 	selections, err := e.repo.GetSelections(ctx, migrationID)
 	if err != nil {
 		selections = nil
@@ -148,11 +199,11 @@ func (e *ParityEngine) ComputeParitySummary(ctx context.Context, migrationID int
 	for _, d := range selections {
 		selByKey[d.ItemKey] = ParityAction(d.Action)
 	}
-	// A category-level skipped step means the whole category was operator-skipped.
-	skippedCats := map[string]bool{}
-	for _, s := range steps {
-		if s.Status == StepStatusSkipped {
-			skippedCats[s.Category] = true
+	itemResults, rerr := e.repo.GetItemResults(ctx, migrationID)
+	resByKey := map[string]ItemResult{}
+	if rerr == nil {
+		for _, r := range itemResults {
+			resByKey[r.ItemKey] = r
 		}
 	}
 
@@ -161,49 +212,81 @@ func (e *ParityEngine) ComputeParitySummary(ctx context.Context, migrationID int
 	}
 
 	total := len(parity.Items)
-	var infraOK, runtimeOK, appOK, manualGaps, unresolved int
+	var decided, executed, verified, manualDeferred, acceptedDrift, unresolvedDrift, failed, passed int
 	for _, it := range parity.Items {
-		// Operator explicitly skipped this category or item → manual gap.
-		if skippedCats[it.Category] || selByKey[it.ItemKey] == ActionSkip || selByKey[it.ItemKey] == ActionReviewManual {
-			manualGaps++
+		action := selByKey[it.ItemKey]
+		res, hasRes := resByKey[it.ItemKey]
+
+		// Decision coverage: item carries an explicit decision.
+		if action != "" {
+			decided++
+		}
+		// Accepted drift: keep_target (target is canonical, not a gap).
+		if action == ActionKeepTarget || it.Status == ParityAcceptedTarget {
+			acceptedDrift++
+			passed++
 			continue
 		}
-		// keep_target → accepted, counts as resolved (not drift, not a gap).
-		if selByKey[it.ItemKey] == ActionKeepTarget || it.Status == ParityAcceptedTarget {
-			infraOK++
-			runtimeOK++
-			appOK++
-			summary.Passed++
+		// Manual deferred burden: skip / review_manual / undecired-and-differs.
+		if action == ActionSkip || action == ActionReviewManual {
+			manualDeferred++
+			summary.ManualGaps++
 			continue
 		}
-		// Infra: target has the item (same / different / applied / verified).
-		if it.Status == ParitySame || it.Status == ParityDifferent || it.Status == ParityApplied || it.Status == ParityVerified {
-			infraOK++
-		}
-		// Runtime: target matches source (same / applied / verified). "different"
-		// means present but not matching → not runtime-ready.
-		if it.Status == ParitySame || it.Status == ParityApplied || it.Status == ParityVerified {
-			runtimeOK++
-		}
-		// App health: only verified counts; we never infer health from presence.
-		if it.Status == ParityVerified {
-			appOK++
-			summary.Passed++
-		} else if it.Status == ParityMissingOnTarget || it.Status == ParityDifferent {
-			unresolved++
+		// Execution completion: decided items that actually executed (applied).
+		if hasRes && res.ExecutionState == ExecApplied {
+			executed++
+			// Verification confidence: applied items that reached a real verify layer.
+			switch res.VerificationState {
+			case VerifyInfra, VerifyRuntime, VerifyApp, VerifyPartial:
+				verified++
+				passed++
+			case VerifyFailed:
+				failed++
+				unresolvedDrift++
+				summary.UnresolvedDrift++
+				summary.Failed++
+			default:
+				// applied but never probed → unresolved, NOT green.
+				unresolvedDrift++
+				summary.UnresolvedDrift++
+			}
+		} else if action == ActionApplyFromSource {
+			// decided to apply but no execution evidence yet → incomplete.
+			unresolvedDrift++
 			summary.UnresolvedDrift++
-		} else {
-			unresolved++
 		}
 	}
 
-	summary.InfraScore = pct(infraOK, total)
-	summary.RuntimeScore = pct(runtimeOK, total)
-	summary.AppHealthScore = pct(appOK, total)
-	summary.ManualGaps = manualGaps
-	summary.UnresolvedDrift = unresolved
-	summary.Failed = unresolved + manualGaps
+	summary.ObservedParity = pct(observedSameCount(parity), total)
+	summary.DecisionCoverage = pct(decided, total)
+	summary.ExecutionCompletion = pct(executed, maxInt(1, decided))
+	summary.VerificationConfidence = pct(verified, maxInt(1, executed))
+	summary.ManualDeferredBurden = pct(manualDeferred, total)
+	summary.AcceptedDrift = acceptedDrift
+	summary.UnresolvedDrift = unresolvedDrift
+	summary.ManualGaps = manualDeferred
+	summary.Failed = failed
+	summary.Passed = passed
 	return summary, nil
+}
+
+// observedSameCount counts items whose observed state is `same`.
+func observedSameCount(parity *ParityResult) int {
+	n := 0
+	for _, it := range parity.Items {
+		if it.Status == ParitySame {
+			n++
+		}
+	}
+	return n
+}
+
+func maxInt(a, b int) int {
+	if a > b {
+		return a
+	}
+	return b
 }
 
 func pct(n, total int) float64 {
@@ -229,6 +312,14 @@ const (
 	// operator's "keep target" is mechanically honest. Guarded items that DIFFER
 	// are left as review_manual (we will not silently overwrite target state).
 	BulkAcceptRiskyUnchanged BulkPolicy = "accept_risky_unchanged"
+	// BulkSkipSelected: skip for every item that is NOT already a clean
+	// keep_target — used to "defer everything" before a careful review.
+	BulkSkipSelected BulkPolicy = "skip_selected"
+	// BulkReviewManualSelected: review_manual for every item that is not a
+	// clean keep_target — pushes undecided/apply items to manual review.
+	BulkReviewManualSelected BulkPolicy = "review_manual_selected"
+	// BulkClear: remove ALL selection decisions for the migration (reset).
+	BulkClear BulkPolicy = "clear"
 )
 
 // BulkResult reports what a BulkApply changed.
@@ -251,6 +342,14 @@ func (e *ParityEngine) BulkApply(ctx context.Context, migrationID int, policy Bu
 	}
 	existing, err := e.repo.GetSelections(ctx, migrationID)
 	if err != nil {
+		existing = nil
+	}
+	// BulkClear wipes ALL decisions first (a reset), then the loop skips
+	// writing anything — honest "start over" before a fresh sweep.
+	if policy == BulkClear {
+		if cerr := e.repo.ClearSelections(ctx, migrationID); cerr != nil {
+			return nil, cerr
+		}
 		existing = nil
 	}
 	explicit := map[string]bool{}
@@ -290,11 +389,32 @@ func (e *ParityEngine) BulkApply(ctx context.Context, migrationID int, policy Bu
 			}
 			action = ActionKeepTarget
 			res.Accepted++
+		case BulkSkipSelected:
+			// Defer everything that is not already a clean keep_target.
+			if ParityAction(existingAction(it, existing)) == ActionKeepTarget {
+				res.Skipped++
+				continue
+			}
+			action = ActionSkip
+			res.Skipped++
+		case BulkReviewManualSelected:
+			// Push undecided/apply items to manual review.
+			if ParityAction(existingAction(it, existing)) == ActionKeepTarget {
+				res.Skipped++
+				continue
+			}
+			action = ActionReviewManual
+			res.Manual++
+		case BulkClear:
+			// Handled before the loop (clears all decisions); here we
+			// simply skip writing anything.
+			res.Skipped++
+			continue
 		default:
 			res.Skipped++
 			continue
 		}
-		if err := e.repo.UpsertSelection(ctx, migrationID, it.ItemKey, it.Category, string(action)); err != nil {
+		if err := e.repo.UpsertSelection(ctx, migrationID, it.ItemKey, it.Category, string(action), "", false, ""); err != nil {
 			return nil, err
 		}
 		res.Items = append(res.Items, SelectionDecision{
@@ -305,6 +425,57 @@ func (e *ParityEngine) BulkApply(ctx context.Context, migrationID int, policy Bu
 		})
 	}
 	return res, nil
+}
+
+// existingAction returns the persisted decision action for an item key, or "".
+func existingAction(it ParityItem, existing []SelectionDecision) string {
+	for _, d := range existing {
+		if d.ItemKey == it.ItemKey {
+			return d.Action
+		}
+	}
+	return ""
+}
+
+// GetFollowUp returns the parity items that still require operator follow-up
+// (contract §N): items decided skip / review_manual / unknown, plus any
+// applied item whose verification FAILED. These are the open burden a
+// "completed" migration still carries.
+func (e *ParityEngine) GetFollowUp(ctx context.Context, migrationID int) (*ParityResult, error) {
+	parity, err := e.ComputeParity(ctx, migrationID, nil)
+	if err != nil {
+		return nil, err
+	}
+	selections, err := e.repo.GetSelections(ctx, migrationID)
+	if err != nil {
+		selections = nil
+	}
+	selByKey := map[string]ParityAction{}
+	for _, d := range selections {
+		selByKey[d.ItemKey] = ParityAction(d.Action)
+	}
+	results, rerr := e.repo.GetItemResults(ctx, migrationID)
+	verifyByKey := map[string]VerificationState{}
+	if rerr == nil {
+		for _, r := range results {
+			verifyByKey[r.ItemKey] = r.VerificationState
+		}
+	}
+
+	out := &ParityResult{MigrationID: migrationID, ComputedAt: time.Now().UTC().Format(time.RFC3339), Freshness: "fresh"}
+	for _, it := range parity.Items {
+		action := selByKey[it.ItemKey]
+		switch {
+		case action == ActionSkip || action == ActionReviewManual:
+			out.Items = append(out.Items, it)
+		case action == "" && it.Status != ParitySame:
+			// undecired AND not already identical → still needs a call.
+			out.Items = append(out.Items, it)
+		case verifyByKey[it.ItemKey] == VerifyFailed:
+			out.Items = append(out.Items, it)
+		}
+	}
+	return out, nil
 }
 
 // hasUnsatisfiedHardDep reports whether an item has a hard dependency whose

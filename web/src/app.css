@@ -106,3 +106,81 @@
     }
   }
 }
+
+/* Shared page frame for migration routes — consistent gutter + centering.
+   Visual-only; preserves all route logic and data flow. Pair with a Tailwind
+   max-w-* utility per route (list/compare use max-w-5xl, diff max-w-6xl,
+   new max-w-3xl) so each route keeps its intended reading width. */
+.page-gutter {
+  width: 100%;
+  margin-inline: auto;
+  padding: 1rem;
+}
+
+@media (min-width: 640px) {
+  .page-gutter {
+    padding: 1.5rem;
+  }
+}
+
+/* Single source of truth for status → tone class mapping, shared by badge and
+   status dot across migration routes (was duplicated inline). */
+.status-success { background: rgb(var(--color-success) / 0.15); color: rgb(var(--color-success)); }
+.status-error   { background: rgb(var(--color-error) / 0.15); color: rgb(var(--color-error)); }
+.status-info    { background: rgb(var(--color-info) / 0.15); color: rgb(var(--color-info)); }
+.status-warning { background: rgb(var(--color-warning) / 0.15); color: rgb(var(--color-warning)); }
+.status-neutral { background: rgb(var(--color-surface-muted)); color: rgb(var(--color-fg-muted)); }
+.status-dot-success { background: rgb(var(--color-success)); }
+.status-dot-error   { background: rgb(var(--color-error)); }
+.status-dot-info    { background: rgb(var(--color-info)); }
+.status-dot-warning { background: rgb(var(--color-warning)); }
+.status-dot-neutral { background: rgb(var(--color-fg-subtle)); }
+
+/* Unified button vocabulary — mirrors ui/Button variants so hand-rolled
+   buttons in dense routes stay consistent with the library. Visual-only. */
+.btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.5rem;
+  border-radius: 0.5rem;
+  font-weight: 500;
+  font-size: 0.875rem;
+  transition: background-color 0.15s, color 0.15s, box-shadow 0.15s, opacity 0.15s;
+  cursor: pointer;
+}
+.btn:focus-visible {
+  outline: none;
+  box-shadow: 0 0 0 2px rgb(var(--color-bg)), 0 0 0 4px rgb(var(--color-accent));
+}
+.btn:disabled, .btn[aria-disabled="true"] {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+.btn-primary {
+  background: rgb(var(--color-accent));
+  color: rgb(var(--color-accent-fg));
+  box-shadow: var(--shadow-card);
+}
+.btn-primary:hover:not(:disabled) {
+  background: rgb(var(--color-accent-hover));
+  box-shadow: var(--shadow-card-hover);
+}
+.btn-secondary {
+  border: 1px solid rgb(var(--color-border-strong));
+  background: rgb(var(--color-surface));
+  color: rgb(var(--color-fg-muted));
+}
+.btn-secondary:hover:not(:disabled) { background: rgb(var(--color-surface-muted)); }
+.btn-danger {
+  background: rgb(var(--color-error));
+  color: #fff;
+}
+.btn-danger:hover:not(:disabled) { opacity: 0.9; }
+.btn-ghost {
+  color: rgb(var(--color-fg-muted));
+}
+.btn-ghost:hover:not(:disabled) { background: rgb(var(--color-surface-muted)); }
+.btn-sm { padding: 0.375rem 0.75rem; }
+.btn-md { padding: 0.5rem 1rem; }
+.btn-lg { padding: 0.625rem 1.25rem; }

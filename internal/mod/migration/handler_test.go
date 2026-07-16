@@ -14,6 +14,8 @@ type mockRepo struct {
 	steps      []MigrationStepRecord
 	backups    []MigrationBackup
 	selections []SelectionDecision
+	itemResults []ItemResult
+	selHistory  []SelectionHistory
 }
 
 func (m *mockRepo) CreateMigration(sourceID, targetID int, categories []string, operationID string) (int, error) {
@@ -164,16 +166,65 @@ func (m *mockRepo) GetAppliedCategories(migrationID int) ([]string, error) {
 
 // --- Phase 6B selection persistence mocks (in-memory) ---
 
-func (m *mockRepo) UpsertSelection(ctx context.Context, migrationID int, itemKey, category, action string) error {
+func (m *mockRepo) UpsertSelection(ctx context.Context, migrationID int, itemKey, category, action, reason string, riskAck bool, manualFollowup string) error {
 	for i := range m.selections {
 		if m.selections[i].MigrationID == migrationID && m.selections[i].ItemKey == itemKey {
 			m.selections[i].Category = category
 			m.selections[i].Action = action
+			m.selections[i].DecisionReason = reason
+			m.selections[i].RiskAcknowledged = riskAck
+			m.selections[i].ManualFollowup = manualFollowup
 			return nil
 		}
 	}
-	m.selections = append(m.selections, SelectionDecision{MigrationID: migrationID, ItemKey: itemKey, Category: category, Action: action})
+	m.selections = append(m.selections, SelectionDecision{MigrationID: migrationID, ItemKey: itemKey, Category: category, Action: action, DecisionReason: reason, RiskAcknowledged: riskAck, ManualFollowup: manualFollowup})
 	return nil
+}
+
+// Phase 6C-BE per-item result + history mocks (in-memory).
+func (m *mockRepo) UpsertItemResult(ctx context.Context, migrationID int, res ItemResult) error {
+	for i := range m.itemResults {
+		if m.itemResults[i].MigrationID == migrationID && m.itemResults[i].ItemKey == res.ItemKey {
+			m.itemResults[i] = res
+			return nil
+		}
+	}
+	m.itemResults = append(m.itemResults, res)
+	return nil
+}
+
+func (m *mockRepo) GetItemResults(ctx context.Context, migrationID int) ([]ItemResult, error) {
+	var out []ItemResult
+	for _, r := range m.itemResults {
+		if r.MigrationID == migrationID {
+			out = append(out, r)
+		}
+	}
+	return out, nil
+}
+
+func (m *mockRepo) GetItemResult(ctx context.Context, migrationID int, itemKey string) (ItemResult, bool, error) {
+	for _, r := range m.itemResults {
+		if r.MigrationID == migrationID && r.ItemKey == itemKey {
+			return r, true, nil
+		}
+	}
+	return ItemResult{}, false, nil
+}
+
+func (m *mockRepo) AppendSelectionHistory(ctx context.Context, migrationID int, h SelectionHistory) error {
+	m.selHistory = append(m.selHistory, h)
+	return nil
+}
+
+func (m *mockRepo) GetSelectionHistory(ctx context.Context, migrationID int) ([]SelectionHistory, error) {
+	var out []SelectionHistory
+	for _, h := range m.selHistory {
+		if h.MigrationID == migrationID {
+			out = append(out, h)
+		}
+	}
+	return out, nil
 }
 
 func (m *mockRepo) GetSelections(ctx context.Context, migrationID int) ([]SelectionDecision, error) {
