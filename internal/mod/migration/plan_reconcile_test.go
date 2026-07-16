@@ -39,6 +39,7 @@ func (stubRunner) BulkApply(ctx context.Context, migrationID int, policy BulkPol
 func (stubRunner) RecomputeParity(ctx context.Context, migrationID int, onProgress StepCallback) (*ParityResult, error) {
 	return nil, nil
 }
+func (stubRunner) InvalidateParity(migrationID int) {}
 func (stubRunner) GetFollowUp(ctx context.Context, migrationID int) (*ParityResult, error) {
 	return nil, nil
 }

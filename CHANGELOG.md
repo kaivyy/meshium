@@ -1615,6 +1615,20 @@ found while driving a live plan end-to-end.
   disarms/re-arms the stale timer, so a live socket that can still send a ping is
   never reported stale purely for lacking a data frame.
 
+### Phase 6C-FE — Compare page reload no longer re-collects live target
+
+The `/migrations/:id/compare` page fired the `parity-summary` and `parity`
+endpoints back-to-back, and **each** ran a full live `ComputeParity` (an SSH
+collect of every category on the target). On a remote/WAN target that live
+collect costs ~10s, so every page reload paid it twice (~20s) and a second
+reload re-paid it. A per-migration in-memory cache (`parityCacheTTL = 15s`) now
+serves repeated computes from the first result: the first load still does one
+live collect, but the sibling endpoint and any reload within 15s return
+instantly. The cache is invalidated on selection PUT, bulk selection, and
+refreshed by an explicit recompute — the only operations that make a cached
+compare stale. `MigrationRunner.InvalidateParity` added to the interface;
+`stubRunner` test mock updated.
+
 ---
 
 ## [1.4.2] — 2026-07-03

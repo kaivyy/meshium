@@ -32,6 +32,9 @@ type MigrationRunner interface {
 	BulkApply(ctx context.Context, migrationID int, policy BulkPolicy) (*BulkResult, error)
 	// RecomputeParity re-runs the live compare (POST parity/recompute).
 	RecomputeParity(ctx context.Context, migrationID int, onProgress StepCallback) (*ParityResult, error)
+	// InvalidateParity drops the cached compare for a migration after a state
+	// change (selection/bulk) that would otherwise serve stale cached parity.
+	InvalidateParity(migrationID int)
 	// GetFollowUp returns the items still requiring operator follow-up.
 	GetFollowUp(ctx context.Context, migrationID int) (*ParityResult, error)
 }
@@ -706,6 +709,8 @@ func (h *Handler) handlePutSelection(w http.ResponseWriter, r *http.Request, id 
 		return
 	}
 	shared.WriteJSON(w, http.StatusOK, map[string]string{"status": "ok", "itemKey": req.ItemKey, "action": req.Action})
+	// A selection changes the derived parity/summary, so drop the cached compare.
+	h.runner.InvalidateParity(id)
 }
 
 // handleParitySummary returns the post-apply verification report (spec §H.5):
@@ -754,6 +759,7 @@ func (h *Handler) handleBulkSelection(w http.ResponseWriter, r *http.Request, id
 		shared.WriteError(w, http.StatusInternalServerError, "bulk apply failed: "+err.Error(), "INTERNAL")
 		return
 	}
+	h.runner.InvalidateParity(id)
 	shared.WriteJSON(w, http.StatusOK, res)
 }
 
