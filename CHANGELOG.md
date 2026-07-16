@@ -1629,6 +1629,27 @@ refreshed by an explicit recompute — the only operations that make a cached
 compare stale. `MigrationRunner.InvalidateParity` added to the interface;
 `stubRunner` test mock updated.
 
+### Phase 6C-FE — Compare shows planned items; Live Monitor shows idle metrics
+
+Two compare/pipeline UI regressions found while driving a live plan (#21):
+
+- **Compare "Nothing to compare" on a freshly planned migration** —
+  `ComputeParity` only accepted source collect steps with `status="applied"`,
+  but plan-time collect steps are `status="completed"` (the `"applied"` marker
+  is only set *after* apply). So a planned-but-not-yet-run migration had an
+  empty source side and rendered "Nothing to compare". The filter now accepts
+  both `completed` and `applied` — both carry the same source snapshot to
+  compare against. Verified: plan #21 now returns 149 compare items. (Note: a
+  plan whose source collect genuinely returned zero packages still shows no
+  package items — that is a planning-collect data gap, not a compare bug.)
+- **Live Monitor "No data available" at idle** — the pipeline page sets
+  `sourceId`/`targetId` only after its async session load, so `LiveMonitor`'s
+  `onMount` fetch ran with null ids and skipped both servers, then never
+  re-fetched. Added a reactive that re-fetches REST metrics once the ids arrive
+  (and when the pipeline stops), guarded so a running pipeline's live WS frames
+  aren't clobbered. The monitor now shows CPU/RAM/disk at idle instead of a
+  permanent "No data available".
+
 ---
 
 ## [1.4.2] — 2026-07-03

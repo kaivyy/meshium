@@ -35,6 +35,18 @@
     disconnectWebSockets();
   }
 
+  // The pipeline page sets sourceId/targetId only after its async session load,
+  // so at onMount they are still null and fetchInitialMetrics skips both servers
+  // — leaving "No data available" forever even though the REST metrics exist.
+  // Re-fetch once the ids arrive (and whenever the pipeline stops, since the WS
+  // no longer feeds metrics). Guarded by initialFetched so a running pipeline's
+  // WS frames aren't clobbered by a REST refetch.
+  let initialFetched = false;
+  $: if (sourceId && targetId && !pipelineRunning && !initialFetched) {
+    initialFetched = true;
+    fetchInitialMetrics();
+  }
+
   // ── Data Fetching ──
   async function fetchInitialMetrics() {
     loading = true;

@@ -73,7 +73,11 @@ func (e *ParityEngine) ComputeParity(ctx context.Context, migrationID int, onPro
 	}
 	sourceByCat := map[string]CategoryData{}
 	for _, s := range steps {
-		if s.Action != "collect" || s.Status != StepStatusApplied {
+		// A plan-time collect step is "completed"; after apply it is checkpointed
+		// as "applied". Both carry the same source snapshot to compare against,
+		// so accept either — rejecting "completed" left freshly-planned migrations
+		// (nothing applied yet) with an empty source and "Nothing to compare".
+		if s.Action != "collect" || (s.Status != StepStatusCompleted && s.Status != StepStatusApplied) {
 			continue
 		}
 		var cd CategoryData
