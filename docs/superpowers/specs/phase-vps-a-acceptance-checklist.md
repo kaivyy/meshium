@@ -23,7 +23,7 @@ passed · failed · partial · needs live verification · unsupported · out of 
 | 16 | Streaming DB transfer functional | ExecPipe panic fixed df0ff1b; no live pair run | needs live verification | High | backend |
 | 17 | Compare distinguishes missing/different/same/unsupported/manual | parity.go states + live 149-item run | passed | — | backend |
 | 18 | Item identity stable across reruns | phase-6c contract + UNIQUE(migration_id,item_key) | passed | — | backend |
-| 19 | Selections honored by executor (catMixed) | filterCategoryToApplySet pipeline.go:1950-1955 | passed (code), needs live verification | High | backend |
+| 19 | Selections honored by executor (catMixed) | live full migration proved the apply-set was ALWAYS empty (envelope bug, fixed 8f1bb0c); now live-verified applying 900 items | passed (live) | — | backend |
 | 20 | keep_target/skip/review_manual never applied | apply-set exclusion + unresolved verify state | passed (code) | — | backend |
 | 21 | applied ≠ verified enforced in data model | item_results states; parity axes live | passed | — | backend |
 | 22 | Verification levels infra/runtime/app honest | per-item probes; docker false-green fixed (one Up container no longer verifies all categories) | passed | — | backend |
@@ -31,7 +31,7 @@ passed · failed · partial · needs live verification · unsupported · out of 
 | 24 | Cutover default cannot claim traffic moved | manual_required + note | passed | — | backend |
 | 25 | Commit blocked until cutover confirmed | ErrCutoverNotConfirmed path | passed | — | backend |
 | 26 | Auto-cutover fenced + whitelisted | pipeline.go:2563-2763 | needs live verification | High | backend |
-| 27 | Rollback scoped to actually-applied categories | pipeline.go:2102-2117 | passed (code) | — | backend |
+| 27 | Rollback scoped to actually-applied categories | scoping correct, BUT a batch that fails partway leaves real changes with no item marked applied — rollback then says "nothing to roll back" while ~390 packages remain installed | **failed (live)** | High | backend |
 | 28 | Per-item rollback evidence (backup_ref populated) | backup_ref.go; preparation records, initialSync stamps; DescribeRollbackScope reports gaps | passed (Gate 1) | — | backend |
 | 29 | Rollback cannot wipe target from empty baseline | Enumerated + zero-package guards + tests | passed | — | backend |
 | 30 | Rollback after cutover | not implemented | unsupported | High | product |
@@ -48,3 +48,5 @@ passed · failed · partial · needs live verification · unsupported · out of 
 | 41 | Root/sudo policy explicit | probePrivilege + checkPrivilege critical blocker; fails closed | passed (Gate 2) | — | backend |
 | 42 | Disk-full / reboot-mid-migration behavior | untested anywhere | needs live verification | High | infrastructure |
 | 43 | Documentation of safe-use boundary | this audit + CHANGELOG known-limits | passed | — | documentation |
+| 44 | Cross-release package migration completes | live 20.04→22.04: 57 packages absent on target, ~390 installed, batch still aborted on a dpkg error and rolled back | **failed (live)** | High | backend |
+| 45 | Partial-batch progress is tracked per item | a failed apt batch installs some packages but marks all 900 failed; the target changed and the record says it did not | **failed (live)** | High | backend |

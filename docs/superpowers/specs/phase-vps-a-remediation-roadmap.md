@@ -84,6 +84,29 @@ database pair, which this environment does not have.
 15. **VPS-B15 — Pool refcount/session-cap** (known limitations noted in
     CHANGELOG Phase 6D): eviction under live use, MaxSessions ceiling.
 
+## Gate 1.5 → Findings from the first live full migration (NEW, blocks Gate 2)
+
+Ran Alibaba (Ubuntu 20.04) → vpsexp7agus (Ubuntu 22.04), four categories.
+Four defects were found and fixed (commit `8f1bb0c`): the apply-set was always
+empty so nothing was ever applied while reporting success; one unavailable
+package blocked every other; debconf aborted the batch over a TTY-less SSH
+session; the sanitizer mangled the diagnostics. Two defects remain OPEN and
+must be closed before Gate 2 can be called done:
+
+19. **VPS-B19 — Track partial progress inside a failed batch.** apt installs
+    packages one transaction at a time; when the batch aborts, some are on the
+    target and some are not, but every item is marked `failed`. Rollback then
+    reports "nothing was applied; there is nothing to roll back" while ~390
+    packages really are installed. The record contradicts the machine. Fix:
+    re-read installed state after a failed batch and mark the items that did
+    land as applied, so rollback scope is truthful.
+    *Area:* packages applier + initialSyncStage item bookkeeping.
+20. **VPS-B20 — Survive an individual package failure.** A single package whose
+    postinst fails (dpkg exit 1) aborts the batch and, after retries, the whole
+    migration. Fix: install in smaller transactions and continue past an
+    individual failure, recording it per item, so one broken package does not
+    cost the other 899. *Depends on:* B19's per-item bookkeeping.
+
 ## Gate 3 → Autonomous production (do not start until Gate 2 complete)
 
 16. **VPS-B16 — Fenced autoCutover live certification** per engine×provider
