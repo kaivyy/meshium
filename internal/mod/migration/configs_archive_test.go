@@ -60,12 +60,45 @@ func TestConfigsCollectorParsesGzippedArchive(t *testing.T) {
 	if cd.Count != 2 {
 		t.Fatalf("expected 2 files from the archive path, got %d (%v)", cd.Count, keysOf(cd.Files))
 	}
-	body, ok := cd.Files["etc/nginx/nginx.conf"]
+	// Keys are normalised to absolute so exclusion checks and the dry-run,
+	// which both reason in absolute system paths, actually match.
+	body, ok := cd.Files["/etc/nginx/nginx.conf"]
 	if !ok {
-		t.Fatalf("nginx.conf missing; got %v", keysOf(cd.Files))
+		t.Fatalf("nginx.conf missing or not absolute; got %v", keysOf(cd.Files))
 	}
 	if string(body) != "worker_processes auto;\n" {
 		t.Errorf("nginx.conf content = %q", string(body))
+	}
+}
+
+// isExcluded compares against absolute paths like "/etc/fstab". tar members
+// arrive as "etc/fstab", so before normalisation the exclusion list — the guard
+// that stops OS-critical files being overwritten on the target — matched
+// nothing on the archive path.
+func TestConfigsCollectorAppliesExclusionsToArchivePaths(t *testing.T) {
+	ssh := newMockSSH()
+	ssh.addOutput("tar -czf", gzTarBase64(t, map[string]string{
+		"etc/fstab":        "UUID=... / ext4 defaults 0 1\n",
+		"etc/passwd":       "root:x:0:0::/root:/bin/bash\n",
+		"etc/nginx/ok.conf": "server {}\n",
+	}))
+
+	data, err := (&ConfigsCollector{Paths: []string{"/etc/"}}).Collect(context.Background(), ssh)
+	if err != nil {
+		t.Fatalf("Collect failed: %v", err)
+	}
+	var cd ConfigsData
+	if err := json.Unmarshal(data.Data, &cd); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+
+	for _, banned := range []string{"/etc/fstab", "etc/fstab", "/etc/passwd", "etc/passwd"} {
+		if _, ok := cd.Files[banned]; ok {
+			t.Errorf("collected excluded file %q — it would overwrite the target's own", banned)
+		}
+	}
+	if _, ok := cd.Files["/etc/nginx/ok.conf"]; !ok {
+		t.Errorf("dropped a legitimate config; got %v", keysOf(cd.Files))
 	}
 }
 

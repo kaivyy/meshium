@@ -34,6 +34,13 @@ type DatabaseCollectData struct {
 // drop only what the migration created/restored (not what was already there).
 type DatabaseBackup struct {
 	ExistingDbs map[string]bool `json:"existingDbs"`
+	// Enumerated reports whether the target's database list was actually read.
+	// Rollback drops every database absent from ExistingDbs, so an empty set
+	// means "the target had no databases" ONLY when this is true. When the
+	// engine was not detected, no migrator matched, or ListDatabases failed,
+	// the set is empty because nothing could be read — dropping its complement
+	// would destroy databases that predate the migration.
+	Enumerated bool `json:"enumerated"`
 }
 
 // DatabaseCollector is the stateful collector (like ConfigsCollector with
@@ -209,6 +216,8 @@ func (a *DatabaseApplier) Backup(ctx context.Context, ssh SSHExecuter) (BackupDa
 			for _, d := range existing {
 				backup.ExistingDbs[d.Name] = true
 			}
+			// Only a successful listing licenses Rollback to drop anything.
+			backup.Enumerated = true
 		}
 	}
 	raw, _ := json.Marshal(backup)
@@ -548,6 +557,17 @@ func (a *DatabaseApplier) Rollback(ctx context.Context, ssh SSHExecuter, backup 
 	if !ok {
 		return nil
 	}
+	// Rollback works by complement: drop whatever is on the target now but was
+	// not there before. That is only sound if the "before" list was actually
+	// read. A backup that failed to enumerate carries an empty set, and its
+	// complement is every database on the target — including ones this
+	// migration never created. Refuse rather than destroy unrelated data.
+	if !b.Enumerated {
+		return fmt.Errorf("database rollback: refusing to drop databases — the pre-migration " +
+			"backup never enumerated the target (engine undetected or listing failed), so the " +
+			"databases this migration created cannot be told apart from pre-existing ones")
+	}
+
 	creds := a.config.ToCredentials()
 	// We only know what to drop from the backup's complement — re-list current
 	// target DBs and drop any not present before migration.

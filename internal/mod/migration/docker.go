@@ -91,8 +91,13 @@ func (c *DockerCollector) Collect(ctx context.Context, ssh SSHExecuter) (Categor
 		if len(containerIDs) > 0 {
 			// Batch env vars: use docker inspect with format that outputs container_id|env_line
 			idList := strings.Join(containerIDs, " ")
+			// printf "%.12s" .Id — `docker ps --format '{{.ID}}'` above returns the
+			// 12-char short id, while `{{.Id}}` here is the 64-char full id. Keying
+			// the map by the full id and looking it up by the short one never
+			// matched, so Env and Labels were nil for every container and the
+			// recreate ran `docker run` with no -e and no --label.
 			envOut, _, _, _ := ssh.ExecContext(ctx, fmt.Sprintf(
-				`docker inspect --format '{{.Id}}|{{range .Config.Env}}{{println .}}{{end}}|||' %s 2>/dev/null`, idList))
+				`docker inspect --format '{{printf "%%.12s" .Id}}|{{range .Config.Env}}{{println .}}{{end}}|||' %s 2>/dev/null`, idList))
 			if strings.TrimSpace(envOut) != "" {
 				// Parse batch env output: container_id|env_line\nenv_line\n|||\ncontainer_id|...
 				envMap := parseBatchInspect(envOut)
@@ -104,8 +109,12 @@ func (c *DockerCollector) Collect(ctx context.Context, ssh SSHExecuter) (Categor
 			}
 
 			// Batch labels: same approach
+			// printf "%s=%s\n" rather than `println $k "=" $v`: println is Sprintln,
+			// which space-separates operands and yields `key = value`, so splitting
+			// on the first '=' left a trailing space on the key and a leading space
+			// on the value (`--label 'team '=' payments'`).
 			labelOut, _, _, _ := ssh.ExecContext(ctx, fmt.Sprintf(
-				`docker inspect --format '{{.Id}}|{{range $k, $v := .Config.Labels}}{{println $k "=" $v}}{{end}}|||' %s 2>/dev/null`, idList))
+				`docker inspect --format '{{printf "%%.12s" .Id}}|{{range $k, $v := .Config.Labels}}{{printf "%%s=%%s\n" $k $v}}{{end}}|||' %s 2>/dev/null`, idList))
 			if strings.TrimSpace(labelOut) != "" {
 				labelMap := parseBatchInspect(labelOut)
 				for i := range data.Containers {

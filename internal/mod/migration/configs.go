@@ -122,10 +122,18 @@ func (c *ConfigsCollector) Collect(ctx context.Context, ssh SSHExecuter) (Catego
 		}
 
 		for path, content := range files {
-			if isExcluded(path) {
+			// tar strips the leading "/", so archive keys arrive relative
+			// ("etc/host.conf") while collectSlow stores absolute
+			// ("/etc/host.conf"). Normalise here so one format reaches every
+			// consumer: isExcluded and the dry-run both match against absolute
+			// paths, and against a relative key the exclusion list — the guard
+			// that stops /etc/fstab and /etc/passwd being overwritten — silently
+			// matched nothing.
+			abs := absConfigPath(path)
+			if isExcluded(abs) {
 				continue
 			}
-			data.Files[path] = content
+			data.Files[abs] = content
 		}
 	}
 
@@ -207,6 +215,17 @@ var hugeConfigDirs = []string{
 	"/etc/fonts",
 	"/etc/terminfo",
 	"/etc/share",
+}
+
+// absConfigPath re-anchors a collected config key to its absolute system path.
+// tar emits members without the leading "/", the SFTP fallback keeps it, and
+// every consumer (exclusion checks, dry-run hashing, upload) means the absolute
+// path — so keys are normalised to absolute at collection time.
+func absConfigPath(p string) string {
+	if strings.HasPrefix(p, "/") {
+		return p
+	}
+	return "/" + p
 }
 
 // collectArchive captures one path as a single gzipped tar.
