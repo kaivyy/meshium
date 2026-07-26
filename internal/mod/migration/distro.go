@@ -125,7 +125,11 @@ func (a *aptAdapter) Detect(ctx context.Context, ssh SSHExecuter) (DistroInfo, e
 }
 func (a *aptAdapter) PackageManager() string { return "apt" }
 func (a *aptAdapter) ListPackages() string {
-	return "dpkg -l | awk 'NR>5 {print $2}'"
+	// Must keep the status column: `rc`/`ic` entries are packages that were
+	// removed but left config behind, and they must not be reinstalled on the
+	// target. parsePackageName filters on it. dpkg-query is used over `dpkg -l`
+	// because the latter pads/truncates its Name column to the output width.
+	return `dpkg-query -W -f='${db:Status-Abbrev} ${binary:Package}\n'`
 }
 func (a *aptAdapter) InstallPackages(pkgs []string) string {
 	return fmt.Sprintf("apt-get install -y %s", shared.ShellQuoteArgs(pkgs))
@@ -173,7 +177,8 @@ func (a *pacmanAdapter) Detect(ctx context.Context, ssh SSHExecuter) (DistroInfo
 }
 func (a *pacmanAdapter) PackageManager() string { return "pacman" }
 func (a *pacmanAdapter) ListPackages() string {
-	return "pacman -Q --qf '%n\\n'"
+	// pacman has no --qf (that is rpm syntax); -Qq prints bare names.
+	return "pacman -Qq"
 }
 func (a *pacmanAdapter) InstallPackages(pkgs []string) string {
 	return fmt.Sprintf("pacman -S --noconfirm %s", shared.ShellQuoteArgs(pkgs))
@@ -197,7 +202,10 @@ func (a *apkAdapter) Detect(ctx context.Context, ssh SSHExecuter) (DistroInfo, e
 }
 func (a *apkAdapter) PackageManager() string { return "apk" }
 func (a *apkAdapter) ListPackages() string {
-	return "apk info -v | awk '{print $1}'"
+	// `apk info` prints bare names; `apk info -v` appends "-<version>-r<rel>",
+	// which no amount of suffix-trimming can strip unambiguously from names
+	// that themselves contain dashes.
+	return "apk info"
 }
 func (a *apkAdapter) InstallPackages(pkgs []string) string {
 	return fmt.Sprintf("apk add %s", shared.ShellQuoteArgs(pkgs))
@@ -221,7 +229,10 @@ func (a *zypperAdapter) Detect(ctx context.Context, ssh SSHExecuter) (DistroInfo
 }
 func (a *zypperAdapter) PackageManager() string { return "zypper" }
 func (a *zypperAdapter) ListPackages() string {
-	return "zypper se --installed-only | awk 'NR>2 {print $3}'"
+	// SUSE is rpm-based. `zypper se` needs repo metadata and prefixes its table
+	// with a variable number of "Loading repository data..." lines, so the
+	// fixed `NR>2` skip silently dropped or kept the wrong rows.
+	return "rpm -qa --qf '%{NAME}\\n'"
 }
 func (a *zypperAdapter) InstallPackages(pkgs []string) string {
 	return fmt.Sprintf("zypper install -y %s", shared.ShellQuoteArgs(pkgs))

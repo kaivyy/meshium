@@ -40,53 +40,49 @@ func (c *PackagesCollector) Collect(ctx context.Context, ssh SSHExecuter) (Categ
 		Distro: adapter.PackageManager(),
 	}
 
-	stdout, _, _, err := ssh.ExecContext(ctx, adapter.ListPackages())
+	stdout, stderr, exit, err := ssh.ExecContext(ctx, adapter.ListPackages())
 	if err != nil {
 		return CategoryData{}, err
+	}
+	// A missing tool or a permission failure exits non-zero with empty stdout.
+	// Ignoring the exit code stored that as a successful collect of zero
+	// packages, and the migration carried an empty source snapshot forward
+	// with no warning.
+	if exit != 0 {
+		return CategoryData{}, fmt.Errorf("listing %s packages failed (exit %d): %s",
+			adapter.PackageManager(), exit, strings.TrimSpace(firstLine(stderr)))
 	}
 
 	data.Packages = parsePackageList(stdout, adapter.PackageManager())
 	data.Count = len(data.Packages)
+	if data.Count == 0 {
+		return CategoryData{}, fmt.Errorf("listing %s packages returned no packages — "+
+			"refusing to record an empty source snapshot (command: %s)",
+			adapter.PackageManager(), adapter.ListPackages())
+	}
 
 	raw, _ := json.Marshal(data)
 	return CategoryData{Type: "packages", Data: raw}, nil
 }
 
-// parsePackageName extracts the package name from a list command output line.
+// parsePackageName extracts the package name from one line of the
+// corresponding adapter's ListPackages() output.
+//
+// Every manager except apt is asked for bare names (rpm --qf '%{NAME}',
+// pacman -Qq, apk info), so the name is the line. Only apt carries a leading
+// install-status column, which must be filtered: `rc`/`ic` rows are packages
+// removed but still holding config, and reinstalling them on the target would
+// be wrong.
+//
+// Do not add version-stripping here. Package names legitimately contain
+// dashes ("python3-libs", "musl-utils"), so trimming dash-separated suffixes
+// silently corrupts them — that is what this function used to do.
 func parsePackageName(line, pm string) string {
 	switch pm {
 	case "apt":
 		fields := strings.Fields(line)
 		if len(fields) >= 2 && (fields[0] == "ii" || fields[0] == "hi") {
 			return fields[1]
-		}
-		return ""
-	case "dnf", "yum":
-		idx := strings.LastIndex(line, "-")
-		if idx > 0 {
-			line = line[:idx]
-			idx = strings.LastIndex(line, "-")
-			if idx > 0 {
-				return line[:idx]
-			}
-		}
-		return line
-	case "pacman":
-		fields := strings.Fields(line)
-		if len(fields) >= 1 {
-			return fields[0]
-		}
-		return ""
-	case "apk":
-		idx := strings.LastIndex(line, "-")
-		if idx > 0 {
-			return line[:idx]
-		}
-		return line
-	case "zypper":
-		fields := strings.Split(line, "|")
-		if len(fields) >= 2 {
-			return strings.TrimSpace(fields[1])
 		}
 		return ""
 	default:

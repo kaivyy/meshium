@@ -9,7 +9,7 @@ import (
 func TestPackagesCollectorApt(t *testing.T) {
 	ssh := newMockSSH()
 	ssh.execOutput["cat /etc/os-release"] = "ID=ubuntu\nVERSION_ID=22.04"
-	ssh.execOutput["dpkg -l"] = "ii  nginx    1.18.0-0ubuntu1   amd64   [installed]\nii  curl     7.81.0-1   amd64   [installed]\n"
+	ssh.execOutput["dpkg-query"] = "ii  nginx\nii  curl\n"
 
 	collector := &PackagesCollector{}
 	data, err := collector.Collect(context.Background(), ssh)
@@ -37,24 +37,30 @@ func TestParsePackageNameApt(t *testing.T) {
 	}
 }
 
+// pacman -Qq emits bare names, one per line.
 func TestParsePackageNamePacman(t *testing.T) {
-	result := parsePackageName("nginx 1.18.0", "pacman")
+	result := parsePackageName("nginx", "pacman")
 	if result != "nginx" {
 		t.Errorf("expected 'nginx', got '%s'", result)
 	}
 }
 
+// rpm -qa --qf '%{NAME}\n' emits the name only — never an NVR string — so the
+// name must be passed through untouched, dashes included.
 func TestParsePackageNameRpm(t *testing.T) {
-	result := parsePackageName("nginx-1.18.0-1.el9.x86_64", "dnf")
+	result := parsePackageName("nginx", "dnf")
 	if result != "nginx" {
 		t.Errorf("expected 'nginx', got '%s'", result)
+	}
+	if result := parsePackageName("python3-libs", "dnf"); result != "python3-libs" {
+		t.Errorf("expected 'python3-libs', got '%s'", result)
 	}
 }
 
 func TestPackagesApplierBackup(t *testing.T) {
 	ssh := newMockSSH()
 	ssh.execOutput["cat /etc/os-release"] = "ID=ubuntu\nVERSION_ID=22.04"
-	ssh.execOutput["dpkg -l"] = "ii  curl     7.81.0-1   amd64\n"
+	ssh.execOutput["dpkg-query"] = "ii  curl\n"
 
 	applier := &PackagesApplier{}
 	backup, err := applier.Backup(context.Background(), ssh)
@@ -75,7 +81,7 @@ func TestPackagesApplierBackup(t *testing.T) {
 func TestPackagesApplierApply(t *testing.T) {
 	ssh := newMockSSH()
 	ssh.execOutput["cat /etc/os-release"] = "ID=ubuntu\nVERSION_ID=22.04"
-	ssh.execOutput["dpkg -l"] = "ii  curl     7.81.0-1   amd64\n"
+	ssh.execOutput["dpkg-query"] = "ii  curl\n"
 
 	pd := PackagesData{
 		Distro:   "apt",

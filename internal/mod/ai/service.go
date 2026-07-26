@@ -368,7 +368,7 @@ func (s *Service) answerPackageQuestion(ctx context.Context, message string, srv
 			return &ChatResponse{
 				Message:  "I can list packages once a server is selected.",
 				Context:  joinContextNotes(contextNotes),
-				Commands: []string{"dpkg -l | awk 'NR>5 {print $2}'", "rpm -qa --qf '%{NAME}\n'"},
+				Commands: []string{`dpkg-query -W -f='${db:Status-Abbrev} ${binary:Package}\n'`, "rpm -qa --qf '%{NAME}\n'"},
 			}, nil
 		}
 		return &ChatResponse{
@@ -1181,15 +1181,16 @@ func packageListCommandForSnapshot(snap *discovery.ServerSnapshot) string {
 func packageListCommandForPackageManager(pm string) string {
 	switch pm {
 	case "apt":
-		return "dpkg -l | awk 'NR>5 {print $2}'"
+		return `dpkg-query -W -f='${db:Status-Abbrev} ${binary:Package}\n'`
 	case "dnf", "yum":
 		return "rpm -qa --qf '%{NAME}\n'"
 	case "pacman":
-		return "pacman -Q --qf '%n\n'"
+		// pacman has no --qf (rpm syntax); -Qq prints bare names.
+		return "pacman -Qq"
 	case "apk":
-		return "apk info -v | awk '{print $1}'"
+		return "apk info"
 	case "zypper":
-		return "zypper se --installed-only | awk 'NR>2 {print $3}'"
+		return "rpm -qa --qf '%{NAME}\n'"
 	default:
 		return ""
 	}
