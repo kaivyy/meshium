@@ -1650,6 +1650,78 @@ Two compare/pipeline UI regressions found while driving a live plan (#21):
   aren't clobbered. The monitor now shows CPU/RAM/disk at idle instead of a
   permanent "No data available".
 
+### Phase 6C-FE — Modal scroll on short viewports
+
+- **Modals clipped instead of scrolling** — the compare item-detail modal, the
+  compare confirm dialog and the pipeline confirm dialog had no height cap, so
+  tall content ran past the viewport with no scrollbar and the action buttons
+  became unreachable. Overlays now scroll (top-aligned on mobile, centered from
+  `sm` up) and panels cap at `90vh` with their own scroll.
+
+### Phase 6D — Full-codebase bug audit
+
+A systematic audit of collectors, the SSH layer, auth and the migration UI,
+prompted by migration #21 storing a package snapshot of zero packages. Each
+finding below was reproduced before it was fixed and verified after.
+
+- **Package collection silently returned zero packages** — every
+  `ListPackages()` command pre-extracted the name with `awk` or a `--format`
+  flag while `parsePackageName` still expected each tool's raw table output, so
+  the parser dropped every line. apt and zypper collected **nothing**; dnf and
+  apk truncated names at dashes (`python3-libs` → `python3`); pacman's command
+  used `--qf`, which is rpm syntax and not a pacman flag. Commands now emit one
+  unambiguous name per line and only apt's status column is filtered. Collect
+  also checks the exit code and rejects an empty list rather than recording it
+  as success. Live: **900 packages collected, was 0.**
+- **Config collection captured cert/font junk, never real configs** — three
+  compounding defects. `-size -1M` rounds *up*, so it matched only zero-byte
+  files. The prune had no explicit `-print`, so find's implicit print emitted
+  the pruned directories themselves and `tar -T -` recursed into them. Migration
+  #21 collected 87 files — 65 fonts, 4 ssl, 1 terminfo, rest empty — and **zero
+  real configs**; the 491 KB that looked healthy was font and certificate data.
+  Fixing those surfaced the third: a real `/etc` exceeds `ExecContext`'s 1 MiB
+  cap, dropping the category into a per-file SFTP crawl that took **over six
+  minutes** and truncated at 2000 files before reaching `/etc/ssh`. The archive
+  is now gzipped and streamed via `ExecPipe`. Live: **11s, 2043 files, including
+  `/etc/nginx/nginx.conf` and `/etc/ssh/sshd_config`.**
+- **Config keys normalised to absolute** — tar strips the leading `/`, so
+  archive keys were relative while the SFTP fallback's were absolute.
+  `isExcluded` compares absolute paths, so the guard preventing `/etc/fstab` and
+  `/etc/passwd` from overwriting the target's own matched nothing on the archive
+  path.
+- **`ExecPipe` panicked on `Close`** — `pipeReader` was built without its `done`
+  channel, so `close(p.done)` closed a nil channel and panicked on the ordinary
+  success path of every streamed database dump, taking the process down. The
+  same nil channel leaked the watchdog goroutine and its SSH session.
+- **Rollback could drop pre-existing databases** — `Backup` returned an empty
+  `ExistingDbs` map with a *nil* error whenever detection or listing failed, and
+  `Rollback` drops the complement of that set. A missed detect or an auth blip
+  therefore meant "drop every database on the target", including ones predating
+  the migration. `DatabaseBackup.Enumerated` now records whether the target was
+  actually read, and rollback refuses to drop without it.
+- **Docker env and labels were always empty** — `docker ps` yields the 12-char
+  short id, `docker inspect --format '{{.Id}}'` the 64-char full id; the batch
+  map was keyed by one and read by the other, so containers were recreated with
+  no `-e` and no `--label`, losing their database URLs and secrets. The label
+  template also used `println $k "=" $v`, which space-separates into
+  `key = value`.
+- **Unbounded SSH liveness probe under the pool mutex** — `IsAlive` waited on a
+  keepalive with no deadline while `isEntryValid` held the pool lock, so one
+  blackholed host stalled pool access for every server. Bounded to 3s, with the
+  cheap lifetime/idle checks moved ahead of it.
+- **Session tokens compared with `==`** — replaced with
+  `crypto/subtle.ConstantTimeCompare`.
+- **Rollback state never reconciled after a successful load** —
+  `applyRollbackReconcile()` sat inside `loadSession`'s `catch`, so despite its
+  comment it ran only when the fetch *failed*; a rolled-back migration showed a
+  stale banner after refresh.
+- **Flaky test fixed** — `mockSSH` resolved stub keys by iterating a map, so
+  when two stubs matched one command Go's randomized iteration picked either.
+  `TestDatabaseCollectResumeNote` failed about one run in six. Matching now
+  prefers the longest (most specific) key. This same fuzzy matching is what hid
+  the package-collection bug: tests fed the parser a format production never
+  produced.
+
 ---
 
 ## [1.4.2] — 2026-07-03
