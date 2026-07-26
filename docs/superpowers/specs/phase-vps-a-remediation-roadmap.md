@@ -8,7 +8,11 @@ just automates the blast radius.
 
 ---
 
-## Gate 0 → Staging use (disposable VPS pairs)
+## Gate 0 → Staging use (disposable VPS pairs) — **COMPLETE 2026-07-26**
+
+Status: B1 ✅ (10/10 live) · B2 ✅ (already existed, finding retracted) ·
+B3 ✅ (0600 + retention, live 429MB→130MB) · B4 ✅ (mode/owner fidelity, live).
+Gate 1 items below are the next tranche.
 
 Blockers before Meshium may be pointed at any VPS someone would mind losing:
 
@@ -19,9 +23,11 @@ Blockers before Meshium may be pointed at any VPS someone would mind losing:
    reboot. Record DB evidence per run. This is the single largest gap —
    every apply/rollback path is `[CODE]`-only today. *Area:*
    test harness + `docs/superpowers/specs/` results doc. *Depends on:* none.
-2. **VPS-B2 — Per-target migration lock.** Refuse to start a migration whose
-   target (or source) is already the target of a running migration.
-   *Area:* `pipeline.go Execute` + repo query. Small.
+2. ~~**VPS-B2 — Per-target migration lock.**~~ **ALREADY IMPLEMENTED** —
+   verified 2026-07-26: `tryAcquireResource(SourceID, TargetID)` claims both
+   hosts atomically and fails closed (pipeline.go:224-235,
+   `concurrency_resource_test.go`). The VPS-A finding was wrong and is
+   retracted. No work needed.
 3. **VPS-B3 — DB file permissions + retention.** Chmod 0600 on create;
    retention/pruning for step payloads (DB is 429MB). *Area:* `internal/db`,
    repo cleanup job.

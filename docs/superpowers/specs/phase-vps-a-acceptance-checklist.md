@@ -8,14 +8,14 @@ passed · failed · partial · needs live verification · unsupported · out of 
 | 1 | Source/target add + connection test | servers API, pool dial `[LIVE]` | passed | — | backend |
 | 2 | Credentials encrypted at rest | server/service.go:88+, auth.key 0600 | passed | — | security |
 | 3 | Credentials redacted in API/WS | redactServer live-verified; WS stderr passthrough | partial | Med | security |
-| 4 | DB file permissions | meshium.db 0644 | failed | High | infrastructure |
+| 4 | DB file permissions | db.Open chmod 0600; live 600 on all db files | passed | — | infrastructure |
 | 5 | Host-key verification deny-until-trusted, mismatch fail | knownhosts.go:137-167 | passed | — | security |
 | 6 | Session token constant-time compare | 6a810ff | passed | — | security |
 | 7 | Command injection hygiene | ShellQuote sweep; pqIdent/backtickIdent; wrapExec live | passed | — | security |
 | 8 | Inventory collects real data (packages) | 900 pkgs live (was 0) | passed | — | backend |
 | 9 | Inventory collects real data (configs) | 2043 files incl nginx/sshd live | passed | — | backend |
 | 10 | Inventory freshness surfaced | stale-snapshot warning live | passed | — | backend |
-| 11 | Config ownership/perms/symlinks captured+applied | configs.go content-only | failed | High | backend |
+| 11 | Config ownership/perms captured+applied | ConfigsData.Meta + applyFileMeta; live C2 + real privkeys 0600 | passed (symlinks still out of scope) | Med | backend |
 | 12 | Docker env/labels collected | 1624a5a + live template proof | passed | — | backend |
 | 13 | Docker volume data migration | no code path | unsupported | High | product |
 | 14 | Docker recreate fidelity (ports/nets/volumes) | docker.go:392-404 name/env/label/image only | failed | High | backend |
@@ -36,13 +36,13 @@ passed · failed · partial · needs live verification · unsupported · out of 
 | 29 | Rollback cannot wipe target from empty baseline | Enumerated + zero-package guards + tests | passed | — | backend |
 | 30 | Rollback after cutover | not implemented | unsupported | High | product |
 | 31 | Per-migration concurrent-run lock | tryAcquire | passed | — | backend |
-| 32 | Per-target cross-migration lock | absent | failed | High | backend |
+| 32 | Per-target cross-migration lock | tryAcquireResource pipeline.go:224-235 + concurrency_resource_test.go | passed (finding retracted) | — | backend |
 | 33 | source==target blocked | pre-flight critical check | passed | — | backend |
 | 34 | SQLite pragmas (FK, WAL, busy_timeout) per connection | db.go:22 + test | passed | — | infrastructure |
 | 35 | Schema: item_results/selection_history/decision fields | live schema dump | passed | — | backend |
-| 36 | DB growth/retention policy | 429MB, none | failed | Med | infrastructure |
+| 36 | DB growth/retention policy | db.Maintain + startup hook; live 429MB→130MB | passed | — | infrastructure |
 | 37 | Stale plan hard-blocked before apply | warning only | partial | Med | backend |
-| 38 | Live e2e apply→verify→rollback matrix | phase-5e mostly PENDING; not run here | needs live verification | **Critical gate** | infrastructure |
+| 38 | Live e2e apply→verify→rollback matrix | vpsb1_live_matrix_test.go — 10/10 PASS on disposable pairs | passed (Gate 0) | — | infrastructure |
 | 39 | UI grades category maturity (experimental flags) | absent | failed | Med | frontend+product |
 | 40 | Sensitive step data at rest (creds in steps) | mongo/db collect metadata-only | passed | — | security |
 | 41 | Root/sudo policy explicit | root silently assumed | partial | Med | product |

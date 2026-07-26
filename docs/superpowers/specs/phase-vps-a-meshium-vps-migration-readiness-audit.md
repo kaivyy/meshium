@@ -48,9 +48,11 @@ several were found stale (noted inline).
   restore-from-backup for configs/users, complement-removal for
   packages/databases (now guarded against empty baselines), `FLUSHALL` for
   Redis. There is **no rollback after cutover** and no per-item rollback.
-- **No cross-migration target lock**: two migrations can write to the same
-  target concurrently (only a per-migration-ID lock exists,
-  pipeline.go:191-194).
+- ~~No cross-migration target lock~~ — **RETRACTED 2026-07-26.** Re-verified
+  during Gate 0: `Execute` claims source AND target through
+  `tryAcquireResource` before any mutating work and fails closed when either is
+  held (pipeline.go:224-235, `concurrency_resource_test.go`). The original
+  finding was wrong; the guard exists.
 - Credential handling is largely correct (AES-encrypted at rest, redacted in
   API, constant-time token compare as of `6a810ff`), but `meshium.db` is
   mode **0644** while `auth.key` is 0600 — the DB leaks encrypted blobs +
@@ -178,10 +180,12 @@ The system itself never conflates them (parity summary showed
   (installs, pulls, compose up) moved to cap-free ctx-bound exec (`f67f211`).
   `NewSession`/`sftp.NewClient` remain outside the per-command watchdog — a
   wedged transport can hang a stage until ctx cancel (**medium, open**).
-- Concurrency: per-migration lock + global slot cap only. **No per-target
-  lock** — two migrations can write the same target concurrently (**high,
-  open**). Same-server (source==target) is a critical pre-flight check
-  (pipeline_handler.go:1000-1005).
+- Concurrency: per-migration lock, global slot cap, **and a per-server resource
+  lock** — `tryAcquireResource(SourceID, TargetID)` is atomic and fails closed,
+  so two distinct migrations cannot fork the same host (pipeline.go:224-235).
+  Same-server (source==target) is a critical pre-flight check
+  (pipeline_handler.go:1000-1005). *(Corrected: an earlier draft of this audit
+  claimed the per-target lock was missing.)*
 - Cancellation: ctx propagated through stages; checkpoint rows persist
   completed stages; resume skips completed stages (pipeline.go:355-368).
 - Partial failure: category apply error marks apply-set items ExecFailed and
@@ -258,8 +262,10 @@ The system itself never conflates them (parity summary showed
 
 | Sev | Finding | Status |
 |---|---|---|
-| High | No per-target concurrency lock → interleaved writes to one target | open |
-| High | `meshium.db` mode 0644 with full inventory + encrypted creds | open (1-line fix) |
+| ~~High~~ | ~~No per-target concurrency lock~~ | **retracted** — guard exists (pipeline.go:224-235) |
+| High→fixed | `meshium.db` mode 0644 with full inventory + encrypted creds | fixed `eb1d2b9`; live 429MB→130MB, all files 0600 |
+| High→fixed | Configs applied content only → 0600 secrets widened on target | fixed `eb1d2b9`; live: TLS privkeys + gshadow keep modes |
+| High→fixed | Cancelled configs collect returned success with zero files | fixed `7d478f0` (found by live matrix C6) |
 | High→fixed | Session token `==` compare (timing) | fixed `6a810ff` |
 | Critical→fixed | Container-mode DB commands unrunnable / env cred assignments dead | fixed `fbac33a` |
 | Critical→fixed | Rollback wipe-target baselines (db/packages) | fixed `1624a5a`,`5b37430` |
@@ -277,7 +283,8 @@ The system itself never conflates them (parity summary showed
 | Collector regression suite (5 distro families, mocks pinned to real tool output) | **PASS** |
 | wrapExec round-trip in real container (env survival) | **PASS** |
 | dpkg/find/prune/tar/docker-template semantics on live shell/daemon | **PASS** (7 empirical proofs) |
-| Apply / verify / rollback / cutover on disposable pair | **NOT RUN** — no disposable VPS pair in this environment; servers 1/5 are real hosts, destructive testing prohibited by brief |
+| Apply / verify / rollback on disposable pair (VPS-B1) | **RUN 2026-07-26** — 10/10 PASS. C1 packages apply+rollback, C2 config mode/owner, C3 excluded files, C4 services, C5 apply failure, C6 cancellation, C7 SSH drop, C8 users, C9 idempotent re-apply, C10 configs rollback restores content+mode. See `vpsb1_live_matrix_test.go` (tag `integration`). |
+| Cutover / commit on disposable pair | **NOT RUN** — Gate 2/3 scope |
 | phase-5e matrix C1–C10 | mostly **PENDING** per its own record `[HIST]` |
 
 ## 14. Go / no-go
