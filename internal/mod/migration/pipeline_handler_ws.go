@@ -222,6 +222,11 @@ func (h *PipelineHandler) streamPipelineHistory(ctx context.Context, conn *wsCon
 }
 
 func (h *PipelineHandler) extendWSMessage(migrationID int, msg WSMessage, sequence int64) WSMessageExtended {
+	// Single choke point for secret redaction on the outbound path: every
+	// progress frame the browser receives passes through here, so a stage that
+	// surfaces raw remote stderr cannot leak credentials by forgetting to
+	// sanitise at its own call site.
+	msg = SanitizeWSMessage(msg)
 	ext := WSMessageExtended{
 		Step:      msg.Step,
 		Status:    msg.Status,

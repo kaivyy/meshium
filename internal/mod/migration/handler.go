@@ -356,7 +356,9 @@ func (h *Handler) handlePlanWS(w http.ResponseWriter, r *http.Request) {
 	}
 
 	plan, err := h.runner.Plan(ctx, req, func(msg WSMessage) {
-		if writeErr := conn.WriteJSON(msg); writeErr != nil {
+		// Redact before the frame leaves the process — collectors surface raw
+		// remote stderr, which can carry credentials from the failing command.
+		if writeErr := conn.WriteJSON(SanitizeWSMessage(msg)); writeErr != nil {
 			log.Printf("websocket write failed: %v", writeErr)
 			cancel()
 		}

@@ -29,6 +29,11 @@ type Client struct {
 	closed      bool // protected by mu
 	mu          sync.Mutex
 	lastUsed    time.Time
+	// sem caps concurrent SSH channels on this connection so the pool's
+	// multiplexed subsystems cannot together exceed sshd's MaxSessions.
+	// See session_cap.go.
+	semOnce sync.Once
+	sem     chan struct{}
 }
 
 func (c *Client) touch() {
@@ -580,33 +585,38 @@ func (c *Client) ExecStreamLinesContextWithTimeout(ctx context.Context, cmd stri
 func (c *Client) ExecPipe(ctx context.Context, cmd string) (io.ReadCloser, error) {
 	c.touch()
 
-	session, err := c.newSessionContext(ctx)
+	// Streaming holds the channel until Close, so it holds its session slot for
+	// that whole period rather than just the open burst.
+	session, releaseSlot, err := c.newSessionContextTracked(ctx)
 	if err != nil {
 		return nil, err
 	}
 
 	stdout, err := session.StdoutPipe()
 	if err != nil {
+		releaseSlot()
 		_ = session.Close()
 		return nil, err
 	}
 	// Capture stderr so a failure isn't lost to /dev/null; surfaced on Close.
 	stderr, err := session.StderrPipe()
 	if err != nil {
+		releaseSlot()
 		_ = session.Close()
 		return nil, err
 	}
 
 	if err := session.Start(cmd); err != nil {
+		releaseSlot()
+		_ = session.Close()
 		if ctx.Err() != nil {
-			_ = session.Close()
 			return nil, ctx.Err()
 		}
-		_ = session.Close()
 		return nil, err
 	}
 
 	pr := newPipeReader(ctx, session, stdout, stderr)
+	pr.releaseSlot = releaseSlot
 	// Cancel the session if the context expires before Close.
 	go func() {
 		select {
@@ -627,6 +637,9 @@ type pipeReader struct {
 	ctx     context.Context
 	done    chan struct{}
 	once    sync.Once
+	// releaseSlot returns this stream's session slot to the per-connection cap.
+	// Set by ExecPipe; called exactly once from Close.
+	releaseSlot func()
 }
 
 // newPipeReader builds a pipeReader with its done channel ready. Always
@@ -650,6 +663,9 @@ func (p *pipeReader) Read(b []byte) (int, error) {
 func (p *pipeReader) Close() error {
 	var closeErr error
 	p.once.Do(func() {
+		if p.releaseSlot != nil {
+			defer p.releaseSlot()
+		}
 		close(p.done)
 		// Wait for the command to finish; session.Close is needed to release
 		// resources whether or not Wait succeeds.

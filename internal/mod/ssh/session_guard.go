@@ -61,14 +61,43 @@ func openWithContext[T any](ctx context.Context, timeout time.Duration, open fun
 	}
 }
 
-// newSessionContext opens an SSH session bounded by ctx and sessionOpenTimeout.
+// newSessionContext opens an SSH session bounded by ctx and sessionOpenTimeout,
+// after reserving a slot against the per-connection session cap.
+//
+// The returned session owns its slot: the caller MUST close it via the
+// returned release func (session.Close alone does not free the slot), which is
+// why this returns both.
 func (c *Client) newSessionContext(ctx context.Context) (*ssh.Session, error) {
-	if c == nil || c.conn == nil {
-		return nil, errors.New("ssh client is not connected")
+	sess, release, err := c.newSessionContextTracked(ctx)
+	if err != nil {
+		return nil, err
 	}
-	return openWithContext(ctx, sessionOpenTimeout, func() (*ssh.Session, error) {
+	// Callers that do not track the slot release it as soon as the session is
+	// handed over; the cap then only bounds the OPEN burst, which is what
+	// protects sshd's MaxSessions during fan-out.
+	release()
+	return sess, nil
+}
+
+// newSessionContextTracked is newSessionContext for callers that hold the
+// session open for a long time (streaming, shells) and should hold their slot
+// for that whole period.
+func (c *Client) newSessionContextTracked(ctx context.Context) (*ssh.Session, func(), error) {
+	if c == nil || c.conn == nil {
+		return nil, nil, errors.New("ssh client is not connected")
+	}
+	release, err := c.acquireSession(ctx)
+	if err != nil {
+		return nil, nil, fmt.Errorf("waiting for an SSH session slot: %w", err)
+	}
+	sess, err := openWithContext(ctx, sessionOpenTimeout, func() (*ssh.Session, error) {
 		return c.conn.NewSession()
 	})
+	if err != nil {
+		release()
+		return nil, nil, err
+	}
+	return sess, release, nil
 }
 
 // newSFTPContext opens an SFTP client bounded by ctx and sessionOpenTimeout.
