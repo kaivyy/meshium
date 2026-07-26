@@ -25,9 +25,12 @@ type ServicesCollector struct{}
 
 // Collect runs systemctl list-unit-files to find enabled services.
 func (c *ServicesCollector) Collect(ctx context.Context, ssh SSHExecuter) (CategoryData, error) {
-	stdout, _, _, err := ssh.ExecContext(ctx, "systemctl list-unit-files --type=service --state=enabled --no-legend 2>/dev/null || rc-update show 2>/dev/null")
+	stdout, _, exit, err := ssh.ExecContext(ctx, "systemctl list-unit-files --type=service --state=enabled --no-legend 2>/dev/null || rc-update show 2>/dev/null")
 	if err != nil {
 		return CategoryData{}, err
+	}
+	if exit != 0 {
+		return CategoryData{}, fmt.Errorf("listing enabled services failed (exit %d): neither systemctl nor rc-update produced output", exit)
 	}
 
 	data := ServicesData{}
@@ -55,6 +58,12 @@ func (c *ServicesCollector) Collect(ctx context.Context, ssh SSHExecuter) (Categ
 		}
 	}
 	data.Count = len(data.Services)
+	// A live server always has at least one enabled service (sshd got us
+	// here). Zero parsed services means the probe failed or the output format
+	// changed — refuse to store an empty snapshot as a successful collect.
+	if data.Count == 0 {
+		return CategoryData{}, fmt.Errorf("service listing returned no enabled services — refusing to record an empty source snapshot")
+	}
 
 	raw, _ := json.Marshal(data)
 	return CategoryData{Type: "services", Data: raw}, nil

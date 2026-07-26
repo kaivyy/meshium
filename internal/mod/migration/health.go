@@ -332,8 +332,12 @@ func (e *HealthEngine) checkContainer(ctx context.Context, cfg HealthCheckConfig
 		CheckTarget: cfg.Target,
 	}
 
-	cmd := fmt.Sprintf("docker inspect --format='{{.State.Status}} {{.State.Health.Status}}' %s 2>&1", shared.ShellQuote(cfg.Target))
-	output, _, _, err := ssh.ExecContext(ctx, cmd)
+	// Guard .State.Health with {{if}}: on a container with no HEALTHCHECK the
+	// bare {{.State.Health.Status}} makes docker inspect fail with "map has no
+	// entry for key Health" (exit 1, error text on the 2>&1 stdout), so every
+	// healthcheck-less container was scored unhealthy.
+	cmd := fmt.Sprintf("docker inspect --format='{{.State.Status}} {{if .State.Health}}{{.State.Health.Status}}{{else}}none{{end}}' %s 2>&1", shared.ShellQuote(cfg.Target))
+	output, _, exitCode, err := ssh.ExecContext(ctx, cmd)
 	elapsed := time.Since(start)
 	result.ResponseTimeMs = elapsed.Milliseconds()
 
@@ -345,7 +349,13 @@ func (e *HealthEngine) checkContainer(ctx context.Context, cfg HealthCheckConfig
 	}
 
 	output = strings.TrimSpace(output)
-	if strings.Contains(output, "running") && (strings.Contains(output, "healthy") || !strings.Contains(output, "unhealthy")) {
+	// Parse fields instead of substring-matching the whole line:
+	// strings.Contains(output, "healthy") is also true for "unhealthy", which
+	// made a genuinely unhealthy container pass as healthy.
+	fields := strings.Fields(output)
+	running := exitCode == 0 && len(fields) > 0 && fields[0] == "running"
+	healthOK := len(fields) < 2 || fields[1] != "unhealthy"
+	if running && healthOK {
 		result.Status = "healthy"
 		result.HealthScore = e.scoreFromLatency(elapsed)
 	} else {

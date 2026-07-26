@@ -119,14 +119,26 @@ func (a *PackagesApplier) Backup(ctx context.Context, ssh SSHExecuter) (BackupDa
 		return BackupData{}, err
 	}
 
-	stdout, _, _, err := ssh.ExecContext(ctx, adapter.ListPackages())
+	stdout, _, exit, err := ssh.ExecContext(ctx, adapter.ListPackages())
 	if err != nil {
 		return BackupData{}, err
+	}
+	// Same guards as Collect. Rollback removes every package NOT in this
+	// backup, so an empty backup recorded as success would later mean
+	// "remove every package on the target".
+	if exit != 0 {
+		return BackupData{}, fmt.Errorf("listing %s packages for backup failed (exit %d)",
+			adapter.PackageManager(), exit)
 	}
 
 	backup := PackagesBackup{
 		Distro:   adapter.PackageManager(),
 		Packages: parsePackageList(stdout, adapter.PackageManager()),
+	}
+	if len(backup.Packages) == 0 {
+		return BackupData{}, fmt.Errorf("listing %s packages for backup returned no packages — "+
+			"refusing to record an empty baseline that rollback would treat as \"remove everything\"",
+			adapter.PackageManager())
 	}
 
 	raw, _ := json.Marshal(backup)
@@ -227,6 +239,14 @@ func (a *PackagesApplier) Rollback(ctx context.Context, ssh SSHExecuter, backup 
 	var pb PackagesBackup
 	if err := json.Unmarshal(backup.Data, &pb); err != nil {
 		return err
+	}
+	// Rollback removes the complement of the backup. A backup with zero
+	// packages cannot mean "the target had nothing installed" on a live server
+	// — it means the baseline listing failed (records from before Backup
+	// guarded its exit code). Its complement is every package on the target.
+	if len(pb.Packages) == 0 {
+		return fmt.Errorf("packages rollback: refusing to remove packages — the pre-migration " +
+			"backup recorded zero packages, so removing its complement would strip the entire target")
 	}
 
 	info, err := DetectDistro(ctx, ssh)

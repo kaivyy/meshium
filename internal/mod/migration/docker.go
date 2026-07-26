@@ -63,8 +63,13 @@ func (c *DockerCollector) Collect(ctx context.Context, ssh SSHExecuter) (Categor
 		return CategoryData{Type: "docker", Data: []byte("{}")}, nil
 	}
 
-	// Collect running containers with JSON format
-	stdout, _, _, err = ssh.ExecContext(ctx, `docker ps -a --format '{{.ID}}|{{.Names}}|{{.Image}}|{{.Status}}|{{.Ports}}' 2>/dev/null`)
+	// Collect running containers. Docker is installed (checked above), so a
+	// failing `docker ps` means the daemon is down or unreachable — that must
+	// surface as an error, not be recorded as "this host runs no containers".
+	stdout, _, exitCode, err = ssh.ExecContext(ctx, `docker ps -a --format '{{.ID}}|{{.Names}}|{{.Image}}|{{.Status}}|{{.Ports}}' 2>/dev/null`)
+	if err == nil && exitCode != 0 {
+		return CategoryData{}, fmt.Errorf("docker is installed but `docker ps` failed (exit %d) — is the daemon running?", exitCode)
+	}
 	if err == nil {
 		containerIDs := make([]string, 0)
 		for _, line := range strings.Split(strings.TrimSpace(stdout), "\n") {

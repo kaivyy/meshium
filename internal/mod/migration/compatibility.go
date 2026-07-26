@@ -195,13 +195,20 @@ func (e *CompatibilityEngine) collectServerInfo(ctx context.Context, ssh SSHExec
 	output, _, _, _ = ssh.ExecContext(ctx, "cat /etc/os-release 2>/dev/null | grep '^PRETTY_NAME=' | cut -d'=' -f2 | tr -d '\"'")
 	info.OS = strings.TrimSpace(output)
 
-	// Docker version
-	output, _, _, _ = ssh.ExecContext(ctx, "docker --version 2>&1")
-	info.DockerVersion = strings.TrimSpace(output)
+	// Docker version. Gate on the exit code: with `2>&1` the shell's
+	// "command not found" lands on stdout, so a host without Docker still
+	// produced a non-empty "version" — and checkDockerVersion's critical
+	// "Docker missing on target" blocker (which fires on empty) was dead code.
+	output, _, exitCode, _ := ssh.ExecContext(ctx, "docker --version 2>/dev/null")
+	if exitCode == 0 {
+		info.DockerVersion = strings.TrimSpace(output)
+	}
 
 	// Compose version
-	output, _, _, _ = ssh.ExecContext(ctx, "docker compose version 2>&1")
-	info.ComposeVersion = strings.TrimSpace(output)
+	output, _, exitCode, _ = ssh.ExecContext(ctx, "docker compose version 2>/dev/null")
+	if exitCode == 0 {
+		info.ComposeVersion = strings.TrimSpace(output)
+	}
 
 	// Package manager
 	output, _, _, _ = ssh.ExecContext(ctx, "which apt dnf yum apk pacman 2>/dev/null | head -1")
@@ -221,16 +228,23 @@ func (e *CompatibilityEngine) collectServerInfo(ctx context.Context, ssh SSHExec
 	}
 
 	// Timezone
-	output, _, _, _ = ssh.ExecContext(ctx, "timedatectl show -p Timezone 2>/dev/null | cut -d= -f2 || cat /etc/timezone 2>/dev/null || echo UTC")
+	output, _, _, _ = ssh.ExecContext(ctx, timezoneProbeCmd())
 	info.Timezone = strings.TrimSpace(output)
 
 	// OpenSSL
-	output, _, _, _ = ssh.ExecContext(ctx, "openssl version 2>&1")
-	info.OpenSSLVersion = strings.TrimSpace(output)
+	output, _, exitCode, _ = ssh.ExecContext(ctx, "openssl version 2>/dev/null")
+	if exitCode == 0 {
+		info.OpenSSLVersion = strings.TrimSpace(output)
+	}
 
-	// Docker storage driver
-	output, _, _, _ = ssh.ExecContext(ctx, "docker info --format '{{.Driver}}' 2>&1")
-	info.StorageDriver = strings.TrimSpace(output)
+	// Docker storage driver. Same exit-code gate as the version probe: with
+	// 2>&1 both sides of checkDockerStorageDriver held error strings, which
+	// compare unequal and produced a bogus "storage driver mismatch" warning
+	// on hosts without Docker.
+	output, _, exitCode, _ = ssh.ExecContext(ctx, "docker info --format '{{.Driver}}' 2>/dev/null")
+	if exitCode == 0 {
+		info.StorageDriver = strings.TrimSpace(output)
+	}
 
 	// SELinux
 	output, _, _, _ = ssh.ExecContext(ctx, "getenforce 2>/dev/null || echo Disabled")
@@ -249,6 +263,18 @@ func (e *CompatibilityEngine) collectServerInfo(ctx context.Context, ssh SSHExec
 }
 
 // --- Compatibility checks ---
+
+// timezoneProbeCmd reads the host timezone with working fallbacks.
+//
+// The old form `timedatectl ... | cut -d= -f2 || cat /etc/timezone || echo UTC`
+// never reached its fallbacks: a pipeline's exit status is the LAST command's,
+// and `cut` exits 0 even when timedatectl doesn't exist. On non-systemd hosts
+// the probe returned "" and checkTimezone compared "" == "" as a match. The
+// fallback must key on the captured value being empty, not on exit status.
+func timezoneProbeCmd() string {
+	return `tz=$(timedatectl show -p Timezone 2>/dev/null | cut -d= -f2); ` +
+		`[ -n "$tz" ] || tz=$(cat /etc/timezone 2>/dev/null); echo "${tz:-UTC}"`
+}
 
 func (e *CompatibilityEngine) checkArchitecture(source, target *serverInfo) CompatibilityCheckResult {
 	if source.Arch == target.Arch {
@@ -358,6 +384,16 @@ func (e *CompatibilityEngine) checkPackageManager(source, target *serverInfo) Co
 }
 
 func (e *CompatibilityEngine) checkTimezone(source, target *serverInfo) CompatibilityCheckResult {
+	// An empty value means the probe failed, not that the servers agree —
+	// "" == "" must not read as a timezone match.
+	if source.Timezone == "" || target.Timezone == "" {
+		return CompatibilityCheckResult{
+			CheckName: "timezone",
+			Severity:  SeverityInfo,
+			Passed:    true,
+			Message:   "Timezone could not be determined on one or both servers",
+		}
+	}
 	if source.Timezone == target.Timezone {
 		return CompatibilityCheckResult{
 			CheckName: "timezone",

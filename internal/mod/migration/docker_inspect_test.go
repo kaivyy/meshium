@@ -103,6 +103,20 @@ func TestDockerLabelFormatHasNoSpacesAroundEquals(t *testing.T) {
 	}
 }
 
+// Docker installed but daemon down: `docker ps` exits non-zero with empty
+// stdout. That was recorded as a successful "no containers" collect, so the
+// migration proceeded with zero workloads and reported success.
+func TestDockerCollectFailsWhenDaemonDown(t *testing.T) {
+	ssh := newMockSSH()
+	ssh.addOutput("which docker", "/usr/bin/docker\n")
+	ssh.addOutput("docker ps -a --format", "")
+	ssh.execExit["docker ps -a --format"] = 1
+
+	if _, err := (&DockerCollector{}).Collect(context.Background(), ssh); err == nil {
+		t.Fatal("Collect recorded 'no containers' while the docker daemon was down")
+	}
+}
+
 // A container with no labels renders as `<id>||||`. The parser's `line == "|||"`
 // guard never fires for that shape, so currentMap was left holding the PREVIOUS
 // container's labels and they were stored under this container's id.

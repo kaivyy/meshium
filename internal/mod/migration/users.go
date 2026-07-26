@@ -86,9 +86,12 @@ func (c *UsersCollector) Collect(ctx context.Context, ssh SSHExecuter) (Category
 		}
 	}
 
-	// Collect firewall rules
+	// Collect firewall rules. Only iptables-save output is restorable — the
+	// `|| ufw status` fallback yields human-readable status text, which
+	// iptables-restore rejects; storing it meant Apply "restored" nothing while
+	// reporting success, leaving the target with no firewall.
 	stdout, _, _, _ = ssh.ExecContext(ctx, "iptables-save 2>/dev/null || ufw status 2>/dev/null")
-	if strings.TrimSpace(stdout) != "" {
+	if isIptablesSaveFormat(stdout) {
 		data.Firewall = stdout
 	}
 
@@ -117,26 +120,22 @@ func (a *UsersApplier) Backup(ctx context.Context, ssh SSHExecuter) (BackupData,
 	stdout, _, _, _ = ssh.ExecContext(ctx, "cat /etc/shadow 2>/dev/null")
 	backup.ShadowContent = stdout
 
-	// Backup crontabs for non-system users
-	stdout, _, _, _ = ssh.ExecContext(ctx, "cut -d: -f1 /etc/passwd | while read u; do crontab -u $u -l 2>/dev/null && echo \"---$u---\"; done")
-	for _, block := range strings.Split(stdout, "---") {
-		block = strings.TrimSpace(block)
-		if block == "" {
-			continue
-		}
-		lines := strings.SplitN(block, "\n", 2)
-		if len(lines) == 2 {
-			user := strings.TrimSpace(lines[0])
-			content := lines[1]
-			if content != "" {
-				backup.CronJobs[user] = content
-			}
-		}
+	// Backup crontabs per user. The marker line is printed BEFORE the crontab
+	// body — the old command printed the body first and then "---user---", so
+	// the parser (which expects marker-first) keyed each block by its first
+	// cron line and dropped single-line crontabs entirely.
+	stdout, _, _, _ = ssh.ExecContext(ctx,
+		`cut -d: -f1 /etc/passwd | while read u; do c=$(crontab -u "$u" -l 2>/dev/null); `+
+			`[ -n "$c" ] && printf '===MESHIUM-CRON:%s===\n%s\n' "$u" "$c"; done`)
+	for user, content := range parseCrontabBlocks(stdout) {
+		backup.CronJobs[user] = content
 	}
 
-	// Backup firewall rules
+	// Backup firewall rules — same restorability guard as Collect.
 	stdout, _, _, _ = ssh.ExecContext(ctx, "iptables-save 2>/dev/null || ufw status 2>/dev/null")
-	backup.FirewallRules = stdout
+	if isIptablesSaveFormat(stdout) {
+		backup.FirewallRules = stdout
+	}
 
 	raw, _ := json.Marshal(backup)
 	return BackupData{Type: "users", Data: raw}, nil
@@ -201,9 +200,24 @@ func (a *UsersApplier) Apply(ctx context.Context, ssh SSHExecuter, data Category
 			shared.ShellQuote(user), shared.ShellQuote(tmpPath), shared.ShellQuote(tmpPath)))
 	}
 
-	// Apply firewall rules
-	if ud.Firewall != "" {
-		ssh.ExecContext(ctx, fmt.Sprintf("%s | iptables-restore 2>/dev/null", shared.Base64EncodeForShell([]byte(ud.Firewall))))
+	// Apply firewall rules. The format guard also protects against records
+	// collected before the ufw-status fix; the exit check stops a rejected
+	// restore from silently passing as success.
+	if isIptablesSaveFormat(ud.Firewall) {
+		_, stderr, exitCode, ferr := ssh.ExecContext(ctx, fmt.Sprintf("%s | iptables-restore", shared.Base64EncodeForShell([]byte(ud.Firewall))))
+		if (ferr != nil || exitCode != 0) && onProgress != nil {
+			onProgress(WSMessage{
+				Step:   "users:apply",
+				Status: "warning",
+				Value:  fmt.Sprintf("firewall restore failed (exit %d): %s", exitCode, strings.TrimSpace(stderr)),
+			})
+		}
+	} else if ud.Firewall != "" && onProgress != nil {
+		onProgress(WSMessage{
+			Step:   "users:apply",
+			Status: "warning",
+			Value:  "collected firewall data is not iptables-save format (likely ufw status text); skipping restore",
+		})
 	}
 
 	if onProgress != nil {
@@ -240,12 +254,53 @@ func (a *UsersApplier) Rollback(ctx context.Context, ssh SSHExecuter, backup Bac
 		ssh.ExecContext(ctx, shared.Base64DecodeCommand("/etc/shadow", []byte(ub.ShadowContent)))
 	}
 
-	// Restore firewall rules
-	if ub.FirewallRules != "" {
+	// Restore firewall rules (same format guard as Apply).
+	if isIptablesSaveFormat(ub.FirewallRules) {
 		ssh.ExecContext(ctx, fmt.Sprintf("%s | iptables-restore 2>/dev/null", shared.Base64EncodeForShell([]byte(ub.FirewallRules))))
 	}
 
 	return nil
+}
+
+// isIptablesSaveFormat reports whether s looks like iptables-save output —
+// the only format iptables-restore accepts. Every table dump contains a table
+// declaration line beginning with '*' (e.g. "*filter"). `ufw status` text
+// contains none.
+func isIptablesSaveFormat(s string) bool {
+	for _, line := range strings.Split(s, "\n") {
+		if strings.HasPrefix(strings.TrimSpace(line), "*") {
+			return true
+		}
+	}
+	return false
+}
+
+// parseCrontabBlocks parses the marker-first crontab dump produced by Backup:
+// each user's block starts with "===MESHIUM-CRON:<user>===" followed by the
+// crontab body.
+func parseCrontabBlocks(out string) map[string]string {
+	const marker = "===MESHIUM-CRON:"
+	jobs := make(map[string]string)
+	current := ""
+	var body []string
+	flush := func() {
+		if current != "" && len(body) > 0 {
+			jobs[current] = strings.Join(body, "\n")
+		}
+	}
+	for _, line := range strings.Split(out, "\n") {
+		if strings.HasPrefix(line, marker) && strings.HasSuffix(line, "===") {
+			flush()
+			current = strings.TrimSuffix(strings.TrimPrefix(line, marker), "===")
+			body = body[:0]
+			continue
+		}
+		if current != "" && strings.TrimSpace(line) != "" {
+			body = append(body, line)
+		}
+	}
+	flush()
+	return jobs
 }
 
 func parseIntSafe(s string) int {
