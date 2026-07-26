@@ -2,6 +2,7 @@ package auth
 
 import (
 	"crypto/rand"
+	"crypto/subtle"
 	"encoding/base64"
 	"errors"
 	"os"
@@ -277,7 +278,9 @@ func (s *Service) ValidateSessionToken(token string) bool {
 	if s.locked || s.sessionToken == "" {
 		return false
 	}
-	return token == s.sessionToken
+	// Constant-time: string == returns on the first differing byte, which leaks
+	// how much of a guessed token is correct to anyone who can time the request.
+	return subtle.ConstantTimeCompare([]byte(token), []byte(s.sessionToken)) == 1
 }
 
 // generateSessionToken creates a cryptographically random session token.

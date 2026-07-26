@@ -1,6 +1,9 @@
 package auth
 
-import "sync"
+import (
+	"crypto/subtle"
+	"sync"
+)
 
 // SessionManager is a small compatibility shim for older callers/tests.
 // The auth Service remains the source of truth for production session checks.
@@ -37,5 +40,6 @@ func (m *SessionManager) ValidateSession(token string) bool {
 	}
 	m.mu.RLock()
 	defer m.mu.RUnlock()
-	return m.token != "" && token == m.token
+	// Constant-time compare — see Service.ValidateSessionToken.
+	return m.token != "" && subtle.ConstantTimeCompare([]byte(token), []byte(m.token)) == 1
 }
