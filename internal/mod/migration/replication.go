@@ -515,8 +515,16 @@ func (e *ReplicationEngine) setupPostgreSQL(ctx context.Context, config Replicat
 		sourceHost = "source"
 	}
 
-	pgVersion, _, _, _ := e.targetSSH.ExecContext(ctx, `ls /etc/postgresql/ 2>/dev/null | head -1 || echo "15"`)
+	// Key the fallback on the VALUE, not the exit status: a pipeline's status
+	// is its last command's, and `head` exits 0 even when the directory is
+	// missing — so `|| echo "15"` never ran, pgVersion came back empty, and
+	// pg_basebackup was pointed at "/var/lib/postgresql//main".
+	pgVersion, _, _, _ := e.targetSSH.ExecContext(ctx,
+		`v=$(ls /etc/postgresql/ 2>/dev/null | head -1); echo "${v:-15}"`)
 	pgVersion = strings.TrimSpace(pgVersion)
+	if pgVersion == "" {
+		pgVersion = "15"
+	}
 	dataDir := fmt.Sprintf("/var/lib/postgresql/%s/main", pgVersion)
 
 	// Stop PostgreSQL on target

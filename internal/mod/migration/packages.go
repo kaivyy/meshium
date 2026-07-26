@@ -202,7 +202,12 @@ func (a *PackagesApplier) Apply(ctx context.Context, ssh SSHExecuter, data Categ
 		}
 		batch := packagesToInstall[i:end]
 		cmd := adapter.InstallPackages(batch)
-		_, stderrRaw, exitCode, err := ssh.ExecContext(ctx, cmd)
+		// Cap-free (bounded by ctx): a batch install downloads and configures
+		// dozens of packages, which easily outlasts the pooled connection's
+		// Command timeout — that cap is whatever profile the FIRST module to
+		// dial this server froze in (15s discovery / 30s default), and a
+		// mid-flight kill leaves dpkg/rpm in a broken half-configured state.
+		_, stderrRaw, exitCode, err := execLongOrContext(ctx, ssh, cmd)
 		stderr := shared.SanitizeString(stderrRaw)
 		if err != nil || exitCode != 0 {
 			if onProgress != nil {
@@ -277,7 +282,10 @@ func (a *PackagesApplier) Rollback(ctx context.Context, ssh SSHExecuter, backup 
 	}
 
 	cmd := adapter.RemovePackages(toRemove)
-	_, _, _, err = ssh.ExecContext(ctx, cmd)
+	// Cap-free for the same reason as Apply's install: removing a large set
+	// outlasts the pooled Command timeout, and killing dpkg/rpm mid-flight
+	// corrupts the package database.
+	_, _, _, err = execLongOrContext(ctx, ssh, cmd)
 	return err
 }
 

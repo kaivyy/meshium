@@ -337,7 +337,9 @@ func (a *DockerApplier) Apply(ctx context.Context, ssh SSHExecuter, data Categor
 				Value:  fmt.Sprintf("Pulling image %d/%d from registry: %s", i+1, len(dd.Images), image),
 			})
 		}
-		_, stderr, exitCode, _ := ssh.ExecContext(ctx, fmt.Sprintf("docker pull %s 2>&1", shared.ShellQuote(image)))
+		// Cap-free (bounded by ctx): a multi-GB image pull outlasts the pooled
+	// connection's frozen Command timeout (15-30s).
+	_, stderr, exitCode, _ := execLongOrContext(ctx, ssh, fmt.Sprintf("docker pull %s 2>&1", shared.ShellQuote(image)))
 		if exitCode != 0 {
 			pullFailures++
 			if onProgress != nil {
@@ -368,7 +370,9 @@ func (a *DockerApplier) Apply(ctx context.Context, ssh SSHExecuter, data Categor
 		if idx := strings.LastIndex(dir, "/"); idx >= 0 {
 			dir = dir[:idx]
 		}
-		_, stderr, exitCode, _ := ssh.ExecContext(ctx, fmt.Sprintf("cd %s && docker compose up -d 2>&1 || docker-compose up -d 2>&1", shared.ShellQuote(dir)))
+		// Cap-free (bounded by ctx): compose up pulls images, which outlasts
+		// the pooled connection's frozen Command timeout (15-30s).
+		_, stderr, exitCode, _ := execLongOrContext(ctx, ssh, fmt.Sprintf("cd %s && docker compose up -d 2>&1 || docker-compose up -d 2>&1", shared.ShellQuote(dir)))
 		if exitCode != 0 && onProgress != nil {
 			onProgress(WSMessage{
 				Step:   "docker:apply",
@@ -401,7 +405,8 @@ func (a *DockerApplier) Apply(ctx context.Context, ssh SSHExecuter, data Categor
 				}
 			}
 			cmd += fmt.Sprintf(" %s", shared.ShellQuote(container.Image))
-			_, stderr, exitCode, _ := ssh.ExecContext(ctx, cmd + " 2>&1")
+			// Cap-free: docker run pulls the image when absent.
+			_, stderr, exitCode, _ := execLongOrContext(ctx, ssh, cmd+" 2>&1")
 			if exitCode != 0 && onProgress != nil {
 				onProgress(WSMessage{
 					Step:   "docker:apply",

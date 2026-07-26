@@ -70,6 +70,12 @@ func main() {
 		MaxIdle:     10 * time.Minute,
 		MaxLifetime: 30 * time.Minute,
 	})
+	// Background keepalive: probe pooled connections every 2m (pool default)
+	// and evict dead ones proactively. Without this the pool only discovers a
+	// dead connection inside GetContext's validity check — on the caller's
+	// clock, while the pool mutex is held.
+	sshPool.StartKeepalive()
+	defer sshPool.StopKeepalive()
 	knownHosts := ssh.NewKnownHostsStore(database)
 	serverSvc.SetHostKeyStore(knownHosts)
 	serverHandler := server.NewHandler(serverSvc)

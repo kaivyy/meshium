@@ -203,7 +203,11 @@ func (p *Pool) StartKeepalive() {
 
 	p.keepaliveStop = make(chan struct{})
 	p.keepaliveRunning = true
-	go p.keepaliveLoop()
+	// Hand the channel over as an argument: if the loop re-read
+	// p.keepaliveStop itself, a StopKeepalive racing in before the goroutine's
+	// first instruction would have closed AND nil-ed the field, leaving the
+	// loop selecting on a nil channel — unstoppable, probing forever.
+	go p.keepaliveLoop(p.keepaliveStop)
 }
 
 // StopKeepalive stops the background keepalive goroutine.
@@ -221,13 +225,7 @@ func (p *Pool) StopKeepalive() {
 	p.keepaliveRunning = false
 }
 
-func (p *Pool) keepaliveLoop() {
-	// Capture the stop channel before the loop starts so we don't
-	// race with StopKeepalive setting it to nil.
-	p.keepaliveMu.Lock()
-	stopCh := p.keepaliveStop
-	p.keepaliveMu.Unlock()
-
+func (p *Pool) keepaliveLoop(stopCh chan struct{}) {
 	ticker := time.NewTicker(p.config.KeepaliveInterval)
 	defer ticker.Stop()
 
