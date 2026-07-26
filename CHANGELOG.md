@@ -1722,6 +1722,135 @@ finding below was reproduced before it was fixed and verified after.
   the package-collection bug: tests fed the parser a format production never
   produced.
 
+### Phase VPS-A — VPS migration readiness audit (audit-only, no code)
+
+A full audit of whether Meshium is actually fit to migrate a real VPS, run as
+investigate → map → validate → threat-model → test → assess → report. Three
+deliverables under `docs/superpowers/specs/`:
+`phase-vps-a-meshium-vps-migration-readiness-audit.md` (verdict, use-case
+matrix, end-to-end flow map, per-category matrix, severity-ranked findings),
+`phase-vps-a-remediation-roadmap.md` (blockers per gate) and
+`phase-vps-a-acceptance-checklist.md` (43 requirements with evidence, status,
+severity, owner).
+
+Every claim carries an evidence class — `[LIVE]`, `[CODE]`, `[HIST]`,
+`[PENDING]` — so nothing reads as proven because the UI shows it. Verdict at
+the time: **not production-ready**; the entire write path (apply → verify →
+cutover → rollback) had never been executed against a real source/target pair.
+One earlier finding ("no per-target concurrency lock") was later **retracted**
+when re-verification found the guard already existed.
+
+### Phase VPS-B Gate 0 — Staging readiness
+
+- **Live execution matrix (VPS-B1)** — `vpsb1_live_matrix_test.go` (build tag
+  `integration`): disposable Debian containers with real sshd, driven through
+  the shipped `*ssh.Client` and the shipped collectors/appliers, no mocks in
+  the path. 10/10 PASS covering packages apply+rollback, config mode/owner,
+  OS-critical exclusion, services, apply failure, cancellation, SSH drop,
+  users, idempotent re-apply, and configs rollback restoring content **and**
+  mode. This is the evidence the audit found missing.
+- **Two findings from the live run, handled honestly** — one case asserted the
+  collector must fail on a host "with no init system"; the live run disproved
+  the premise (openssh-server pulls in systemd), so the **test** was corrected,
+  not the working code. The other was a real bug: a cancelled context made the
+  configs collect return SUCCESS with zero files — the silent-empty class,
+  reached through cancellation. Fixed with ctx checks and a zero-file guard.
+- **Database permissions + retention (VPS-B3)** — the DB carries the full
+  inventory and encrypted credential blobs and was created world-readable
+  (0644, observed live). `db.Open` now pins it and its WAL/SHM siblings to
+  0600. `db.Maintain` prunes step payloads >64KiB for inactive migrations past
+  a 30-day window, leaving an explicit `{"pruned":true,…}` marker rather than
+  an empty collect, and vacuums when free pages exceed 20%. Live: **429MB →
+  130MB**.
+- **Config ownership and permissions (VPS-B4)** — apply wrote content only, so
+  a source `/etc/ssh/sshd_config` at root:root 0600 landed under the SFTP
+  login's umask. tar already records mode/uid/gid; the collector now keeps it,
+  apply restores it (chmod **before** chown, since chown clears setuid/setgid),
+  Backup captures the target's own metadata, and Rollback restores that too.
+  Ownership uses **names**, not numeric ids. Verified live against real TLS
+  private keys at 0600 and `/etc/gshadow` at 0640 root:shadow — files that
+  would previously have landed world-readable on the target.
+
+### Phase VPS-B Gate 1 — Low-risk VPS with supervision
+
+- **Per-item verification probes (VPS-B5)** — verification ran `echo ok` on the
+  target and then attested every applied item as `infra_verified`. Each
+  category now earns its level from evidence about itself: package installed
+  (infra), config sha256 match (infra), `systemctl is-active` (**runtime**),
+  account resolves (infra). Probes are batched per category and **fail
+  closed** — one that cannot run proves nothing, so it proves failure.
+  Categories without a probe return no verdict rather than a fabricated one.
+- **False green fixed** — the docker branch passed the whole applied-items map
+  into the attestation helper, so one container reporting "Up" upgraded every
+  applied item in **every** category to `runtime_verified`, including packages
+  that were never installed. Docker now matches container names individually.
+- **Per-item rollback evidence (VPS-B6)** — `backup_ref` had existed since
+  Phase 6C and was never written, so rollback could only reason per category.
+  Preparation now records each category's restore point and apply stamps it
+  onto every item; items in a category with no backup keep an **empty** ref,
+  because a restore point that does not exist is worse than none.
+  `DescribeRollbackScope` reports the real boundary before rollback runs.
+- **Stale-plan gate (VPS-B7)** — a plan is a snapshot of the source; applying a
+  stale one writes state the source no longer has. Evaluated in validation
+  **before** any backup is taken, so a refusal costs nothing on the target:
+  warn past 1h, refuse past 24h. Unknown or future-dated plan times warn but
+  never read as fresh.
+- **Session open watchdogs (VPS-B8)** — `NewSession`/`sftp.NewClient` are
+  round-trips with no deadline and sat outside the per-command watchdog, so on
+  a wedged transport a "30s-bounded" command blocked before its timeout began.
+  All nine call sites now open through a context- and timeout-bounded helper.
+- **Category maturity in the wizard (VPS-B9)** — docker and database carry an
+  **Experimental** badge and, when selected, the specific gap: Docker volume
+  DATA is not migrated and non-compose containers lose ports/networks/mounts;
+  database dump/restore has no live end-to-end run, no post-restore
+  verification, and its rollback drops databases.
+
+### Phase VPS-B Gate 2 — Partial
+
+- **Docker recreate fidelity, and an honest refusal (VPS-B10)** — recreation
+  passed only name/env/label/image, so a migrated container published nothing,
+  sat on the default bridge, had no volumes and died at reboot. The full
+  runtime shape (ports, mounts, networks, restart policy) is now captured and
+  rendered; templates verified against a live daemon. More importantly,
+  containers whose state lives in a volume or bind mount are **no longer
+  started** — Meshium never copies volume contents, so starting them yields a
+  container that looks healthy and is empty. Each is reported by name with its
+  mounts and the instruction to move the data manually.
+- **Privilege precondition (VPS-B13)** — root was silently assumed, so a
+  non-root login produced a half-finished migration with permission errors
+  scattered deep into the run. `probePrivilege` answers it once per host (root,
+  or non-root with passwordless sudo — there is no interactive sudo-password
+  path), **fails closed**, and runs first in the compatibility list as a
+  **critical** blocker.
+- **Secret redaction at the WS boundary (VPS-B14)** — progress frames carry raw
+  remote stderr to the browser and the event log; sanitisation was applied at a
+  handful of call sites and nowhere else. `SanitizeWSMessage` is now the single
+  choke point on both outbound paths, so a new stage cannot leak by forgetting.
+- **Per-connection session cap (VPS-B15)** — sshd's default MaxSessions is 10
+  per connection and the pool multiplexes every subsystem onto one connection
+  per server; the original incident was ~13 collectors on one connection with
+  the overflow silently returning blank data. Session opens now take a slot
+  from a per-client semaphore capped at 8; overflow waits instead of being
+  rejected, and streaming sessions hold their slot until Close.
+
+**Still open in Gate 2:** database row/checksum verification with MySQL replica
+seeding (B11) and rollback drills wired into CI (B12) — both need a live
+database pair.
+
+### Refactor — pipeline split by responsibility
+
+`pipeline.go` (3237 lines), `pipeline_repo.go` (1833) and
+`pipeline_handler.go` (1814) held the orchestration loop, every operator verb,
+every stage, every route and every table's persistence between them. Split into
+20 focused files (`pipeline_lifecycle/concurrency/recovery.go`,
+`stages_prepare/apply/replication/verify/cutover/finalize.go`,
+`pipeline_handler_*.go`, `pipeline_repo_*.go`), each opening with a doc comment
+stating what it owns and why the boundary is there.
+
+Pure move: `go doc -all` over the package is byte-identical before and after,
+which is the check that matters — the split cannot have changed behaviour if
+the surface is unchanged. Full suite and the live matrix pass afterwards.
+
 ### Phase 6D — Audit round 2 (remaining findings verified & fixed)
 
 Continuation of the audit: every remaining reported finding was reproduced
