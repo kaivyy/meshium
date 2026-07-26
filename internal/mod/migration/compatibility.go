@@ -72,6 +72,7 @@ func (e *CompatibilityEngine) CheckCompatibility(ctx context.Context, migrationI
 		label string
 		run   func(*serverInfo, *serverInfo) CompatibilityCheckResult
 	}{
+		{"privilege", e.checkPrivilege},
 		{"architecture", e.checkArchitecture},
 		{"ram", e.checkRAM},
 		{"disk", e.checkDisk},
@@ -150,6 +151,7 @@ type serverInfo struct {
 	SELinux        string
 	Distro         string
 	OpenPorts      []string
+	Privilege      PrivilegeInfo
 }
 
 // collectServerInfo gathers system information from a server via SSH.
@@ -194,6 +196,11 @@ func (e *CompatibilityEngine) collectServerInfo(ctx context.Context, ssh SSHExec
 	// OS
 	output, _, _, _ = ssh.ExecContext(ctx, "cat /etc/os-release 2>/dev/null | grep '^PRETTY_NAME=' | cut -d'=' -f2 | tr -d '\"'")
 	info.OS = strings.TrimSpace(output)
+
+	// Privilege: can this login actually do the work? Probed before anything is
+	// applied so an unprivileged login is one clear precondition failure rather
+	// than scattered permission errors mid-migration.
+	info.Privilege = probePrivilege(ctx, ssh)
 
 	// Docker version. Gate on the exit code: with `2>&1` the shell's
 	// "command not found" lands on stdout, so a host without Docker still

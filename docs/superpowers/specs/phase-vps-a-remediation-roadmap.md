@@ -59,7 +59,14 @@ badges + named gaps). Live matrix re-run after the changes: 10/10 PASS.
 9. **VPS-B9 — Category maturity labels in UI.** docker/database marked
    experimental at selection time; volume-data explicitly "not migrated".
 
-## Gate 2 → Production with mandatory runbook (supervised)
+## Gate 2 → Production with mandatory runbook (supervised) — **PARTIAL**
+
+Done: B10 ✅ (docker fidelity + refusal to start data-carrying containers) ·
+B13 ✅ (privilege probe as a critical blocker) · B14 ✅ (WS redaction choke
+point) · B15 ✅ (per-connection session cap, streaming holds its slot).
+Remaining: **B11** (database row/checksum verification + MySQL replica
+seeding) and **B12** (rollback drills wired into CI). Both need a live
+database pair, which this environment does not have.
 
 10. **VPS-B10 — Docker recreate fidelity or honest refusal.** Recreate with
     ports/volumes/networks/restart-policy from inspect, or refuse

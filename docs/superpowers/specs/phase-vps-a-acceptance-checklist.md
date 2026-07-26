@@ -7,7 +7,7 @@ passed · failed · partial · needs live verification · unsupported · out of 
 |---|---|---|---|---|---|
 | 1 | Source/target add + connection test | servers API, pool dial `[LIVE]` | passed | — | backend |
 | 2 | Credentials encrypted at rest | server/service.go:88+, auth.key 0600 | passed | — | security |
-| 3 | Credentials redacted in API/WS | redactServer live-verified; WS stderr passthrough | partial | Med | security |
+| 3 | Credentials redacted in API/WS | redactServer live-verified; SanitizeWSMessage choke point on both WS paths | passed (Gate 2) | — | security |
 | 4 | DB file permissions | db.Open chmod 0600; live 600 on all db files | passed | — | infrastructure |
 | 5 | Host-key verification deny-until-trusted, mismatch fail | knownhosts.go:137-167 | passed | — | security |
 | 6 | Session token constant-time compare | 6a810ff | passed | — | security |
@@ -17,8 +17,8 @@ passed · failed · partial · needs live verification · unsupported · out of 
 | 10 | Inventory freshness surfaced | stale-snapshot warning live | passed | — | backend |
 | 11 | Config ownership/perms captured+applied | ConfigsData.Meta + applyFileMeta; live C2 + real privkeys 0600 | passed (symlinks still out of scope) | Med | backend |
 | 12 | Docker env/labels collected | 1624a5a + live template proof | passed | — | backend |
-| 13 | Docker volume data migration | no code path | unsupported | High | product |
-| 14 | Docker recreate fidelity (ports/nets/volumes) | docker.go:392-404 name/env/label/image only | failed | High | backend |
+| 13 | Docker volume data migration | still no code path — but data-carrying containers are now REFUSED, not silently started empty | unsupported (now explicit) | Med | product |
+| 14 | Docker recreate fidelity (ports/nets/volumes) | buildDockerRunCommand + collectContainerShape; templates verified live | passed (Gate 2) | — | backend |
 | 15 | DB engines dump/restore commands correct incl. container mode | fbac33a + container round-trip live | needs live verification | High | backend |
 | 16 | Streaming DB transfer functional | ExecPipe panic fixed df0ff1b; no live pair run | needs live verification | High | backend |
 | 17 | Compare distinguishes missing/different/same/unsupported/manual | parity.go states + live 149-item run | passed | — | backend |
@@ -45,6 +45,6 @@ passed · failed · partial · needs live verification · unsupported · out of 
 | 38 | Live e2e apply→verify→rollback matrix | vpsb1_live_matrix_test.go — 10/10 PASS on disposable pairs | passed (Gate 0) | — | infrastructure |
 | 39 | UI grades category maturity (experimental flags) | migrations/new: Experimental badge + named gap per category | passed (Gate 1) | — | frontend |
 | 40 | Sensitive step data at rest (creds in steps) | mongo/db collect metadata-only | passed | — | security |
-| 41 | Root/sudo policy explicit | root silently assumed | partial | Med | product |
+| 41 | Root/sudo policy explicit | probePrivilege + checkPrivilege critical blocker; fails closed | passed (Gate 2) | — | backend |
 | 42 | Disk-full / reboot-mid-migration behavior | untested anywhere | needs live verification | High | infrastructure |
 | 43 | Documentation of safe-use boundary | this audit + CHANGELOG known-limits | passed | — | documentation |
