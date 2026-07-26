@@ -2041,8 +2041,8 @@
 </div>
 
 {#if confirmationAction}
-  <div class="fixed inset-0 z-50 flex items-center justify-center bg-black/70 px-4" role="presentation" on:keydown={onConfirmKeydown}>
-    <div bind:this={confirmEl} class="w-full max-w-md rounded-xl border border-border-strong bg-surface p-6 shadow-2xl" role="dialog" aria-modal="true" aria-labelledby="confirm-title" aria-describedby="confirm-body" tabindex="-1">
+  <div class="fixed inset-0 z-50 flex items-start sm:items-center justify-center bg-black/70 px-4 overflow-y-auto" role="presentation" on:keydown={onConfirmKeydown}>
+    <div bind:this={confirmEl} class="w-full max-w-md rounded-xl border border-border-strong bg-surface p-6 shadow-2xl my-auto max-h-[90vh] overflow-y-auto" role="dialog" aria-modal="true" aria-labelledby="confirm-title" aria-describedby="confirm-body" tabindex="-1">
       <div class="flex items-start gap-3">
         <div class="mt-0.5 flex h-9 w-9 shrink-0 items-center justify-center rounded-lg {confirmationAction === 'rollback' ? 'bg-error/15 text-error' : confirmationAction === 'commit' ? 'bg-success/15 text-success' : 'bg-warning/15 text-warning'}">
           {#if confirmationAction === 'rollback'}

@@ -368,13 +368,13 @@
 
 {#if selected}
   <div
-    class="fixed inset-0 z-40 bg-black/40 flex items-center justify-center p-4"
+    class="fixed inset-0 z-40 bg-black/40 flex items-start sm:items-center justify-center p-4 overflow-y-auto"
     role="dialog"
     aria-modal="true"
     on:click={() => (selected = null)}
   >
     <div
-      class="w-full max-w-lg rounded-xl border border-border-strong bg-surface p-6 shadow-2xl"
+      class="w-full max-w-lg rounded-xl border border-border-strong bg-surface p-6 shadow-2xl my-auto max-h-[90vh] overflow-y-auto"
       on:click|stopPropagation
     >
       <div class="flex items-start justify-between mb-4">
@@ -488,13 +488,13 @@
 
 {#if pendingConfirm}
   <div
-    class="fixed inset-0 z-50 bg-black/50 flex items-center justify-center p-4"
+    class="fixed inset-0 z-50 bg-black/50 flex items-start sm:items-center justify-center p-4 overflow-y-auto"
     role="alertdialog"
     aria-modal="true"
     on:click={() => (pendingConfirm = null)}
   >
     <div
-      class="w-full max-w-md rounded-xl border border-error/40 bg-surface p-6 shadow-2xl"
+      class="w-full max-w-md rounded-xl border border-error/40 bg-surface p-6 shadow-2xl my-auto max-h-[90vh] overflow-y-auto"
       on:click|stopPropagation
     >
       <div class="flex items-center gap-2 mb-3 text-error">
