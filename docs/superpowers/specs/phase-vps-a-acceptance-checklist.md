@@ -26,13 +26,13 @@ passed · failed · partial · needs live verification · unsupported · out of 
 | 19 | Selections honored by executor (catMixed) | filterCategoryToApplySet pipeline.go:1950-1955 | passed (code), needs live verification | High | backend |
 | 20 | keep_target/skip/review_manual never applied | apply-set exclusion + unresolved verify state | passed (code) | — | backend |
 | 21 | applied ≠ verified enforced in data model | item_results states; parity axes live | passed | — | backend |
-| 22 | Verification levels infra/runtime/app honest | attestVerification never writes app | passed | — | backend |
-| 23 | Per-item post-apply probes (pkg exists/config hash/service active) | absent except docker Up | failed | High | backend |
+| 22 | Verification levels infra/runtime/app honest | per-item probes; docker false-green fixed (one Up container no longer verifies all categories) | passed | — | backend |
+| 23 | Per-item post-apply probes (pkg exists/config hash/service active) | verify_probe.go + verify_stage_test.go; fail-closed | passed (Gate 1) | — | backend |
 | 24 | Cutover default cannot claim traffic moved | manual_required + note | passed | — | backend |
 | 25 | Commit blocked until cutover confirmed | ErrCutoverNotConfirmed path | passed | — | backend |
 | 26 | Auto-cutover fenced + whitelisted | pipeline.go:2563-2763 | needs live verification | High | backend |
 | 27 | Rollback scoped to actually-applied categories | pipeline.go:2102-2117 | passed (code) | — | backend |
-| 28 | Per-item rollback evidence (backup_ref populated) | schema only, never written | failed | High | backend |
+| 28 | Per-item rollback evidence (backup_ref populated) | backup_ref.go; preparation records, initialSync stamps; DescribeRollbackScope reports gaps | passed (Gate 1) | — | backend |
 | 29 | Rollback cannot wipe target from empty baseline | Enumerated + zero-package guards + tests | passed | — | backend |
 | 30 | Rollback after cutover | not implemented | unsupported | High | product |
 | 31 | Per-migration concurrent-run lock | tryAcquire | passed | — | backend |
@@ -41,9 +41,9 @@ passed · failed · partial · needs live verification · unsupported · out of 
 | 34 | SQLite pragmas (FK, WAL, busy_timeout) per connection | db.go:22 + test | passed | — | infrastructure |
 | 35 | Schema: item_results/selection_history/decision fields | live schema dump | passed | — | backend |
 | 36 | DB growth/retention policy | db.Maintain + startup hook; live 429MB→130MB | passed | — | infrastructure |
-| 37 | Stale plan hard-blocked before apply | warning only | partial | Med | backend |
+| 37 | Stale plan hard-blocked before apply | stale_plan.go; validationStage refuses >24h before any backup | passed (Gate 1) | — | backend |
 | 38 | Live e2e apply→verify→rollback matrix | vpsb1_live_matrix_test.go — 10/10 PASS on disposable pairs | passed (Gate 0) | — | infrastructure |
-| 39 | UI grades category maturity (experimental flags) | absent | failed | Med | frontend+product |
+| 39 | UI grades category maturity (experimental flags) | migrations/new: Experimental badge + named gap per category | passed (Gate 1) | — | frontend |
 | 40 | Sensitive step data at rest (creds in steps) | mongo/db collect metadata-only | passed | — | security |
 | 41 | Root/sudo policy explicit | root silently assumed | partial | Med | product |
 | 42 | Disk-full / reboot-mid-migration behavior | untested anywhere | needs live verification | High | infrastructure |

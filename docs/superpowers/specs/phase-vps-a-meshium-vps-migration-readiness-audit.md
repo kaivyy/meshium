@@ -198,9 +198,12 @@ The system itself never conflates them (parity summary showed
   app / verify_failed`; attestation only ever raises infra→runtime and never
   writes app (pipeline.go:2373-2375). Items outside the apply-set stay
   unresolved — no false green (pipeline.go:2316-2319).
-- BUT the probes are thin: infra = `echo ok` on target; runtime = docker `ps`
-  Up substring. Packages/configs/services/db get **no per-item existence
-  probe** post-apply. Verification honesty is structural, depth is minimal.
+- ~~The probes are thin~~ — **RESOLVED Gate 1 (`49c95ba`).** Each category now
+  earns its level from its own evidence: package installed (infra), config
+  sha256 match (infra), `systemctl is-active` (runtime), account resolves
+  (infra). Probes fail closed. A docker false-green was found and fixed in the
+  process: one container reporting "Up" had been upgrading every applied item
+  in every category to runtime_verified.
 - `applied ≠ verified` holds throughout the schema and parity scoring
   (`[LIVE]` summary shows independent axes).
 
@@ -289,7 +292,13 @@ The system itself never conflates them (parity summary showed
 
 ## 14. Go / no-go
 
-**Release verdict tier: "Suitable only for disposable staging VPS; low-risk
-non-critical VPS with operator supervision."** Production (supervised or
-autonomous): **NO-GO** until the remediation roadmap's staging→production
-gates pass, chiefly a live execution matrix on disposable pairs.
+**Release verdict tier (updated 2026-07-26, after Gate 0 + Gate 1):
+"Suitable for low-risk non-critical VPS with operator supervision"** for the
+four live-verified categories (packages, configs, services, users). The Gate 0
+live matrix (10/10) supplied the missing write-path evidence, and Gate 1 added
+per-item verification, per-item rollback evidence, and a stale-plan gate.
+
+Still **NO-GO for production** (supervised or autonomous): docker and database
+remain experimental and are now labelled as such in the UI; cutover/commit have
+no live evidence; there is no post-cutover rollback; and disk-full /
+reboot-mid-migration behaviour is untested. Those are Gate 2/3 items.

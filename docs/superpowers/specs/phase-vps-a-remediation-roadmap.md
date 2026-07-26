@@ -36,7 +36,12 @@ Blockers before Meshium may be pointed at any VPS someone would mind losing:
    root:600 secrets to default umask. *Area:* configs.go (tar already
    carries mode bits — parse and apply them).
 
-## Gate 1 → Low-risk non-critical VPS with supervision
+## Gate 1 → Low-risk non-critical VPS with supervision — **COMPLETE 2026-07-26**
+
+Status: B5 ✅ (per-item probes, fail-closed; docker false-green fixed) ·
+B6 ✅ (backup_ref populated + honest rollback scope) · B7 ✅ (stale-plan gate
+before any backup) · B8 ✅ (session/SFTP open watchdogs) · B9 ✅ (experimental
+badges + named gaps). Live matrix re-run after the changes: 10/10 PASS.
 
 5. **VPS-B5 — Post-apply per-item probes.** Verification depth: package
    exists (`dpkg-query -W`), config sha256 match, service `is-active`,
