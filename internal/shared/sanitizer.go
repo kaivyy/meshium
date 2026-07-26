@@ -17,7 +17,14 @@ var (
 	// `-P`); redacting it is the only way to stop the most common raw-secret
 	// leak in command output / error strings. A false-positive redaction of a
 	// numeric port is harmless in an operator log.
-	inlinePasswordPattern = regexp.MustCompile(`(?i)-p\s*([^\s-][^\s]*)`)
+	// The flag must be a STANDALONE token: the previous form matched "-p"
+	// anywhere, including inside ordinary words, so real diagnostics came back
+	// mangled — a live migration reported "dpkg-p [REDACTED]" and
+	// "Sub-p [REDACTED]" instead of "dpkg-preconfigure" and "Sub-process",
+	// destroying the error the operator needed to read. `-p<value>` with no
+	// space is the password form (mysql/psql); `-p 2222` with a space is a
+	// port and is left alone.
+	inlinePasswordPattern = regexp.MustCompile(`(^|\s)-p(\S+)`)
 	// Bearer tokens
 	bearerPattern = regexp.MustCompile(`(?i)bearer\s+[A-Za-z0-9\-._~+/]+=*`)
 	// SSH private key blocks
@@ -40,7 +47,7 @@ func SanitizeString(s string) string {
 	// error strings, and remote stderr. Run first so the replacement text
 	// cannot be re-matched by later patterns. A space after `-p` is left
 	// intact (that is an SSH/port flag, not a password).
-	s = inlinePasswordPattern.ReplaceAllString(s, "-p [REDACTED]")
+	s = inlinePasswordPattern.ReplaceAllString(s, "${1}-p [REDACTED]")
 	s = privateKeyPattern.ReplaceAllString(s, "[REDACTED-PRIVATE-KEY]")
 	s = authHeaderPattern.ReplaceAllString(s, "Authorization: [REDACTED]")
 	s = bearerPattern.ReplaceAllString(s, "Bearer [REDACTED]")

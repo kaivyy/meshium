@@ -247,7 +247,12 @@ func TestApplyItemPlanCatMixedAppliesOnlySelected(t *testing.T) {
 	// catMixed: a category with 3 items where the operator selected only 1 to
 	// apply_from_source, kept 1, skipped 1, and left 1 undecided. Only the
 	// apply+undecided items enter applySet; keep/skip become ExecSkipped.
-	data, _ := json.Marshal(PackagesData{Packages: []string{"nginx", "redis", "curl", "git"}})
+	// step.Data must be the stored ENVELOPE ({"type":…,"data":{…}}), which is
+	// what migration_steps actually holds. This test used to pass the inner
+	// payload directly and so could not have caught the envelope bug that made
+	// a full live migration skip every category.
+	inner, _ := json.Marshal(PackagesData{Packages: []string{"nginx", "redis", "curl", "git"}})
+	data, _ := json.Marshal(CategoryData{Type: "packages", Data: inner})
 	step := MigrationStepRecord{Category: "packages", Data: string(data)}
 	decisions := map[string]ParityAction{
 		"package:nginx":  ActionApplyFromSource,
@@ -283,7 +288,8 @@ func TestApplyItemPlanCatMixedAppliesOnlySelected(t *testing.T) {
 }
 
 func TestApplyItemPlanReviewManualNotApplicable(t *testing.T) {
-	data, _ := json.Marshal(PackagesData{Packages: []string{"weird-pkg"}})
+	inner, _ := json.Marshal(PackagesData{Packages: []string{"weird-pkg"}})
+	data, _ := json.Marshal(CategoryData{Type: "packages", Data: inner})
 	step := MigrationStepRecord{Category: "packages", Data: string(data)}
 	decisions := map[string]ParityAction{"package:weird-pkg": ActionReviewManual}
 	pc := &PipelineContext{MigrationID: 1}
@@ -296,7 +302,8 @@ func TestApplyItemPlanReviewManualNotApplicable(t *testing.T) {
 func TestApplyItemPlanHardDepBlocked(t *testing.T) {
 	// A service whose backing config is absent on the target is hard-blocked even
 	// if the operator decided apply_from_source.
-	data, _ := json.Marshal(ServicesData{Services: []string{"nginx"}})
+	inner, _ := json.Marshal(ServicesData{Services: []string{"nginx"}})
+	data, _ := json.Marshal(CategoryData{Type: "services", Data: inner})
 	step := MigrationStepRecord{Category: "services", Data: string(data)}
 	decisions := map[string]ParityAction{"service:nginx": ActionApplyFromSource}
 	inv := newTargetInventory() // config:/etc/nginx/nginx.conf NOT present ⇒ unsatisfied
@@ -311,7 +318,8 @@ func TestApplyItemPlanHardDepBlocked(t *testing.T) {
 }
 
 func TestApplyItemPlanHardDepSatisfiedApplies(t *testing.T) {
-	data, _ := json.Marshal(ServicesData{Services: []string{"nginx"}})
+	inner, _ := json.Marshal(ServicesData{Services: []string{"nginx"}})
+	data, _ := json.Marshal(CategoryData{Type: "services", Data: inner})
 	step := MigrationStepRecord{Category: "services", Data: string(data)}
 	decisions := map[string]ParityAction{"service:nginx": ActionApplyFromSource}
 	inv := newTargetInventory()

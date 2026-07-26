@@ -136,6 +136,27 @@ func filterCategoryToApplySet(category string, raw json.RawMessage, applySet map
 // itemKeysFor returns the parity ItemKeys present in a collected CategoryData,
 // mirroring the key prefixes in parity_engine.go compareCategory. Used to
 // enumerate per-item decisions + hard-block at apply time.
+// itemKeysForStep derives item keys from a stored migration step.
+//
+// migration_steps.data holds the collector's ENVELOPE —
+// {"type":…,"meta":…,"data":{…}} — not the payload itself. Callers used to
+// pass the raw envelope straight into itemKeysFor as if it were the payload;
+// json.Unmarshal is lenient about unknown fields, so decoding an envelope into
+// PackagesData did not error, it just yielded a struct with no packages. Zero
+// item keys meant an empty apply-set, which the apply stage reads as "the
+// operator deselected everything" — so a full migration skipped every category
+// and still reported success. Unwrap once, here, so no caller can repeat it.
+func itemKeysForStep(category, stepData string) []string {
+	if stepData == "" {
+		return nil
+	}
+	var envelope CategoryData
+	if err := json.Unmarshal([]byte(stepData), &envelope); err != nil {
+		return nil
+	}
+	return itemKeysFor(category, envelope)
+}
+
 func itemKeysFor(category string, data CategoryData) []string {
 	switch category {
 	case "packages":
@@ -264,7 +285,7 @@ func applyItemPlan(ctx context.Context, pc *PipelineContext, step MigrationStepR
 
 	applySet = map[string]bool{}
 	now := time.Now().UTC().Format(time.RFC3339)
-	for _, key := range itemKeysFor(step.Category, CategoryData{Data: json.RawMessage(step.Data)}) {
+	for _, key := range itemKeysForStep(step.Category, step.Data) {
 		action := decisions[key] // "" ⇒ undecided
 		hard := itemHardBlocked(step.Category, key, inv)
 		rec := ItemResult{

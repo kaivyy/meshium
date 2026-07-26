@@ -151,3 +151,28 @@ func TestPackagesCollectAptEndToEnd(t *testing.T) {
 		t.Errorf("expected [nginx curl], got %v", pd.Packages)
 	}
 }
+
+// Over SSH exec there is no TTY and no stdin. Any package with a debconf
+// prompt then walks Dialog → Readline → Teletype and dpkg fails with
+// "unable to re-open stdin", aborting the entire batch — observed live while
+// migrating Ubuntu 20.04 → 22.04, where it blocked all 416 installable
+// packages.
+func TestAptInstallIsNonInteractive(t *testing.T) {
+	cmd := (&aptAdapter{}).InstallPackages([]string{"nginx"})
+	if !strings.Contains(cmd, "DEBIAN_FRONTEND=noninteractive") {
+		t.Errorf("apt install can prompt over a TTY-less SSH session: %s", cmd)
+	}
+	if !strings.Contains(cmd, "</dev/null") {
+		t.Errorf("apt install leaves dpkg without a readable stdin: %s", cmd)
+	}
+	if !strings.Contains(cmd, "force-confold") {
+		t.Errorf("apt install may prompt about existing config files: %s", cmd)
+	}
+}
+
+func TestAptRemoveIsNonInteractive(t *testing.T) {
+	cmd := (&aptAdapter{}).RemovePackages([]string{"nginx"})
+	if !strings.Contains(cmd, "DEBIAN_FRONTEND=noninteractive") || !strings.Contains(cmd, "</dev/null") {
+		t.Errorf("apt remove can hang on a prompt: %s", cmd)
+	}
+}

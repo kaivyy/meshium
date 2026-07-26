@@ -132,10 +132,18 @@ func (a *aptAdapter) ListPackages() string {
 	return `dpkg-query -W -f='${db:Status-Abbrev} ${binary:Package}\n'`
 }
 func (a *aptAdapter) InstallPackages(pkgs []string) string {
-	return fmt.Sprintf("apt-get install -y %s", shared.ShellQuoteArgs(pkgs))
+	// Over SSH exec there is no TTY and no stdin. Without DEBIAN_FRONTEND any
+	// package carrying a debconf prompt tries Dialog, then Readline, then
+	// Teletype, and dpkg finally fails with "unable to re-open stdin" — which
+	// aborts the WHOLE batch (observed live migrating Ubuntu 20.04 → 22.04).
+	// </dev/null gives dpkg a readable stdin; --force-confold keeps the
+	// target's existing config files rather than prompting about them, which
+	// is also the safer default when migrating configs separately.
+	return fmt.Sprintf("DEBIAN_FRONTEND=noninteractive apt-get install -y -o Dpkg::Options::=--force-confold -o Dpkg::Options::=--force-confdef %s </dev/null",
+		shared.ShellQuoteArgs(pkgs))
 }
 func (a *aptAdapter) RemovePackages(pkgs []string) string {
-	return fmt.Sprintf("apt-get remove -y %s", shared.ShellQuoteArgs(pkgs))
+	return fmt.Sprintf("DEBIAN_FRONTEND=noninteractive apt-get remove -y %s </dev/null", shared.ShellQuoteArgs(pkgs))
 }
 func (a *aptAdapter) EnableService(name string) string {
 	return fmt.Sprintf("systemctl enable %s", shared.ShellQuote(name))

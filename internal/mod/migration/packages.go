@@ -185,11 +185,28 @@ func (a *PackagesApplier) Apply(ctx context.Context, ssh SSHExecuter, data Categ
 		packagesToInstall = append(packagesToInstall, strings.Fields(mapped)...)
 	}
 
+	// Drop names the target cannot install BEFORE handing the list to apt:
+	// `apt-get install` is all-or-nothing, so one unavailable package (a
+	// vendor-repo agent like aliyun-assist, or one dropped in the target
+	// release like crda) blocks every other package in the batch. Report them
+	// rather than silently omitting them — they are real migration gaps the
+	// operator has to close by hand.
+	available, unavailable := partitionByAvailability(ctx, ssh, packagesToInstall)
+	packagesToInstall = available
+	if len(unavailable) > 0 && onProgress != nil {
+		onProgress(WSMessage{
+			Step:   "packages:apply",
+			Status: "warning",
+			Value: fmt.Sprintf("%d package(s) are not available in the target's repositories and were NOT installed: %s — add the matching repository or install them manually",
+				len(unavailable), strings.Join(unavailable, ", ")),
+		})
+	}
+
 	if onProgress != nil {
 		onProgress(WSMessage{
 			Step:   "packages:apply",
 			Status: "progress",
-			Value:  fmt.Sprintf("Installing %d packages (%d skipped)", len(packagesToInstall), skipped),
+			Value:  fmt.Sprintf("Installing %d packages (%d already present, %d unavailable on target)", len(packagesToInstall), skipped, len(unavailable)),
 		})
 	}
 
@@ -229,11 +246,11 @@ func (a *PackagesApplier) Apply(ctx context.Context, ssh SSHExecuter, data Categ
 	}
 
 	if onProgress != nil {
-		onProgress(WSMessage{
-			Step:   "packages:apply",
-			Status: "success",
-			Value:  fmt.Sprintf("%d packages installed", len(packagesToInstall)),
-		})
+		summary := fmt.Sprintf("%d packages installed", len(packagesToInstall))
+		if len(unavailable) > 0 {
+			summary += fmt.Sprintf("; %d unavailable on the target and left for manual follow-up", len(unavailable))
+		}
+		onProgress(WSMessage{Step: "packages:apply", Status: "success", Value: summary})
 	}
 
 	return nil
@@ -287,6 +304,97 @@ func (a *PackagesApplier) Rollback(ctx context.Context, ssh SSHExecuter, backup 
 	// corrupts the package database.
 	_, _, _, err = execLongOrContext(ctx, ssh, cmd)
 	return err
+}
+
+// partitionByAvailability splits the wanted packages into those the TARGET can
+// actually install and those it cannot.
+//
+// `apt-get install a b c` is all-or-nothing: one unknown name makes apt exit
+// 100 and install nothing. A cross-version or cross-vendor migration almost
+// always carries a few names that only existed in the source's own repos
+// (aliyun-assist, cloudflare-warp) or were dropped in the target release
+// (crda), so without this one such package blocks every other one.
+//
+// Fails OPEN, deliberately: if the availability probe itself cannot run, every
+// package is reported available so the install is still attempted. Degrading
+// to the old all-or-nothing behaviour is acceptable; silently installing
+// nothing and calling it success is not.
+func partitionByAvailability(ctx context.Context, ssh SSHExecuter, want []string) (available, missing []string) {
+	if len(want) == 0 {
+		return nil, nil
+	}
+	info, err := DetectDistro(ctx, ssh)
+	if err != nil {
+		return want, nil
+	}
+	adapter, err := GetAdapter(info)
+	if err != nil {
+		return want, nil
+	}
+	// Only apt exposes a cheap batch availability query today. Other managers
+	// keep the previous behaviour rather than gain an unverified code path.
+	if adapter.PackageManager() != "apt" {
+		return want, nil
+	}
+
+	installable := map[string]bool{}
+	const batch = 300
+	probed := false
+	for start := 0; start < len(want); start += batch {
+		end := start + batch
+		if end > len(want) {
+			end = len(want)
+		}
+		quoted := make([]string, 0, end-start)
+		for _, p := range want[start:end] {
+			quoted = append(quoted, shared.ShellQuote(p))
+		}
+		out, _, exit, err := ssh.ExecContext(ctx, "apt-cache policy "+strings.Join(quoted, " ")+" 2>/dev/null")
+		if err != nil || exit != 0 {
+			continue
+		}
+		probed = true
+		// Output is a stanza per known package:
+		//   nginx:
+		//     Installed: (none)
+		//     Candidate: 1.18.0
+		// A name absent from the output, or present with "Candidate: (none)",
+		// cannot be installed.
+		var current string
+		for _, line := range strings.Split(out, "\n") {
+			trimmed := strings.TrimSpace(line)
+			if strings.HasSuffix(trimmed, ":") && !strings.HasPrefix(line, " ") {
+				current = strings.TrimSuffix(trimmed, ":")
+				continue
+			}
+			if current != "" && strings.HasPrefix(trimmed, "Candidate:") {
+				cand := strings.TrimSpace(strings.TrimPrefix(trimmed, "Candidate:"))
+				if cand != "" && cand != "(none)" {
+					installable[current] = true
+				}
+				current = ""
+			}
+		}
+	}
+	if !probed {
+		// The probe never ran anywhere — fall back to attempting all.
+		return want, nil
+	}
+
+	for _, p := range want {
+		// apt reports multi-arch names as "pkg:arch"; the policy stanza uses
+		// the bare name.
+		base := p
+		if i := strings.IndexByte(base, ':'); i > 0 {
+			base = base[:i]
+		}
+		if installable[base] {
+			available = append(available, p)
+		} else {
+			missing = append(missing, p)
+		}
+	}
+	return available, missing
 }
 
 // distroFamilyFromPM returns the distro family from a package manager name.

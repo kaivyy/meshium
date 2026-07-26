@@ -88,3 +88,35 @@ func TestSanitizeStringLeavesShortStringsUntouched(t *testing.T) {
 		t.Fatalf("expected short string to remain unchanged, got %q", got)
 	}
 }
+
+// The inline-password pattern matched "-p" ANYWHERE, including inside ordinary
+// words, so real diagnostics came back mangled: a live migration reported
+// "dpkg-p [REDACTED]" and "Sub-p [REDACTED]" instead of "dpkg-preconfigure"
+// and "Sub-process", destroying the very error the operator needed to read.
+// The flag must be a standalone token to count.
+func TestSanitizeDoesNotMangleOrdinaryWords(t *testing.T) {
+	for _, s := range []string{
+		"dpkg-preconfigure failed",
+		"E: Sub-process /usr/bin/dpkg returned an error code (1)",
+		"python-pip is not installed",
+	} {
+		if got := SanitizeString(s); got != s {
+			t.Errorf("SanitizeString(%q) mangled it into %q", s, got)
+		}
+	}
+}
+
+// A real inline password must still be redacted.
+func TestSanitizeStillRedactsInlinePassword(t *testing.T) {
+	got := SanitizeString("mysql -uroot -pSuperSecret123 -e 'SELECT 1'")
+	if strings.Contains(got, "SuperSecret123") {
+		t.Errorf("inline password survived: %q", got)
+	}
+}
+
+// `ssh -p 2222` is a port, not a password; redacting it hides useful context.
+func TestSanitizeLeavesSeparatedPortFlagAlone(t *testing.T) {
+	if got := SanitizeString("ssh -p 2222 host"); got != "ssh -p 2222 host" {
+		t.Errorf("port flag was redacted: %q", got)
+	}
+}
