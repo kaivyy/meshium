@@ -12,13 +12,159 @@ import (
 
 // DockerContainer represents a running container on the source server.
 type DockerContainer struct {
-	ID      string            `json:"id"`
-	Name    string            `json:"name"`
-	Image   string            `json:"image"`
-	Status  string            `json:"status"`
-	Ports   string            `json:"ports"`
-	Env     map[string]string `json:"env,omitempty"`
-	Labels  map[string]string `json:"labels,omitempty"`
+	ID     string            `json:"id"`
+	Name   string            `json:"name"`
+	Image  string            `json:"image"`
+	Status string            `json:"status"`
+	Ports  string            `json:"ports"` // human-readable, from `docker ps`
+	Env    map[string]string `json:"env,omitempty"`
+	Labels map[string]string `json:"labels,omitempty"`
+
+	// Runtime shape. Recreation used to pass only name/image/env/labels, so a
+	// migrated container published no ports, joined the default bridge, had no
+	// volumes attached and would not restart after a reboot — while the step
+	// reported success.
+	PortBindings  []string `json:"portBindings,omitempty"`  // "8080:80/tcp"
+	MountSpecs    []string `json:"mountSpecs,omitempty"`    // "<type>:<source>:<dest>"
+	Networks      []string `json:"networks,omitempty"`      // network names
+	RestartPolicy string   `json:"restartPolicy,omitempty"` // e.g. "unless-stopped"
+}
+
+// ContainerCarriesData reports whether the container keeps state in a named
+// volume or bind mount.
+//
+// Meshium never copies volume contents, so recreating such a container on the
+// target yields a container that looks healthy and is EMPTY. That is worse
+// than not starting it: the operator sees green and believes the data moved.
+// tmpfs is excluded — it is ephemeral by definition.
+func ContainerCarriesData(c DockerContainer) bool {
+	for _, m := range c.MountSpecs {
+		switch {
+		case strings.HasPrefix(m, "volume:"), strings.HasPrefix(m, "bind:"):
+			return true
+		}
+	}
+	return false
+}
+
+// buildDockerRunCommand renders the recreate command with the container's full
+// runtime shape. Every value is shell-quoted.
+func buildDockerRunCommand(c DockerContainer) string {
+	cmd := fmt.Sprintf("docker run -d --name %s", shared.ShellQuote(c.Name))
+	if c.RestartPolicy != "" && c.RestartPolicy != "no" {
+		cmd += fmt.Sprintf(" --restart %s", shared.ShellQuote(c.RestartPolicy))
+	}
+	for _, n := range c.Networks {
+		if n != "" {
+			cmd += fmt.Sprintf(" --network %s", shared.ShellQuote(n))
+		}
+	}
+	for _, p := range c.PortBindings {
+		if p != "" {
+			cmd += fmt.Sprintf(" -p %s", shared.ShellQuote(p))
+		}
+	}
+	for _, m := range c.MountSpecs {
+		// "<type>:<source>:<dest>" → docker's "-v source:dest". A tmpfs mount
+		// has no source and is expressed with --tmpfs instead.
+		parts := strings.SplitN(m, ":", 3)
+		if len(parts) != 3 {
+			continue
+		}
+		kind, src, dst := parts[0], parts[1], parts[2]
+		switch kind {
+		case "tmpfs":
+			cmd += fmt.Sprintf(" --tmpfs %s", shared.ShellQuote(dst))
+		case "volume", "bind":
+			if src != "" && dst != "" {
+				cmd += fmt.Sprintf(" -v %s", shared.ShellQuote(src+":"+dst))
+			}
+		}
+	}
+	for k, v := range c.Env {
+		cmd += fmt.Sprintf(" -e %s=%s", shared.ShellQuote(k), shared.ShellQuote(v))
+	}
+	for k, v := range c.Labels {
+		cmd += fmt.Sprintf(" --label %s=%s", shared.ShellQuote(k), shared.ShellQuote(v))
+	}
+	cmd += fmt.Sprintf(" %s", shared.ShellQuote(c.Image))
+	return cmd
+}
+
+// collectContainerShape fills in ports, mounts, networks and restart policy
+// for every collected container, using one batched inspect per field. Each
+// inspect keys on the same 12-char short id `docker ps` returned.
+func collectContainerShape(ctx context.Context, ssh SSHExecuter, idList string, containers []DockerContainer) {
+	const idFmt = `{{printf "%.12s" .Id}}|`
+
+	assign := func(format string, set func(c *DockerContainer, vals []string)) {
+		out, _, _, err := ssh.ExecContext(ctx, fmt.Sprintf(
+			`docker inspect --format '%s%s|||' %s 2>/dev/null`, idFmt, format, idList))
+		if err != nil || strings.TrimSpace(out) == "" {
+			return
+		}
+		byID := parseBatchInspectList(out)
+		for i := range containers {
+			if vals, ok := byID[containers[i].ID]; ok {
+				set(&containers[i], vals)
+			}
+		}
+	}
+
+	// "8080:80/tcp" per published port.
+	assign(`{{range $p, $conf := .HostConfig.PortBindings}}{{range $conf}}{{printf "%s:%s
+" .HostPort $p}}{{end}}{{end}}`,
+		func(c *DockerContainer, v []string) { c.PortBindings = v })
+	// "<type>:<source>:<destination>" per mount.
+	assign(`{{range .Mounts}}{{printf "%s:%s:%s
+" .Type .Source .Destination}}{{end}}`,
+		func(c *DockerContainer, v []string) { c.MountSpecs = v })
+	assign(`{{range $k, $v := .NetworkSettings.Networks}}{{printf "%s
+" $k}}{{end}}`,
+		func(c *DockerContainer, v []string) { c.Networks = v })
+	assign(`{{printf "%s
+" .HostConfig.RestartPolicy.Name}}`,
+		func(c *DockerContainer, v []string) {
+			if len(v) > 0 {
+				c.RestartPolicy = v[0]
+			}
+		})
+}
+
+// parseBatchInspectList parses the same "<id>|line\nline\n|||" batches as
+// parseBatchInspect, but keeps the lines as an ordered list instead of
+// splitting them into key=value pairs.
+func parseBatchInspectList(output string) map[string][]string {
+	result := map[string][]string{}
+	currentID := ""
+	var current []string
+	for _, line := range strings.Split(output, "\n") {
+		line = strings.TrimSpace(line)
+		if line == "" {
+			continue
+		}
+		if line == "|||" {
+			if currentID != "" {
+				result[currentID] = current
+			}
+			currentID, current = "", nil
+			continue
+		}
+		if idx := strings.Index(line, "|"); idx > 0 && currentID == "" {
+			currentID = line[:idx]
+			if rest := strings.TrimSpace(line[idx+1:]); rest != "" && rest != "|||" {
+				current = append(current, rest)
+			}
+			continue
+		}
+		if currentID != "" {
+			current = append(current, line)
+		}
+	}
+	if currentID != "" && len(current) > 0 {
+		result[currentID] = current
+	}
+	return result
 }
 
 // DockerVolume represents a Docker volume.
@@ -128,6 +274,11 @@ func (c *DockerCollector) Collect(ctx context.Context, ssh SSHExecuter) (Categor
 					}
 				}
 			}
+
+			// Runtime shape: ports, mounts, networks, restart policy. Without
+			// these the recreate produces a container that publishes nothing,
+			// sits on the default bridge, has no volumes and dies at reboot.
+			collectContainerShape(ctx, ssh, idList, data.Containers)
 		}
 	}
 
@@ -382,9 +533,28 @@ func (a *DockerApplier) Apply(ctx context.Context, ssh SSHExecuter, data Categor
 		}
 	}
 
-	// 5. If no compose files, try to recreate containers directly
+	// 5. If no compose files, recreate containers directly.
+	//
+	// Containers whose state lives in a named volume or bind mount are NOT
+	// started: Meshium never copies volume contents, so starting them would
+	// produce a container that looks healthy and is empty — the operator would
+	// see green and believe the data moved. Those are reported as needing
+	// manual data migration instead.
+	dataCarrying := 0
 	if len(dd.ComposeFiles) == 0 {
 		for _, container := range dd.Containers {
+			if ContainerCarriesData(container) {
+				dataCarrying++
+				if onProgress != nil {
+					onProgress(WSMessage{
+						Step:   "docker:apply",
+						Status: "warning",
+						Value: fmt.Sprintf("Not starting %s: its data lives in %s and container data is NOT migrated by this tool — copy the volume/bind contents yourself, then start it manually",
+							container.Name, strings.Join(container.MountSpecs, ", ")),
+					})
+				}
+				continue
+			}
 			if onProgress != nil {
 				onProgress(WSMessage{
 					Step:   "docker:apply",
@@ -392,19 +562,8 @@ func (a *DockerApplier) Apply(ctx context.Context, ssh SSHExecuter, data Categor
 					Value:  fmt.Sprintf("Recreating container %s", container.Name),
 				})
 			}
-			// Build docker run command from collected data
-			cmd := fmt.Sprintf("docker run -d --name %s", shared.ShellQuote(container.Name))
-			if container.Env != nil {
-				for k, v := range container.Env {
-					cmd += fmt.Sprintf(" -e %s=%s", shared.ShellQuote(k), shared.ShellQuote(v))
-				}
-			}
-			if container.Labels != nil {
-				for k, v := range container.Labels {
-					cmd += fmt.Sprintf(" --label %s=%s", shared.ShellQuote(k), shared.ShellQuote(v))
-				}
-			}
-			cmd += fmt.Sprintf(" %s", shared.ShellQuote(container.Image))
+			// Full runtime shape: ports, networks, mounts, restart policy.
+			cmd := buildDockerRunCommand(container)
 			// Cap-free: docker run pulls the image when absent.
 			_, stderr, exitCode, _ := execLongOrContext(ctx, ssh, cmd+" 2>&1")
 			if exitCode != 0 && onProgress != nil {
@@ -419,6 +578,9 @@ func (a *DockerApplier) Apply(ctx context.Context, ssh SSHExecuter, data Categor
 
 	if onProgress != nil {
 		summary := fmt.Sprintf("Docker migration finished: %d containers, %d images (registry pull), %d volumes, %d compose files", len(dd.Containers), len(dd.Images), len(dd.Volumes), len(dd.ComposeFiles))
+		if dataCarrying > 0 {
+			summary += fmt.Sprintf("; %d container(s) were NOT started because their data lives in volumes/bind mounts that this tool does not migrate", dataCarrying)
+		}
 		if pullFailures > 0 {
 			summary += fmt.Sprintf("; %d image(s) failed to pull from a registry and were NOT migrated (see warnings above)", pullFailures)
 		}
