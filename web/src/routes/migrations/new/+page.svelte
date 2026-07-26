@@ -130,13 +130,29 @@
           ? selectedCategories.length > 0
           : true;
 
+  // `maturity` states how far each category has actually been proven, so the
+  // wizard does not present an experimental path as if it were as ready as a
+  // live-verified one. "verified" = apply + rollback exercised end to end
+  // against real hosts (VPS-B1 matrix); "experimental" = the code path exists
+  // and is unit-tested but has never completed a live migration.
+  // `caveat` names the specific gap rather than a vague warning.
   const categories = [
-    { id: 'packages', label: 'Packages', icon: Package, desc: 'Installed packages (apt, dnf, pacman, etc.)' },
-    { id: 'configs', label: 'Config Files', icon: FileCode, desc: 'Configuration files from /etc/ and custom paths' },
-    { id: 'services', label: 'Services', icon: Settings, desc: 'Systemd enabled services' },
-    { id: 'users', label: 'Users & Security', icon: Users, desc: 'Users, groups, cron jobs, firewall rules' },
-    { id: 'docker', label: 'Docker', icon: Container, desc: 'Running containers, compose files, volumes, images' },
-    { id: 'database', label: 'Databases', icon: Database, desc: 'PostgreSQL / MySQL / MongoDB / Redis dump & restore' },
+    { id: 'packages', label: 'Packages', icon: Package, desc: 'Installed packages (apt, dnf, pacman, etc.)', maturity: 'verified' },
+    { id: 'configs', label: 'Config Files', icon: FileCode, desc: 'Configuration files from /etc/ and custom paths', maturity: 'verified' },
+    { id: 'services', label: 'Services', icon: Settings, desc: 'Systemd enabled services', maturity: 'verified' },
+    { id: 'users', label: 'Users & Security', icon: Users, desc: 'Users, groups, cron jobs, firewall rules', maturity: 'verified' },
+    {
+      id: 'docker', label: 'Docker', icon: Container,
+      desc: 'Running containers, compose files, images',
+      maturity: 'experimental',
+      caveat: 'Volume DATA is not migrated — only volume names. Containers outside a compose file are recreated from name, image, env and labels only: ports, networks, mounts and restart policy are not reconstructed.',
+    },
+    {
+      id: 'database', label: 'Databases', icon: Database,
+      desc: 'PostgreSQL / MySQL / MongoDB / Redis dump & restore',
+      maturity: 'experimental',
+      caveat: 'Dump/restore has not yet completed a live end-to-end migration. There is no row-count or checksum verification after restore, and rollback drops the databases this migration created.',
+    },
   ];
 
   onMount(async () => {
@@ -480,9 +496,19 @@
           >
             <div class="flex items-start gap-3">
               <cat.icon size={20} class="text-fg-muted mt-0.5 shrink-0" />
-              <div>
-                <p class="font-medium text-fg">{cat.label}</p>
+              <div class="min-w-0">
+                <p class="font-medium text-fg flex items-center gap-2 flex-wrap">
+                  {cat.label}
+                  {#if cat.maturity === 'experimental'}
+                    <span class="px-1.5 py-0.5 rounded text-[10px] font-semibold uppercase tracking-wide bg-warning/20 text-warning">
+                      Experimental
+                    </span>
+                  {/if}
+                </p>
                 <p class="text-xs text-fg-subtle mt-1">{cat.desc}</p>
+                {#if cat.caveat && selectedCategories.includes(cat.id)}
+                  <p class="text-xs text-warning mt-2 leading-relaxed">{cat.caveat}</p>
+                {/if}
               </div>
             </div>
           </button>

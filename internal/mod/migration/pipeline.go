@@ -51,6 +51,11 @@ type PipelineContext struct {
 	// copied from the Pipeline at Execute time so stages (initialSyncStage) can
 	// inject it into the DatabaseApplier without reaching back into the Pipeline.
 	CheckpointStore transfer.CheckpointStore
+	// BackupRefs maps category → restore-point reference (see backup_ref.go).
+	// preparationStage fills it when it persists each category's backup;
+	// initialSyncStage stamps it onto every item it applies, which is what
+	// gives rollback per-item evidence instead of category-wide guesswork.
+	BackupRefs map[string]string
 }
 
 // Pipeline is the unified orchestration engine for zero-downtime migrations.
@@ -1455,8 +1460,40 @@ func (s *validationStage) Execute(ctx context.Context, pc *PipelineContext) erro
 		pc.OnProgress(WSMessage{Step: "validation", Status: "progress", Value: fmt.Sprintf("Target available disk: %s", output)})
 	}
 
+	// Plan freshness. The collected payload is a snapshot of the SOURCE at plan
+	// time; applying a stale one writes state the source no longer has. This
+	// runs BEFORE preparationStage takes backups, so a refusal costs nothing on
+	// the target. Beyond the hard window it blocks — re-planning takes seconds.
+	if pc.Migration != nil {
+		if fresh := planFreshnessOf(pc.Migration.CreatedAt); fresh.Stale {
+			status := "warning"
+			if fresh.Blocking {
+				status = "error"
+			}
+			pc.OnProgress(WSMessage{Step: "validation", Status: status, Value: fresh.Reason})
+			if fresh.Blocking {
+				return fmt.Errorf("stale plan: %s", fresh.Reason)
+			}
+		}
+	}
+
 	pc.OnProgress(WSMessage{Step: "validation", Status: "success", Value: "Validation passed"})
 	return nil
+}
+
+// planFreshnessOf parses a stored RFC3339 plan timestamp and evaluates it. An
+// unparsable value is treated as unknown (warn, never silently fresh).
+func planFreshnessOf(createdAt string) PlanFreshness {
+	t, err := time.Parse(time.RFC3339, createdAt)
+	if err != nil {
+		// The repo also stores "2006-01-02 15:04:05" for older rows.
+		if t2, err2 := time.Parse("2006-01-02 15:04:05", createdAt); err2 == nil {
+			t = t2
+		} else {
+			return evaluatePlanFreshness(time.Time{}, time.Now())
+		}
+	}
+	return evaluatePlanFreshness(t, time.Now())
 }
 
 func (s *validationStage) Rollback(ctx context.Context, pc *PipelineContext) error {
@@ -1501,9 +1538,16 @@ func (s *preparationStage) Execute(ctx context.Context, pc *PipelineContext) err
 		if err != nil {
 			return fmt.Errorf("marshal %s backup failed (migration aborted — no apply without backup): %w", catName, err)
 		}
-		if _, err := pc.JobRepo.CreateBackup(pc.MigrationID, pc.Migration.TargetID, catName, string(rawBackup)); err != nil {
+		backupID, err := pc.JobRepo.CreateBackup(pc.MigrationID, pc.Migration.TargetID, catName, string(rawBackup))
+		if err != nil {
 			return fmt.Errorf("persist %s backup failed (migration aborted — no apply without backup): %w", catName, err)
 		}
+		// Remember the restore point so initialSyncStage can stamp it onto each
+		// item it applies (per-item rollback evidence).
+		if pc.BackupRefs == nil {
+			pc.BackupRefs = map[string]string{}
+		}
+		pc.BackupRefs[catName] = backupRefFor(backupID)
 
 		pc.OnProgress(WSMessage{Step: "preparation", Status: "success", Value: fmt.Sprintf("Backed up %s", catName)})
 	}
@@ -1982,6 +2026,9 @@ func (s *initialSyncStage) Execute(ctx context.Context, pc *PipelineContext) err
 				itemResults[i].ExecutionState = ExecApplied
 				itemResults[i].LastExecutionAt = time.Now().UTC().Format(time.RFC3339)
 				itemResults[i].StepRefs = []int{step.ID}
+				// Per-item restore point: without this, rollback can only reason
+				// per category ("something here was applied, restore all of it").
+				applyBackupRef(&itemResults[i], pc.BackupRefs)
 			}
 			if uerr := pc.JobRepo.UpsertItemResult(ctx, pc.MigrationID, itemResults[i]); uerr != nil {
 				log.Printf("warning: failed to persist item result for %s/%s: %v", step.Category, itemResults[i].ItemKey, uerr)
@@ -2114,6 +2161,16 @@ func (s *initialSyncStage) rollbackApplied(ctx context.Context, pc *PipelineCont
 				appliedCats[r.Category] = true
 			}
 		}
+		// Report the real boundary from per-item restore evidence before doing
+		// anything: an applied item with no backup_ref will NOT be undone, and
+		// the operator must see that rather than infer "rollback ran, so we are
+		// back where we started".
+		scope := DescribeRollbackScope(itemResults)
+		status := "progress"
+		if !scope.FullyCovered {
+			status = "warning"
+		}
+		pc.OnProgress(WSMessage{Step: "rollback", Status: status, Value: scope.Summary()})
 	}
 
 	// Load backups from DB
@@ -2341,55 +2398,97 @@ func (s *healthVerificationStage) Execute(ctx context.Context, pc *PipelineConte
 		s.failVerification(ctx, pc, appliedByCat, "target health check returned unexpected output")
 		return fmt.Errorf("target health check failed: unexpected output %q", output)
 	}
-	// Honest infra-level attestation for every applied item.
-	s.attestVerification(ctx, pc, appliedByCat, VerifyInfra, "infra",
-		"target responsive; item applied and present")
-
-	// Check Docker containers if docker category is included. A container
-	// reporting "Up" is a RUNTIME-level attestation (active/listening).
-	for _, cat := range pc.Migration.Categories {
+	// Per-item probes. A responsive target proves only that the target is
+	// responsive; each item must earn its level from evidence about ITSELF —
+	// the package is installed, the file's hash matches, the unit is active.
+	// Anything a probe cannot positively confirm is verify_failed, never green.
+	verified, failed, unprobed := 0, 0, 0
+	for cat, items := range appliedByCat {
 		if cat == "docker" {
-			dockerOutput, _, _, err := pc.TargetSSH.ExecContext(ctx, "docker ps --format '{{.Names}} {{.Status}}' 2>/dev/null")
-			if err == nil && dockerOutput != "" {
-				pc.OnProgress(WSMessage{Step: "health_verification", Status: "progress", Value: fmt.Sprintf("Docker containers: %s", dockerOutput)})
-				// Upgrade applied docker items to runtime_verified when their
-				// container shows Up; leave others at infra_verified (honest).
-				for _, r := range appliedByCat["docker"] {
-					if strings.Contains(dockerOutput, strings.TrimPrefix(r.ItemKey, "docker-container:")) &&
-						strings.Contains(dockerOutput, "Up") {
-						s.attestVerification(ctx, pc, appliedByCat, VerifyRuntime, "runtime",
-							"container reported Up")
-					}
-				}
+			continue // handled below with the container probe
+		}
+		verdicts := probeItems(ctx, pc.TargetSSH, cat, items)
+		if len(verdicts) == 0 {
+			// No probe exists for this category (e.g. database): leave the
+			// items at whatever level they already hold rather than inventing
+			// one. They are NOT counted as verified.
+			unprobed += len(items)
+			continue
+		}
+		for _, r := range items {
+			v, ok := verdicts[r.ItemKey]
+			if !ok {
+				unprobed++
+				continue
+			}
+			if v.OK {
+				s.recordVerdict(ctx, pc, r, v.Level, string(v.Level), v.Detail, "")
+				verified++
+			} else {
+				s.recordVerdict(ctx, pc, r, VerifyFailed, "", "", v.Detail)
+				failed++
 			}
 		}
 	}
 
-	pc.OnProgress(WSMessage{Step: "health_verification", Status: "success", Value: "Health verification passed"})
+	// Docker: a container reporting "Up" is a RUNTIME attestation — but only
+	// for THAT container. This used to pass the whole appliedByCat map into
+	// attestVerification, so one running container upgraded every applied item
+	// in every category to runtime_verified, including packages that were
+	// never installed.
+	if dockerItems := appliedByCat["docker"]; len(dockerItems) > 0 {
+		dockerOutput, _, _, err := pc.TargetSSH.ExecContext(ctx, "docker ps --format '{{.Names}} {{.Status}}' 2>/dev/null")
+		if err == nil && strings.TrimSpace(dockerOutput) != "" {
+			pc.OnProgress(WSMessage{Step: "health_verification", Status: "progress", Value: fmt.Sprintf("Docker containers: %s", dockerOutput)})
+			up := map[string]bool{}
+			for _, line := range strings.Split(strings.TrimSpace(dockerOutput), "\n") {
+				fields := strings.Fields(line)
+				if len(fields) >= 2 && strings.HasPrefix(fields[1], "Up") {
+					up[fields[0]] = true
+				}
+			}
+			for _, r := range dockerItems {
+				if up[strings.TrimPrefix(r.ItemKey, "docker-container:")] {
+					s.recordVerdict(ctx, pc, r, VerifyRuntime, "runtime", "container reported Up", "")
+					verified++
+				} else {
+					s.recordVerdict(ctx, pc, r, VerifyFailed, "", "", "container is not running on the target")
+					failed++
+				}
+			}
+		} else {
+			for _, r := range dockerItems {
+				s.recordVerdict(ctx, pc, r, VerifyFailed, "", "", "could not list containers on the target")
+				failed++
+			}
+		}
+	}
+
+	summary := fmt.Sprintf("Verified %d item(s); %d failed verification", verified, failed)
+	if unprobed > 0 {
+		summary += fmt.Sprintf("; %d left unverified (no probe for that category)", unprobed)
+	}
+	if failed > 0 {
+		// Applied but not confirmed on the target: surface it as a warning and
+		// let the operator decide. The per-item rows carry the detail.
+		pc.OnProgress(WSMessage{Step: "health_verification", Status: "warning", Value: summary})
+		return nil
+	}
+	pc.OnProgress(WSMessage{Step: "health_verification", Status: "success", Value: summary})
 	return nil
 }
 
-// attestVerification records an honest verification level for every applied item
-// in the given category buckets. It only ever RAISES the level (infra →
-// runtime) and never fabricates app_verified, which needs a real /health probe
-// this stage does not perform (those items stay infra/runtime, i.e. NOT green).
-func (s *healthVerificationStage) attestVerification(ctx context.Context, pc *PipelineContext, byCat map[string][]ItemResult, state VerificationState, level, evidence string) {
-	for _, items := range byCat {
-		for _, r := range items {
-			// Never downgrade an already-stronger attestation.
-			if r.VerificationState == VerifyRuntime || r.VerificationState == VerifyApp {
-				continue
-			}
-			r.VerificationState = state
-			r.VerificationLevel = level
-			r.VerifyEvidence = evidence
-			r.VerifyNotes = ""
-			if uerr := s.repo.UpsertItemResult(ctx, pc.MigrationID, r); uerr != nil {
-				log.Printf("warning: failed to record verification for %s: %v", r.ItemKey, uerr)
-			}
-		}
+// recordVerdict persists one item's verification outcome.
+func (s *healthVerificationStage) recordVerdict(ctx context.Context, pc *PipelineContext, r ItemResult, state VerificationState, level, evidence, notes string) {
+	r.VerificationState = state
+	r.VerificationLevel = level
+	r.VerifyEvidence = evidence
+	r.VerifyNotes = notes
+	if err := s.repo.UpsertItemResult(ctx, pc.MigrationID, r); err != nil {
+		log.Printf("warning: failed to record verification for %s: %v", r.ItemKey, err)
 	}
 }
+
 
 // failVerification marks applied items verify_failed with the given reason, so a
 // broken target is never reported green.

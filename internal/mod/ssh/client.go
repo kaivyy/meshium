@@ -12,7 +12,6 @@ import (
 	"sync"
 	"time"
 
-	"github.com/pkg/sftp"
 	"golang.org/x/crypto/ssh"
 	"golang.org/x/crypto/ssh/agent"
 )
@@ -344,7 +343,7 @@ func (c *Client) ExecContextWithTimeout(ctx context.Context, cmd string, timeout
 	}
 	defer cancel()
 
-	session, err := c.conn.NewSession()
+	session, err := c.newSessionContext(execCtx)
 	if err != nil {
 		return "", "", -1, err
 	}
@@ -487,7 +486,7 @@ func (c *Client) ExecStreamLinesContextWithTimeout(ctx context.Context, cmd stri
 	}
 	defer cancel()
 
-	session, err := c.conn.NewSession()
+	session, err := c.newSessionContext(execCtx)
 	if err != nil {
 		return err
 	}
@@ -581,7 +580,7 @@ func (c *Client) ExecStreamLinesContextWithTimeout(ctx context.Context, cmd stri
 func (c *Client) ExecPipe(ctx context.Context, cmd string) (io.ReadCloser, error) {
 	c.touch()
 
-	session, err := c.conn.NewSession()
+	session, err := c.newSessionContext(ctx)
 	if err != nil {
 		return nil, err
 	}
@@ -681,7 +680,7 @@ func (c *Client) ExecWithStdin(ctx context.Context, cmd string, stdin io.Reader)
 	execCtx, cancel := context.WithCancel(ctx)
 	defer cancel()
 
-	session, err := c.conn.NewSession()
+	session, err := c.newSessionContext(execCtx)
 	if err != nil {
 		return "", -1, err
 	}
@@ -804,7 +803,7 @@ func (a *activityReader) Read(p []byte) (int, error) {
 func (c *Client) Upload(src io.Reader, remotePath string) error {
 	c.touch()
 
-	sftpClient, err := sftp.NewClient(c.conn)
+	sftpClient, err := c.newSFTPContext(context.Background())
 	if err != nil {
 		return err
 	}
@@ -844,7 +843,7 @@ func (c *Client) Upload(src io.Reader, remotePath string) error {
 func (c *Client) Download(remotePath string, dst io.Writer) error {
 	c.touch()
 
-	sftpClient, err := sftp.NewClient(c.conn)
+	sftpClient, err := c.newSFTPContext(context.Background())
 	if err != nil {
 		return err
 	}
@@ -894,7 +893,7 @@ func (c *Client) Download(remotePath string, dst io.Writer) error {
 func (c *Client) DownloadLong(ctx context.Context, remotePath string, dst io.Writer) error {
 	c.touch()
 
-	sftpClient, err := sftp.NewClient(c.conn)
+	sftpClient, err := c.newSFTPContext(ctx)
 	if err != nil {
 		return err
 	}
@@ -930,7 +929,7 @@ func (c *Client) DownloadLong(ctx context.Context, remotePath string, dst io.Wri
 func (c *Client) UploadLong(ctx context.Context, src io.Reader, remotePath string) error {
 	c.touch()
 
-	sftpClient, err := sftp.NewClient(c.conn)
+	sftpClient, err := c.newSFTPContext(ctx)
 	if err != nil {
 		return err
 	}
@@ -1053,7 +1052,9 @@ func (c *Client) NewShellSession(cols, rows int) (*ShellSession, error) {
 	}
 	c.mu.Unlock()
 
-	session, err := c.conn.NewSession()
+	// No caller context on this API; the open timeout alone bounds it so an
+	// interactive shell request cannot hang the handler forever.
+	session, err := c.newSessionContext(context.Background())
 	if err != nil {
 		return nil, fmt.Errorf("create session: %w", err)
 	}
