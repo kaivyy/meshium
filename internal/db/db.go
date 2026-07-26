@@ -2,7 +2,9 @@ package db
 
 import (
 	"database/sql"
+	"fmt"
 	"net/url"
+	"os"
 	"strings"
 
 	_ "modernc.org/sqlite"
@@ -44,6 +46,25 @@ func Open(path string) (*sql.DB, error) {
 	db, err := sql.Open("sqlite", dsn)
 	if err != nil {
 		return nil, err
+	}
+
+	if path != ":memory:" {
+		// The database carries the full server inventory plus encrypted
+		// credential blobs; SQLite creates it (and its WAL/SHM siblings) with
+		// the process umask, which left it world-readable in production.
+		// Force a connection open so the files exist, then pin them to 0600.
+		if err := db.Ping(); err != nil {
+			db.Close()
+			return nil, err
+		}
+		for _, f := range []string{path, path + "-wal", path + "-shm"} {
+			if _, statErr := os.Stat(f); statErr == nil {
+				if chErr := os.Chmod(f, 0o600); chErr != nil {
+					db.Close()
+					return nil, fmt.Errorf("restricting %s permissions: %w", f, chErr)
+				}
+			}
+		}
 	}
 
 	// For in-memory databases, keep a single connection to maintain the

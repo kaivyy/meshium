@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"fmt"
+	"log"
 	"net/http"
 	"os"
 	"os/signal"
@@ -42,6 +43,19 @@ func main() {
 		os.Exit(1)
 	}
 	defer database.Close()
+
+	// Retention: prune bulk step payloads of inactive migrations older than
+	// 30 days and vacuum when free pages dominate (the DB had grown to 429MB
+	// on one stale 113MB plan payload). Best-effort — startup must not fail
+	// on a maintenance error.
+	go func() {
+		if res, err := db.Maintain(database, 30); err != nil {
+			log.Printf("db maintenance: %v", err)
+		} else if res.StepsPruned > 0 || res.VacuumRan {
+			log.Printf("db maintenance: pruned %d step payloads, vacuum=%v (freelist %d/%d pages)",
+				res.StepsPruned, res.VacuumRan, res.FreelistPages, res.PageCount)
+		}
+	}()
 
 	if err := db.Migrate(database); err != nil {
 		fmt.Fprintf(os.Stderr, "Failed to run migrations: %v\n", err)

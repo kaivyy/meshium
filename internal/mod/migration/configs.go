@@ -10,6 +10,8 @@ import (
 	"fmt"
 	"io"
 	"path/filepath"
+	"sort"
+	"strconv"
 	"strings"
 	"time"
 
@@ -70,12 +72,27 @@ func isExcluded(path string) bool {
 // ConfigsData holds collected config files from the source server.
 type ConfigsData struct {
 	Files map[string][]byte `json:"files"` // path -> content
-	Count int               `json:"count"`
+	// Meta carries each file's ownership and permission bits. Applying content
+	// alone silently reset a 0600 root-owned secret to the SFTP default umask
+	// on the target, widening it. Absent for payloads planned before this was
+	// captured — Apply then leaves target metadata untouched.
+	Meta  map[string]FileMeta `json:"meta,omitempty"`
+	Count int                 `json:"count"`
+}
+
+// FileMeta is the ownership/permission metadata of one config file. Names are
+// preferred over numeric ids: uid 1001 can be a different account on the
+// target, whereas "www-data" is the identity that actually matters.
+type FileMeta struct {
+	Mode  int64  `json:"mode"`            // permission bits, e.g. 0600
+	Uname string `json:"uname,omitempty"` // owner name
+	Gname string `json:"gname,omitempty"` // group name
 }
 
 // ConfigsBackup holds the target's original config files.
 type ConfigsBackup struct {
-	Files map[string][]byte `json:"files"`
+	Files map[string][]byte   `json:"files"`
+	Meta  map[string]FileMeta `json:"meta,omitempty"`
 }
 
 // ConfigsCollector collects config files from the source server via SFTP.
@@ -113,7 +130,7 @@ func (c *ConfigsCollector) Collect(ctx context.Context, ssh SSHExecuter) (Catego
 		// below, which takes minutes. Config files are text and compress about
 		// 6x, bringing the same capture to ~550 KB. parseTarArchive re-checks
 		// the per-file size as a final guard.
-		files, err := c.collectArchive(ctx, ssh, cleanPath)
+		files, meta, err := c.collectArchive(ctx, ssh, cleanPath)
 		if err != nil {
 			// Fallback: try individual file download (old method). collectSlow
 			// is itself bounded, so even this path can never hang.
@@ -134,6 +151,12 @@ func (c *ConfigsCollector) Collect(ctx context.Context, ssh SSHExecuter) (Catego
 				continue
 			}
 			data.Files[abs] = content
+			if m, ok := meta[path]; ok {
+				if data.Meta == nil {
+					data.Meta = make(map[string]FileMeta)
+				}
+				data.Meta[abs] = m
+			}
 		}
 	}
 
@@ -239,7 +262,7 @@ func absConfigPath(p string) string {
 // /etc/fstab. ExecPipe has no such cap, which is exactly what it exists for.
 //
 // The buffered path is kept for executers that cannot stream (test mocks).
-func (c *ConfigsCollector) collectArchive(ctx context.Context, ssh SSHExecuter, cleanPath string) (map[string][]byte, error) {
+func (c *ConfigsCollector) collectArchive(ctx context.Context, ssh SSHExecuter, cleanPath string) (map[string][]byte, map[string]FileMeta, error) {
 	findCmd := buildCollectFind(cleanPath)
 
 	if streamer, ok := ssh.(StreamExecuter); ok {
@@ -248,13 +271,13 @@ func (c *ConfigsCollector) collectArchive(ctx context.Context, ssh SSHExecuter, 
 		cmd := fmt.Sprintf(`%s 2>/dev/null | tar -czf - -T - 2>/dev/null`, findCmd)
 		r, err := streamer.ExecPipe(ctx, cmd)
 		if err != nil {
-			return nil, err
+			return nil, nil, err
 		}
 		defer r.Close()
 
 		zr, err := gzip.NewReader(io.LimitReader(r, maxConfigArchiveBytes))
 		if err != nil {
-			return nil, fmt.Errorf("config archive is not valid gzip: %w", err)
+			return nil, nil, fmt.Errorf("config archive is not valid gzip: %w", err)
 		}
 		defer zr.Close()
 
@@ -264,15 +287,15 @@ func (c *ConfigsCollector) collectArchive(ctx context.Context, ssh SSHExecuter, 
 	stdout, _, _, err := ssh.ExecContext(ctx, fmt.Sprintf(
 		`%s 2>/dev/null | tar -czf - -T - 2>/dev/null | base64`, findCmd))
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	gzData, err := base64Decode(stdout)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	tarData, err := gunzip(gzData)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	return parseTarArchive(tarData)
 }
@@ -360,13 +383,16 @@ func base64Decode(s string) ([]byte, error) {
 // full content in one migration_steps row, so without a cap a single /etc scan
 // writes ~100MB+ per plan and bloats the DB (and stalls the step). Large files
 // in /etc are almost always logs/caches/state DBs, not real config.
-func parseTarArchive(data []byte) (map[string][]byte, error) {
+func parseTarArchive(data []byte) (map[string][]byte, map[string]FileMeta, error) {
 	return parseTarReader(bytes.NewReader(data))
 }
 
 // parseTarReader reads a tar stream without first buffering the whole archive.
-func parseTarReader(src io.Reader) (map[string][]byte, error) {
+// It returns file contents and their ownership/permission metadata, which tar
+// records in every header and the collector previously discarded.
+func parseTarReader(src io.Reader) (map[string][]byte, map[string]FileMeta, error) {
 	files := make(map[string][]byte)
+	meta := make(map[string]FileMeta)
 	r := tar.NewReader(src)
 	for {
 		header, err := r.Next()
@@ -374,7 +400,7 @@ func parseTarReader(src io.Reader) (map[string][]byte, error) {
 			break
 		}
 		if err != nil {
-			return files, err
+			return files, meta, err
 		}
 		if header.Typeflag != tar.TypeReg {
 			continue
@@ -389,8 +415,13 @@ func parseTarReader(src io.Reader) (map[string][]byte, error) {
 			continue
 		}
 		files[header.Name] = content
+		meta[header.Name] = FileMeta{
+			Mode:  header.Mode & 0o7777,
+			Uname: header.Uname,
+			Gname: header.Gname,
+		}
 	}
-	return files, nil
+	return files, meta, nil
 }
 
 // ConfigsApplier uploads config files to the target server.
@@ -442,8 +473,100 @@ func (a *ConfigsApplier) Backup(ctx context.Context, ssh SSHExecuter) (BackupDat
 		backup.Files[file] = buf.Bytes()
 	}
 
+	// Capture the target's own mode/owner so Rollback restores metadata too —
+	// otherwise a rollback would rewrite the content but leave the widened
+	// permissions Apply had set.
+	backup.Meta = statFileMeta(ctx, ssh, keysOfBytes(backup.Files))
+
 	raw, _ := json.Marshal(backup)
 	return BackupData{Type: "configs", Data: raw}, nil
+}
+
+// keysOfBytes returns the sorted keys of a path→content map.
+func keysOfBytes(m map[string][]byte) []string {
+	out := make([]string, 0, len(m))
+	for k := range m {
+		out = append(out, k)
+	}
+	sort.Strings(out)
+	return out
+}
+
+// statFileMeta reads mode/owner for the given paths in batches.
+//
+// `stat -c '%a %U %G %n'` prints e.g. "600 root root /etc/ssh/sshd_config".
+// Paths are batched so a large /etc does not exceed ARG_MAX, and a failed
+// batch is skipped rather than failing the backup — metadata is best-effort
+// on top of content, which is the part rollback truly needs.
+func statFileMeta(ctx context.Context, ssh SSHExecuter, paths []string) map[string]FileMeta {
+	meta := make(map[string]FileMeta)
+	const batch = 200
+	for start := 0; start < len(paths); start += batch {
+		end := start + batch
+		if end > len(paths) {
+			end = len(paths)
+		}
+		quoted := make([]string, 0, end-start)
+		for _, p := range paths[start:end] {
+			quoted = append(quoted, shared.ShellQuote(p))
+		}
+		out, _, exit, err := ssh.ExecContext(ctx,
+			"stat -c '%a %U %G %n' "+strings.Join(quoted, " ")+" 2>/dev/null")
+		if err != nil || exit != 0 {
+			continue
+		}
+		for _, line := range strings.Split(strings.TrimSpace(out), "\n") {
+			// Split into at most 4 so a path containing spaces stays intact.
+			fields := strings.SplitN(strings.TrimSpace(line), " ", 4)
+			if len(fields) != 4 {
+				continue
+			}
+			mode, perr := strconv.ParseInt(fields[0], 8, 64)
+			if perr != nil {
+				continue
+			}
+			meta[fields[3]] = FileMeta{Mode: mode, Uname: fields[1], Gname: fields[2]}
+		}
+	}
+	if len(meta) == 0 {
+		return nil
+	}
+	return meta
+}
+
+// applyFileMeta restores mode and ownership for one uploaded file.
+//
+// chmod runs before chown: chown clears setuid/setgid bits on most kernels, so
+// doing it the other way round would silently drop them. Ownership uses NAMES
+// (uname:gname) because a numeric uid means a different account on the target;
+// a missing account makes chown fail, which is surfaced as a warning rather
+// than failing the whole category — the file content is already correct.
+func applyFileMeta(ctx context.Context, ssh SSHExecuter, dst string, meta map[string]FileMeta, onProgress StepCallback) {
+	m, ok := meta[dst]
+	if !ok {
+		return
+	}
+	warn := func(format string, args ...interface{}) {
+		if onProgress != nil {
+			onProgress(WSMessage{Step: "configs:apply", Status: "warning", Value: fmt.Sprintf(format, args...)})
+		}
+	}
+	if m.Mode != 0 {
+		cmd := fmt.Sprintf("chmod %o %s", m.Mode, shared.ShellQuote(dst))
+		if _, _, exit, err := ssh.ExecContext(ctx, cmd); err != nil || exit != 0 {
+			warn("could not restore mode %o on %s (exit %d)", m.Mode, dst, exit)
+		}
+	}
+	if m.Uname != "" {
+		owner := m.Uname
+		if m.Gname != "" {
+			owner += ":" + m.Gname
+		}
+		cmd := fmt.Sprintf("chown %s %s", shared.ShellQuote(owner), shared.ShellQuote(dst))
+		if _, _, exit, err := ssh.ExecContext(ctx, cmd); err != nil || exit != 0 {
+			warn("could not restore owner %s on %s — does the account exist on the target? (exit %d)", owner, dst, exit)
+		}
+	}
 }
 
 // Apply uploads config files to the target server.
@@ -507,6 +630,12 @@ func (a *ConfigsApplier) Apply(ctx context.Context, ssh SSHExecuter, data Catego
 			}
 			return fmt.Errorf("failed to upload %s: %w", dst, err)
 		}
+		// Restore the source's ownership and permissions. SFTP creates the file
+		// with the login user's umask, so a 0600 root-owned secret would land
+		// world-readable on the target without this. Payloads planned before
+		// metadata capture carry no Meta and are left alone (target keeps its
+		// own metadata) rather than being reset to a guessed default.
+		applyFileMeta(ctx, ssh, dst, cd.Meta, onProgress)
 		count++
 		if onProgress != nil && count%10 == 0 {
 			onProgress(WSMessage{
@@ -540,6 +669,10 @@ func (a *ConfigsApplier) Rollback(ctx context.Context, ssh SSHExecuter, backup B
 			// Continue even if some files fail
 			continue
 		}
+		// Restore the target's original mode/owner too. Without this a rollback
+		// would put the old content back under whatever permissions Apply left
+		// behind — undoing the change but not the exposure.
+		applyFileMeta(ctx, ssh, path, cb.Meta, nil)
 	}
 
 	return nil
