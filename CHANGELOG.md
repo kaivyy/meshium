@@ -1722,6 +1722,75 @@ finding below was reproduced before it was fixed and verified after.
   the package-collection bug: tests fed the parser a format production never
   produced.
 
+### Phase 6D — Audit round 2 (remaining findings verified & fixed)
+
+Continuation of the audit: every remaining reported finding was reproduced
+(live shell / live docker daemon) before being fixed, and each fix carries a
+regression test.
+
+- **Container-mode DB commands could never run** — every container/compose
+  engine command was built as `docker exec -i <c> -- ENV=x tool`. Verified
+  live: docker exec treats `--` as the binary to run and runs no shell, so the
+  credential env assignments (PGPASSWORD/MYSQL_PWD/REDISCLI_AUTH) and redis's
+  multi-statement restore could never execute. All commands now wrap in
+  `docker exec -i <c> sh -c '…'` (compose: `exec -T … sh -c`), verified live
+  inside a real container. File plumbing (redirects, `cat`, `gunzip`) stays
+  host-side so SFTP can reach the dumps; the doubled `docker exec` prefixes on
+  mongo dump / mysql restore are gone. Two stale tests asserted the broken
+  format and were corrected.
+- **MongoDB listing broken on MongoDB 5+** — the parser demanded double-quoted
+  JSON keys, which only the legacy `mongo` shell prints; mongosh emits Node
+  inspect format, so zero databases parsed and collect blamed the server. The
+  eval now renders plain `name<TAB>MiB` lines, identical on both shells.
+- **MySQL view-only / empty schemas silently dropped** — `SUM(...)` is NULL
+  for a schema of views, `mysql -N -B` prints literal "NULL", ParseInt fails,
+  row skipped. Query now `LEFT JOIN`s from `schemata` with `IFNULL(…,0)`.
+- **Dead compatibility blockers** — probes ran `cmd 2>&1` ignoring the exit
+  code, so "command not found" became a non-empty Docker/OpenSSL "version";
+  the critical "Docker missing on target" check could never fire and the
+  storage-driver check compared two error strings. Probes gate on exit code
+  now. The timezone probe's `|| cat /etc/timezone || echo UTC` fallbacks were
+  dead (`cut` exits 0); rewritten value-keyed and verified on all three paths.
+  Same dead-fallback shape fixed for the PG version pick in replication.go
+  (`ls /etc/postgresql | head -1 || echo 15` → basebackup at
+  `/var/lib/postgresql//main`).
+- **Container health false verdicts** — `{{.State.Health.Status}}` errors
+  outright on containers without a HEALTHCHECK (verified live), scoring them
+  all unhealthy; and `strings.Contains(out,"healthy")` matches inside
+  "un**healthy**", scoring genuinely failing containers healthy. Template now
+  guards with `{{if .State.Health}}`; the parser reads fields.
+- **Crontab backups were garbage** — the dump printed the crontab body before
+  its `---user---` marker while the parser expected marker-first: multi-line
+  crontabs were keyed by their own first cron line, single-line crontabs were
+  dropped. Marker-first dump + line parser, verified against a real crontab.
+- **Firewall "restored" from ufw status text** — when iptables-save was
+  absent, `|| ufw status` captured human-readable text that Apply piped into
+  iptables-restore with the exit discarded: target up with no firewall, step
+  green. Only iptables-save-format content is stored/applied now, and restore
+  failures surface as warnings.
+- **Empty-probe results recorded as success** — packages Backup ignored the
+  list exit code, and Rollback removes the complement of the backup, so an
+  empty baseline meant "remove every package on the target" (same blast
+  radius as the DB rollback bug); Rollback now refuses a zero-package
+  baseline. services Collect stored zero services when systemctl/rc-update
+  failed; docker Collect recorded "no containers" with the daemon down.
+- **Long operations vs frozen pool timeouts** — a pooled connection keeps the
+  timeout profile of whichever module dialed it first (15s discovery / 30s
+  default), and killing dpkg/rpm or docker pull at that wall corrupts state.
+  Batch installs, removes, docker pull/run and compose up now run cap-free
+  (bounded by the stage context) via the existing `execLongOrContext` pattern.
+- **Pool keepalive dead code + shutdown race** — `StartKeepalive` had no
+  caller (dead connections were only found under the pool mutex on the
+  caller's clock); main.go now starts it. The loop could also capture a
+  nil stop channel if StopKeepalive raced the spawn, becoming unstoppable;
+  the channel is now passed at spawn. Passes `-race`.
+
+Known limitations (documented, not fixed here): the pool shares one unrefcounted
+client per server, so lifetime eviction can close a connection under a live
+terminal/tail; nothing caps concurrent sessions per connection against sshd's
+MaxSessions=10; `NewSession`/`sftp.NewClient` sit outside the per-command
+timeout guard on a wedged transport.
+
 ---
 
 ## [1.4.2] — 2026-07-03
