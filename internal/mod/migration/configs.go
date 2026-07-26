@@ -113,6 +113,15 @@ func (c *ConfigsCollector) Collect(ctx context.Context, ssh SSHExecuter) (Catego
 	}
 
 	for _, path := range paths {
+		// A cancelled/expired context must surface as an error. Without this the
+		// archive command fails, the bounded SFTP fallback bails out on ctx.Done,
+		// and Collect marshals an EMPTY ConfigsData as a healthy result — a
+		// cancelled migration then carries "the source has no configs" forward.
+		// Found live by the VPS-B1 matrix (C6).
+		if err := ctx.Err(); err != nil {
+			return CategoryData{}, fmt.Errorf("configs collect cancelled: %w", err)
+		}
+
 		cleanPath := strings.TrimRight(path, "/")
 		if cleanPath == "" {
 			cleanPath = "/etc"
@@ -160,7 +169,16 @@ func (c *ConfigsCollector) Collect(ctx context.Context, ssh SSHExecuter) (Catego
 		}
 	}
 
+	if err := ctx.Err(); err != nil {
+		return CategoryData{}, fmt.Errorf("configs collect cancelled: %w", err)
+	}
+
 	data.Count = len(data.Files)
+	// Zero files is a failed probe, not an answer: every Linux host has config
+	// files under the collected paths. Mirrors the packages/services guards.
+	if data.Count == 0 {
+		return CategoryData{}, fmt.Errorf("config collection returned no files from %v — refusing to record an empty source snapshot", paths)
+	}
 
 	raw, _ := json.Marshal(data)
 	return CategoryData{Type: "configs", Data: raw}, nil
