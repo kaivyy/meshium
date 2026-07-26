@@ -242,10 +242,13 @@
         currentState = plan.status;
         recoverStepFromRecords();
       } catch { /* ignore */ }
-    // 4G.2: after either load path, reconcile the explicit rollback state
-    // machine from the authoritative backend state.
-    applyRollbackReconcile();
-  } finally {
+    } finally {
+      // 4G.2: after either load path, reconcile the explicit rollback state
+      // machine from the authoritative backend state. This must sit in
+      // `finally`: it used to live inside the `catch` above, so it only ran
+      // when the session fetch failed, and a normal load left the rollback
+      // banner showing a stale state after a refresh.
+      applyRollbackReconcile();
       loading = false;
     }
   }
