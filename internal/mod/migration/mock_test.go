@@ -52,26 +52,49 @@ func (m *mockSSH) Exec(cmd string) (string, string, int, error) {
 		}
 		return out, "", m.exitFor(cmd), nil
 	}
-	// Try prefix match (for commands with variable arguments)
-	for key, out := range m.execOutput {
-		if strings.HasPrefix(cmd, key) {
-			if err, ok := m.execErr[key]; ok {
-				return out, "", 1, err
-			}
-			return out, "", m.exitFor(key), nil
-		}
+	// Try prefix match (for commands with variable arguments), then substring
+	// (for probes whose command varies but a stable token identifies the
+	// expected output, e.g. "pgrep -x postgres").
+	//
+	// Both pick the LONGEST matching key. Go randomizes map iteration, so
+	// returning the first match made these tests nondeterministic whenever two
+	// stubs matched one command. TestDatabaseCollectResumeNote stubs both
+	// "pgrep -x mysql" and "mysql", and the mysql probe
+	// "(pgrep -x mysqld ... || pgrep -x mariadbd ...) && echo yes" contains
+	// both — so roughly one run in six answered the detect probe with the
+	// database listing and the test failed. Longest-match is also the right
+	// semantics: the more specific stub should win.
+	if key, ok := m.longestMatch(cmd, strings.HasPrefix); ok {
+		return m.resultFor(key)
 	}
-	// Try substring match (for probes whose command varies but a stable token
-	// identifies the expected output, e.g. "pgrep -x postgres").
-	for key, out := range m.execOutput {
-		if strings.Contains(cmd, key) {
-			if err, ok := m.execErr[key]; ok {
-				return out, "", 1, err
-			}
-			return out, "", m.exitFor(key), nil
-		}
+	if key, ok := m.longestMatch(cmd, strings.Contains); ok {
+		return m.resultFor(key)
 	}
 	return "", "", 0, nil
+}
+
+// longestMatch returns the longest key in execOutput satisfying match(cmd, key).
+func (m *mockSSH) longestMatch(cmd string, match func(s, substr string) bool) (string, bool) {
+	best := ""
+	found := false
+	for key := range m.execOutput {
+		if !match(cmd, key) {
+			continue
+		}
+		if !found || len(key) > len(best) {
+			best, found = key, true
+		}
+	}
+	return best, found
+}
+
+// resultFor renders the stubbed response for an already-selected key.
+func (m *mockSSH) resultFor(key string) (string, string, int, error) {
+	out := m.execOutput[key]
+	if err, ok := m.execErr[key]; ok {
+		return out, "", 1, err
+	}
+	return out, "", m.exitFor(key), nil
 }
 
 // addOutput registers a substring→stdout mapping (lowest-priority, substring

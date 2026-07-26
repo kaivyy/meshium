@@ -3,6 +3,7 @@ package migration
 import (
 	"archive/tar"
 	"bytes"
+	"compress/gzip"
 	"context"
 	"encoding/base64"
 	"encoding/json"
@@ -104,36 +105,18 @@ func (c *ConfigsCollector) Collect(ctx context.Context, ssh SSHExecuter) (Catego
 		// near the top of /etc), prune the known huge subtrees (cert stores,
 		// font/terminfo databases) that contain tens of thousands of files and
 		// would otherwise produce a ~100MB+ archive, and cap per-file size to
-		// maxConfigFileSize so a single large file can't blow the capture. The
-		// archive stays well under the 1 MiB ExecContext output cap, so this
-		// path never overflows into the slow per-file fallback. parseTarArchive
-		// re-checks the size as a final guard.
-		excludeArgs := buildExcludeArgs()
-		pruneArgs := buildPruneArgs()
-		sizeCap := fmt.Sprintf("-size -%dM", maxConfigFileSize>>20)
-		cmd := fmt.Sprintf(
-			`find %s -maxdepth 4 %s %s %s 2>/dev/null | tar -cf - -T - 2>/dev/null | base64`,
-			shared.ShellQuote(cleanPath), pruneArgs, sizeCap, excludeArgs,
-		)
-
-		stdout, _, _, err := ssh.ExecContext(ctx, cmd)
+		// maxConfigFileSize so a single large file can't blow the capture.
+		//
+		// The tar is gzipped before base64. A real /etc at this depth is ~3 MB
+		// of base64 uncompressed, which blows the 1 MiB ExecContext cap; the
+		// command then errors and every file falls to the per-file SFTP crawl
+		// below, which takes minutes. Config files are text and compress about
+		// 6x, bringing the same capture to ~550 KB. parseTarArchive re-checks
+		// the per-file size as a final guard.
+		files, err := c.collectArchive(ctx, ssh, cleanPath)
 		if err != nil {
 			// Fallback: try individual file download (old method). collectSlow
 			// is itself bounded, so even this path can never hang.
-			c.collectSlow(ctx, ssh, cleanPath, &data)
-			continue
-		}
-
-		// Decode base64 and parse tar archive
-		tarData, err := base64Decode(stdout)
-		if err != nil {
-			c.collectSlow(ctx, ssh, cleanPath, &data)
-			continue
-		}
-
-		// Parse tar archive in memory
-		files, err := parseTarArchive(tarData)
-		if err != nil {
 			c.collectSlow(ctx, ssh, cleanPath, &data)
 			continue
 		}
@@ -226,6 +209,113 @@ var hugeConfigDirs = []string{
 	"/etc/share",
 }
 
+// collectArchive captures one path as a single gzipped tar.
+//
+// It streams when the executer supports it. ExecContext caps captured stdout at
+// 1 MiB, and a real /etc is well past that even gzipped (~5 MB on a host with a
+// populated /etc/letsencrypt), so the buffered path errors with
+// ErrOutputLimitExceeded and drops the whole category into collectSlow — which
+// downloads files one at a time over SFTP, takes minutes, and stops at
+// maxConfigFiles, silently truncating before it ever reaches /etc/ssh or
+// /etc/fstab. ExecPipe has no such cap, which is exactly what it exists for.
+//
+// The buffered path is kept for executers that cannot stream (test mocks).
+func (c *ConfigsCollector) collectArchive(ctx context.Context, ssh SSHExecuter, cleanPath string) (map[string][]byte, error) {
+	findCmd := buildCollectFind(cleanPath)
+
+	if streamer, ok := ssh.(StreamExecuter); ok {
+		// No base64 on this path: the pipe is binary-safe, and skipping it
+		// avoids inflating the transfer by a third.
+		cmd := fmt.Sprintf(`%s 2>/dev/null | tar -czf - -T - 2>/dev/null`, findCmd)
+		r, err := streamer.ExecPipe(ctx, cmd)
+		if err != nil {
+			return nil, err
+		}
+		defer r.Close()
+
+		zr, err := gzip.NewReader(io.LimitReader(r, maxConfigArchiveBytes))
+		if err != nil {
+			return nil, fmt.Errorf("config archive is not valid gzip: %w", err)
+		}
+		defer zr.Close()
+
+		return parseTarReader(zr)
+	}
+
+	stdout, _, _, err := ssh.ExecContext(ctx, fmt.Sprintf(
+		`%s 2>/dev/null | tar -czf - -T - 2>/dev/null | base64`, findCmd))
+	if err != nil {
+		return nil, err
+	}
+	gzData, err := base64Decode(stdout)
+	if err != nil {
+		return nil, err
+	}
+	tarData, err := gunzip(gzData)
+	if err != nil {
+		return nil, err
+	}
+	return parseTarArchive(tarData)
+}
+
+// gunzip decompresses the gzipped tar produced by the collect command. The
+// decompressed size is bounded so a hostile or runaway archive cannot exhaust
+// memory: the capture is already capped at 1 MiB of base64 on the wire, and a
+// legitimate /etc expands to a few MB.
+func gunzip(b []byte) ([]byte, error) {
+	zr, err := gzip.NewReader(bytes.NewReader(b))
+	if err != nil {
+		return nil, fmt.Errorf("config archive is not valid gzip: %w", err)
+	}
+	defer zr.Close()
+
+	out, err := io.ReadAll(io.LimitReader(zr, maxConfigArchiveBytes))
+	if err != nil {
+		return nil, fmt.Errorf("decompressing config archive: %w", err)
+	}
+	return out, nil
+}
+
+// maxConfigArchiveBytes bounds the decompressed config tar.
+const maxConfigArchiveBytes = 64 << 20 // 64 MiB
+
+// buildCollectFind assembles the find expression Collect pipes into tar.
+//
+// Operator precedence matters: this reads as
+//
+//	(-path huge1 -prune) -o (-path huge2 -prune) -o (-type f <size> <excl> -print)
+//
+// so a pruned directory matches an earlier branch and is never printed, while
+// only regular files that pass the size and exclusion tests reach -print.
+func buildCollectFind(path string) string {
+	return fmt.Sprintf(
+		`find %s -maxdepth 4 %s -type f %s %s %s`,
+		shared.ShellQuote(path), buildPruneArgs(), configSizeCapArg(), buildExcludeArgs(), configPrintArg(),
+	)
+}
+
+// configSizeCapArg builds the per-file size cap for find.
+//
+// It must use the 'c' (bytes) suffix. GNU find rounds a file's size UP to the
+// given unit before comparing, so `-size -1M` means "size rounded up to whole
+// megabytes is < 1" — true only for zero-byte files. The previous
+// `-size -1M` therefore skipped every non-empty config file.
+func configSizeCapArg() string {
+	return fmt.Sprintf("-size -%dc", maxConfigFileSize)
+}
+
+// configPrintArg terminates the find expression with an explicit -print.
+//
+// Without it, find applies an implicit -print to the ENTIRE expression, and
+// since `-prune` evaluates to true the pruned directories are printed. Feeding
+// a directory to `tar -T -` makes tar archive that whole subtree — pulling in
+// exactly the cert/font/terminfo trees the prune exists to skip. With an
+// explicit -print bound to the final branch, pruned directories match an
+// earlier branch and are never printed.
+func configPrintArg() string {
+	return "-print"
+}
+
 // buildPruneArgs builds find -prune arguments for the huge subtrees. Pruning
 // (rather than -not -path) stops find from even descending into them, which is
 // what keeps a large /etc scan from enumerating hundreds of thousands of files.
@@ -252,8 +342,13 @@ func base64Decode(s string) ([]byte, error) {
 // writes ~100MB+ per plan and bloats the DB (and stalls the step). Large files
 // in /etc are almost always logs/caches/state DBs, not real config.
 func parseTarArchive(data []byte) (map[string][]byte, error) {
+	return parseTarReader(bytes.NewReader(data))
+}
+
+// parseTarReader reads a tar stream without first buffering the whole archive.
+func parseTarReader(src io.Reader) (map[string][]byte, error) {
 	files := make(map[string][]byte)
-	r := tar.NewReader(bytes.NewReader(data))
+	r := tar.NewReader(src)
 	for {
 		header, err := r.Next()
 		if err == io.EOF {
