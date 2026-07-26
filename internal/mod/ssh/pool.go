@@ -366,14 +366,14 @@ func (p *Pool) isEntryValid(entry *poolEntry, now time.Time) bool {
 	if entry == nil || entry.client == nil {
 		return false
 	}
-	if !entry.client.IsAlive() {
-		return false
-	}
+	// Cheap local checks first. An entry that is already past its lifetime or
+	// idle window is discarded either way, so probing the network for it only
+	// spends a round-trip (held under the pool mutex) to reach the same answer.
 	if p.config.MaxLifetime > 0 && now.Sub(entry.createdAt) > p.config.MaxLifetime {
 		return false
 	}
 	if p.config.MaxIdle > 0 && now.Sub(entry.client.LastUsed()) > p.config.MaxIdle {
 		return false
 	}
-	return true
+	return entry.client.IsAlive()
 }

@@ -607,12 +607,7 @@ func (c *Client) ExecPipe(ctx context.Context, cmd string) (io.ReadCloser, error
 		return nil, err
 	}
 
-	pr := &pipeReader{
-		session: session,
-		stdout:  stdout,
-		stderr:  stderr,
-		ctx:     ctx,
-	}
+	pr := newPipeReader(ctx, session, stdout, stderr)
 	// Cancel the session if the context expires before Close.
 	go func() {
 		select {
@@ -633,6 +628,20 @@ type pipeReader struct {
 	ctx     context.Context
 	done    chan struct{}
 	once    sync.Once
+}
+
+// newPipeReader builds a pipeReader with its done channel ready. Always
+// construct through this: Close does `close(p.done)` and ExecPipe's watchdog
+// selects on `<-p.done`, so a nil channel both panics on Close and makes the
+// watchdog unselectable, leaking the goroutine and its SSH session.
+func newPipeReader(ctx context.Context, session *ssh.Session, stdout, stderr io.Reader) *pipeReader {
+	return &pipeReader{
+		session: session,
+		stdout:  stdout,
+		stderr:  stderr,
+		ctx:     ctx,
+		done:    make(chan struct{}),
+	}
 }
 
 func (p *pipeReader) Read(b []byte) (int, error) {
@@ -951,13 +960,38 @@ func (c *Client) UploadLong(ctx context.Context, src io.Reader, remotePath strin
 	}
 }
 
-// IsAlive checks whether the SSH connection is still responsive.
+// aliveProbeTimeout bounds the keepalive round-trip in IsAlive. A host that is
+// blackholed (NAT drop or hard partition, so no RST comes back) leaves
+// SendRequest waiting on TCP retransmission for minutes. The pool calls IsAlive
+// while holding its mutex, so an unbounded probe there stalls every pool
+// operation for every server behind one dead host.
+const aliveProbeTimeout = 3 * time.Second
+
+// IsAlive checks whether the SSH connection is still responsive. It never
+// blocks longer than aliveProbeTimeout; a probe that has not answered by then
+// is treated as dead. The probe goroutine is left to finish on its own — it
+// unblocks when the connection is closed or the transport finally errors, and
+// it holds no locks.
 func (c *Client) IsAlive() bool {
 	if c == nil || c.conn == nil {
 		return false
 	}
-	_, _, err := c.conn.SendRequest("keepalive@openssh.com", true, nil)
-	return err == nil
+
+	// Buffered so the goroutine never blocks after we stop listening.
+	result := make(chan bool, 1)
+	go func() {
+		_, _, err := c.conn.SendRequest("keepalive@openssh.com", true, nil)
+		result <- err == nil
+	}()
+
+	timer := time.NewTimer(aliveProbeTimeout)
+	defer timer.Stop()
+	select {
+	case ok := <-result:
+		return ok
+	case <-timer.C:
+		return false
+	}
 }
 
 // HasBastion returns true if this connection is tunneled through a bastion.
