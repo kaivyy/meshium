@@ -340,7 +340,7 @@ func (a *DatabaseApplier) applyFile(ctx context.Context, ssh SSHExecuter, m Data
 	}
 	safe := sanitizeName(db)
 	// ExecMode (host/container/compose) selects WHERE the engine runs; every
-	// engine command is wrapped via execPrefix so container/compose exec actually
+	// engine command is wrapped via wrapExec so container/compose exec actually
 	// runs in-container (Phase 5E, D5/H10). The creds already carry ExecMode.
 	creds.ExecMode = resolveExecMode(creds.ExecMode)
 	// Deterministic dump paths keyed on (migrationID, db) — NOT time-based. A

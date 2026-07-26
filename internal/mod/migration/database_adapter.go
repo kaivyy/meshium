@@ -98,34 +98,42 @@ func dockerWrap(container, cmd string) string {
 	if container == "" {
 		return cmd
 	}
-	return fmt.Sprintf("docker exec -i %s -- %s", shared.ShellQuote(container), cmd)
+	return fmt.Sprintf("docker exec -i %s sh -c %s", shared.ShellQuote(container), shared.ShellQuote(cmd))
 }
 
-// execPrefix builds the command prefix that targets the engine's execution
-// context (host / container / compose) for the given DatabaseConfig. For host
-// mode it returns empty (no wrap). For container mode it prefixes `docker exec
-// -i <container> --`. For compose mode it prefixes
-// `docker compose -f <file> exec <service> --` (file is optional; compose picks
-// the default project file when empty). All identifiers are shell-quoted.
-func execPrefix(c DBCredentials) string {
+// wrapExec runs cmd in the engine's execution context (host / container /
+// compose). Host mode returns cmd unchanged.
+//
+// Container/compose mode wraps the WHOLE command in `sh -c '<cmd>'`. The old
+// prefix form `docker exec -i <c> -- ENV=x tool` was broken two ways, verified
+// against a live daemon: docker exec treats `--` as the binary to run
+// (`exec: "--": executable file not found`), and it runs no shell, so env
+// assignments and multi-statement scripts can never execute. Only a shell
+// inside the container can interpret them.
+//
+// Callers that combine a container command with host-side file plumbing
+// (`> path`, `cat path |`, `| gzip > path`) must keep that plumbing OUTSIDE
+// the wrapper so the dump file lands on the host where SFTP can reach it.
+func wrapExec(c DBCredentials, cmd string) string {
 	switch c.ExecMode {
 	case "container":
 		if c.Container == "" {
-			return "" // misconfigured: caller should have failed earlier
+			return cmd // misconfigured: caller should have failed earlier
 		}
-		return fmt.Sprintf("docker exec -i %s -- ", shared.ShellQuote(c.Container))
+		return fmt.Sprintf("docker exec -i %s sh -c %s", shared.ShellQuote(c.Container), shared.ShellQuote(cmd))
 	case "compose":
 		svc := c.ComposeService
 		if svc == "" {
-			return ""
+			return cmd
 		}
 		fileArg := ""
 		if c.ComposeFile != "" {
 			fileArg = fmt.Sprintf("-f %s ", shared.ShellQuote(c.ComposeFile))
 		}
-		return fmt.Sprintf("docker compose %sexec %s -- ", fileArg, shared.ShellQuote(svc))
+		// -T: no TTY — these run over SSH exec, and stdin must stay a pipe.
+		return fmt.Sprintf("docker compose %sexec -T %s sh -c %s", fileArg, shared.ShellQuote(svc), shared.ShellQuote(cmd))
 	default: // host
-		return ""
+		return cmd
 	}
 }
 
@@ -289,8 +297,8 @@ func (postgresMigrator) ListDatabases(ctx context.Context, ssh SSHExecuter, c DB
 	// datname + size in MiB, excluding system DBs. Output: "name<TAB>size" lines.
 	q := "SELECT datname, pg_database_size(datname)/1048576 FROM pg_database " +
 		"WHERE datname NOT IN ('template0','template1','postgres') ORDER BY datname;"
-	cmd := execPrefix(c) + fmt.Sprintf("%s psql %s -t -A -F '\t' -c %s 2>/dev/null",
-		pgEnv(c), pgConnArgs(c), shared.ShellQuote(q))
+	cmd := wrapExec(c, fmt.Sprintf("%s psql %s -t -A -F '\t' -c %s 2>/dev/null",
+		pgEnv(c), pgConnArgs(c), shared.ShellQuote(q)))
 	out, _, exit, err := ssh.ExecContext(ctx, cmd)
 	if err != nil || exit != 0 {
 		return nil, fmt.Errorf("postgres list databases: %v", err)
@@ -299,14 +307,21 @@ func (postgresMigrator) ListDatabases(ctx context.Context, ssh SSHExecuter, c DB
 }
 
 func (postgresMigrator) DumpCommand(c DBCredentials, db, path string) string {
-	// -Fc custom format + -Z 1 gzip; --clean --if-exists makes restore idempotent.
-	return execPrefix(c) + fmt.Sprintf("%s pg_dump %s -Fc --no-owner --clean --if-exists -Z 1 -f %s %s 2>/dev/null",
-		pgEnv(c), pgConnArgs(c), shared.ShellQuote(path), shared.ShellQuote(db))
+	// -Fc custom format + -Z 1 gzip; --clean --if-exists makes restore
+	// idempotent. The dump goes to stdout with the redirect OUTSIDE wrapExec:
+	// with `-f <path>` in container mode the file landed inside the container,
+	// where the SFTP download (which reads host paths) could never find it.
+	return wrapExec(c, fmt.Sprintf("%s pg_dump %s -Fc --no-owner --clean --if-exists -Z 1 %s 2>/dev/null",
+		pgEnv(c), pgConnArgs(c), shared.ShellQuote(db))) + " > " + shared.ShellQuote(path)
 }
 
 func (postgresMigrator) RestoreCommand(c DBCredentials, db, path string) string {
-	return execPrefix(c) + fmt.Sprintf("%s pg_restore %s --no-owner --clean --if-exists -d %s %s 2>&1",
-		pgEnv(c), pgConnArgs(c), shared.ShellQuote(db), shared.ShellQuote(path))
+	// The dump file lives on the host (SFTP upload), so cat feeds it through
+	// stdin — pg_restore reads a custom-format archive from stdin fine when
+	// not using -j. A path argument would resolve inside the container.
+	return "cat " + shared.ShellQuote(path) + " | " + wrapExec(c, fmt.Sprintf(
+		"%s pg_restore %s --no-owner --clean --if-exists -d %s 2>&1",
+		pgEnv(c), pgConnArgs(c), shared.ShellQuote(db)))
 }
 
 func (postgresMigrator) StreamDumpCommand(c DBCredentials, db string) string {
@@ -320,7 +335,7 @@ func (postgresMigrator) StreamRestoreCommand(c DBCredentials, db string) string 
 
 func (postgresMigrator) DropDatabaseCommand(c DBCredentials, db string) string {
 	q := fmt.Sprintf("DROP DATABASE IF EXISTS %s;", pqIdent(db))
-	return execPrefix(c) + fmt.Sprintf("%s psql %s -c %s 2>/dev/null", pgEnv(c), pgConnArgs(c), shared.ShellQuote(q))
+	return wrapExec(c, fmt.Sprintf("%s psql %s -c %s 2>/dev/null", pgEnv(c), pgConnArgs(c), shared.ShellQuote(q)))
 }
 
 // pqIdent double-quotes a Postgres identifier with embedded quotes doubled.
@@ -346,12 +361,8 @@ func (mysqlMigrator) Streaming() bool { return true }
 func (mysqlMigrator) SupportsLiveReplication() bool { return false }
 
 func (mysqlMigrator) ListDatabases(ctx context.Context, ssh SSHExecuter, c DBCredentials) ([]DBCatalogEntry, error) {
-	q := "SELECT table_schema, ROUND(SUM(data_length+index_length)/1048576) " +
-		"FROM information_schema.tables WHERE table_schema " +
-		"NOT IN ('mysql','sys','information_schema','performance_schema') " +
-		"GROUP BY table_schema ORDER BY table_schema;"
-	cmd := execPrefix(c) + fmt.Sprintf("%s mysql %s -N -B -e %s 2>/dev/null",
-		mysqlEnv(c), mysqlConnArgs(c), shared.ShellQuote(q))
+	cmd := wrapExec(c, fmt.Sprintf("%s mysql %s -N -B -e %s 2>/dev/null",
+		mysqlEnv(c), mysqlConnArgs(c), shared.ShellQuote(mysqlListQuery(c))))
 	out, _, exit, err := ssh.ExecContext(ctx, cmd)
 	if err != nil || exit != 0 {
 		return nil, fmt.Errorf("mysql list databases: %v", err)
@@ -359,31 +370,50 @@ func (mysqlMigrator) ListDatabases(ctx context.Context, ssh SSHExecuter, c DBCre
 	return parseCatalog(out, "\t")
 }
 
+// mysqlListQuery builds the catalog query. IFNULL matters: a schema holding
+// only views has SUM(data_length+index_length) = NULL, `mysql -N -B` prints
+// the literal string "NULL", and parseCatalog drops the row — so a view-only
+// database silently vanished from the migration. The LEFT JOIN from schemata
+// likewise keeps schemas with zero tables, which have no rows in
+// information_schema.tables at all.
+func mysqlListQuery(_ DBCredentials) string {
+	return "SELECT s.schema_name, IFNULL(ROUND(SUM(t.data_length+t.index_length)/1048576),0) " +
+		"FROM information_schema.schemata s " +
+		"LEFT JOIN information_schema.tables t ON t.table_schema = s.schema_name " +
+		"WHERE s.schema_name NOT IN ('mysql','sys','information_schema','performance_schema') " +
+		"GROUP BY s.schema_name ORDER BY s.schema_name;"
+}
+
 func (mysqlMigrator) StreamDumpCommand(c DBCredentials, db string) string {
 	// --single-transaction for a consistent snapshot without locking;
 	// --add-drop-database makes the restore idempotent. Output to stdout.
-	return fmt.Sprintf("%s mysqldump %s --single-transaction --routines --triggers --add-drop-database --databases %s 2>/dev/null",
-		mysqlEnv(c), mysqlConnArgs(c), shared.ShellQuote(db))
+	return wrapExec(c, fmt.Sprintf("%s mysqldump %s --single-transaction --routines --triggers --add-drop-database --databases %s 2>/dev/null",
+		mysqlEnv(c), mysqlConnArgs(c), shared.ShellQuote(db)))
 }
 
 func (mysqlMigrator) StreamRestoreCommand(c DBCredentials, db string) string {
 	// mysql reads the dump from stdin. The dump already contains
 	// CREATE/DROP DATABASE statements (--add-drop-database), so db here is the
 	// connection target, not a filter.
-	return execPrefix(c) + fmt.Sprintf("%s mysql %s 2>&1", mysqlEnv(c), mysqlConnArgs(c))
+	return wrapExec(c, fmt.Sprintf("%s mysql %s 2>&1", mysqlEnv(c), mysqlConnArgs(c)))
 }
 
 func (mysqlMigrator) DumpCommand(c DBCredentials, db, path string) string {
-	return execPrefix(c) + mysqlMigrator{}.StreamDumpCommand(c, db) + " | gzip > " + shared.ShellQuote(path)
+	// gzip + redirect stay on the host so the file is SFTP-reachable; the
+	// stream command already carries the exec-context wrapper (the old form
+	// prefixed it again, producing docker-exec-inside-docker-exec).
+	return mysqlMigrator{}.StreamDumpCommand(c, db) + " | gzip > " + shared.ShellQuote(path)
 }
 
 func (mysqlMigrator) RestoreCommand(c DBCredentials, db, path string) string {
-	return execPrefix(c) + fmt.Sprintf("gunzip -c %s | %s 2>&1", shared.ShellQuote(path), mysqlMigrator{}.StreamRestoreCommand(c, db))
+	// gunzip runs on the host where the uploaded dump lives; the wrapped mysql
+	// reads it over stdin (docker exec -i forwards stdin into the container).
+	return fmt.Sprintf("gunzip -c %s | %s", shared.ShellQuote(path), mysqlMigrator{}.StreamRestoreCommand(c, db))
 }
 
 func (mysqlMigrator) DropDatabaseCommand(c DBCredentials, db string) string {
 	q := fmt.Sprintf("DROP DATABASE IF EXISTS %s;", backtickIdent(db))
-	return execPrefix(c) + fmt.Sprintf("%s mysql %s -e %s 2>/dev/null", mysqlEnv(c), mysqlConnArgs(c), shared.ShellQuote(q))
+	return wrapExec(c, fmt.Sprintf("%s mysql %s -e %s 2>/dev/null", mysqlEnv(c), mysqlConnArgs(c), shared.ShellQuote(q)))
 }
 
 // backtickIdent wraps a MySQL identifier in backticks with embedded backticks
@@ -408,16 +438,31 @@ func (mongoMigrator) Streaming() bool { return true }
 func (mongoMigrator) SupportsLiveReplication() bool { return false }
 
 func (mongoMigrator) ListDatabases(ctx context.Context, ssh SSHExecuter, c DBCredentials) ([]DBCatalogEntry, error) {
-	// listDatabases via the mongo shell; parseMongoCatalog pulls name +
-	// sizeOnDisk (bytes→MiB) and excludes admin/config/local.
+	// The eval renders plain "name<TAB>MiB" lines itself, so the output is
+	// identical on mongosh and the legacy mongo shell. The previous approach
+	// printed the raw command result and scanned it for double-quoted JSON
+	// keys — but only the LEGACY shell prints strict JSON; mongosh (MongoDB
+	// 5+) emits Node inspect format (`name: 'admin', sizeOnDisk: Long('…')`),
+	// so on any modern host zero entries parsed and collect failed with a
+	// misleading "no user databases enumerated".
 	shell, _ := mongoShell(ctx, ssh)
-	eval := "db.adminCommand({listDatabases:1})"
-	listCmd := execPrefix(c) + fmt.Sprintf("%s %s --quiet --eval %s 2>/dev/null", shell, mongoConnArgs(c), shared.ShellQuote(eval))
+	listCmd := wrapExec(c, fmt.Sprintf("%s %s --quiet --eval %s 2>/dev/null",
+		shell, mongoConnArgs(c), shared.ShellQuote(mongoListEval())))
 	out, _, exit, err := ssh.ExecContext(ctx, listCmd)
 	if err != nil || exit != 0 {
 		return nil, fmt.Errorf("mongo list databases: %v", err)
 	}
-	return parseMongoCatalog(out)
+	return parseCatalog(out, "\t")
+}
+
+// mongoListEval builds the shell-agnostic listing expression. String
+// concatenation coerces Long to decimal digits on both shells, and the
+// filter drops system databases before they ever reach the wire.
+func mongoListEval() string {
+	return `db.adminCommand({listDatabases:1}).databases` +
+		`.filter(function(d){return ['admin','local','config'].indexOf(d.name)===-1})` +
+		`.map(function(d){return d.name+"\t"+Math.round(d.sizeOnDisk/1048576)})` +
+		`.join("\n")`
 }
 
 // mongoShell resolves the MongoDB shell binary, preferring mongosh (MongoDB 5+)
@@ -434,23 +479,26 @@ func mongoShell(ctx context.Context, ssh SSHExecuter) (shell string, warning str
 
 func (mongoMigrator) StreamDumpCommand(c DBCredentials, db string) string {
 	// --archive streams a single archive to stdout; --gzip compresses in flight.
-	return execPrefix(c) + fmt.Sprintf("mongodump %s --db %s --archive --gzip 2>/dev/null",
-		mongoConnArgs(c), shared.ShellQuote(db))
+	return wrapExec(c, fmt.Sprintf("mongodump %s --db %s --archive --gzip 2>/dev/null",
+		mongoConnArgs(c), shared.ShellQuote(db)))
 }
 
 func (mongoMigrator) StreamRestoreCommand(c DBCredentials, db string) string {
 	// --drop makes restore idempotent. --nsInclude targets the streamed db.
-	return execPrefix(c) + fmt.Sprintf("mongorestore %s --archive --gzip --drop --nsInclude %s.* 2>&1",
-		mongoConnArgs(c), shared.ShellQuote(db))
+	return wrapExec(c, fmt.Sprintf("mongorestore %s --archive --gzip --drop --nsInclude %s.* 2>&1",
+		mongoConnArgs(c), shared.ShellQuote(db)))
 }
 
 func (mongoMigrator) DumpCommand(c DBCredentials, db, path string) string {
-	return execPrefix(c) + mongoMigrator{}.StreamDumpCommand(c, db) + " > " + shared.ShellQuote(path)
+	// Redirect on the host side; the stream command already carries the
+	// exec-context wrapper (the old form prefixed it a second time).
+	return mongoMigrator{}.StreamDumpCommand(c, db) + " > " + shared.ShellQuote(path)
 }
 
 func (mongoMigrator) RestoreCommand(c DBCredentials, db, path string) string {
-	return execPrefix(c) + fmt.Sprintf("mongorestore %s --archive %s --gzip --drop --nsInclude %s.* 2>&1",
-		mongoConnArgs(c), shared.ShellQuote(path), shared.ShellQuote(db))
+	// cat on the host feeds the uploaded archive through stdin — a path
+	// argument would resolve inside the container where the file never landed.
+	return "cat " + shared.ShellQuote(path) + " | " + mongoMigrator{}.StreamRestoreCommand(c, db)
 }
 
 func (mongoMigrator) DropDatabaseCommand(c DBCredentials, db string) string {
@@ -458,7 +506,7 @@ func (mongoMigrator) DropDatabaseCommand(c DBCredentials, db string) string {
 	// (no ctx/ssh), so mongosh is used unconditionally — replication.go already
 	// assumes mongosh. The legacy fallback only applies to ListDatabases.
 	drop := fmt.Sprintf("db.getSiblingDB(%s).dropDatabase()", shared.ShellQuote(db))
-	return execPrefix(c) + fmt.Sprintf("mongosh %s --quiet --eval %s 2>/dev/null", mongoConnArgs(c), shared.ShellQuote(drop))
+	return wrapExec(c, fmt.Sprintf("mongosh %s --quiet --eval %s 2>/dev/null", mongoConnArgs(c), shared.ShellQuote(drop)))
 }
 
 // --- Redis -----------------------------------------------------------------
@@ -479,8 +527,8 @@ func (redisMigrator) SupportsLiveReplication() bool { return false }
 func (redisMigrator) ListDatabases(ctx context.Context, ssh SSHExecuter, c DBCredentials) ([]DBCatalogEntry, error) {
 	// Redis has one logical DB namespace; report DBSIZE as a rough "size" (key
 	// count, not MiB — Redis exposes no per-DB size without SCAN+DEBUG).
-	cmd := execPrefix(c) + fmt.Sprintf("%s redis-cli -h %s -p %d DBSIZE 2>/dev/null",
-		redisEnv(c), shared.ShellQuote(c.Host), c.Port)
+	cmd := wrapExec(c, fmt.Sprintf("%s redis-cli -h %s -p %d DBSIZE 2>/dev/null",
+		redisEnv(c), shared.ShellQuote(c.Host), c.Port))
 	out, _, exit, err := ssh.ExecContext(ctx, cmd)
 	if err != nil || exit != 0 {
 		return nil, fmt.Errorf("redis dbsize: %v", err)
@@ -502,8 +550,8 @@ func (redisMigrator) StreamRestoreCommand(c DBCredentials, db string) string {
 func (redisMigrator) DumpCommand(c DBCredentials, db, path string) string {
 	// redis-cli --rdb streams the RDB to stdout; redirect to the remote file.
 	// Password rides REDISCLI_AUTH (never -a on argv).
-	return execPrefix(c) + fmt.Sprintf("%s redis-cli -h %s -p %d --rdb %s 2>/dev/null",
-		redisEnv(c), shared.ShellQuote(c.Host), c.Port, shared.ShellQuote(path))
+	return wrapExec(c, fmt.Sprintf("%s redis-cli -h %s -p %d --rdb %s 2>/dev/null",
+		redisEnv(c), shared.ShellQuote(c.Host), c.Port, shared.ShellQuote(path)))
 }
 
 func (redisMigrator) RestoreCommand(c DBCredentials, db, path string) string {
@@ -511,7 +559,7 @@ func (redisMigrator) RestoreCommand(c DBCredentials, db, path string) string {
 	// health check. A failed restart must surface as an error — no || true masking
 	// the chain. set -e makes any step abort before the PING gate; the SHUTDOWN's
 	// expected non-zero is the only allowed non-zero (redis closes the conn).
-	return execPrefix(c) + fmt.Sprintf(
+	return wrapExec(c, fmt.Sprintf(
 		"set -e; "+
 			"[ -s %s ] || exit 1; "+ // refuse to restore a missing/empty RDB
 			"rdir=$(redis-cli -h %s -p %d %s CONFIG GET dir 2>/dev/null | tail -1); "+
@@ -525,14 +573,14 @@ func (redisMigrator) RestoreCommand(c DBCredentials, db, path string) string {
 		shared.ShellQuote(c.Host), c.Port, redisEnv(c),
 		shared.ShellQuote(path),
 		shared.ShellQuote(c.Host), c.Port, redisEnv(c),
-		shared.ShellQuote(c.Host), c.Port, redisEnv(c))
+		shared.ShellQuote(c.Host), c.Port, redisEnv(c)))
 }
 
 func (redisMigrator) DropDatabaseCommand(c DBCredentials, db string) string {
 	// FLUSHALL empties the dataset (rollback = undo the restore). Connects through
 	// the engine's execution context (host/container/compose) and auth env.
-	return execPrefix(c) + fmt.Sprintf("%s redis-cli -h %s -p %d FLUSHALL 2>/dev/null",
-		redisEnv(c), shared.ShellQuote(c.Host), c.Port)
+	return wrapExec(c, fmt.Sprintf("%s redis-cli -h %s -p %d FLUSHALL 2>/dev/null",
+		redisEnv(c), shared.ShellQuote(c.Host), c.Port))
 }
 
 // redisEnv returns the REDISCLI_AUTH env prefix so the password never appears on
@@ -570,70 +618,5 @@ func parseCatalog(out, sep string) ([]DBCatalogEntry, error) {
 	return entries, nil
 }
 
-// parseMongoCatalog extracts database names + sizes (MiB) from a
-// listDatabases JSON-ish response. Mongo's JS shell output is loose JSON, so we
-// scan for "name": and "sizeOnDisk": pairs defensively rather than strict-decode.
-func parseMongoCatalog(out string) ([]DBCatalogEntry, error) {
-	var entries []DBCatalogEntry
-	// Naive scan: each db block has "name" then "sizeOnDisk".
-	lines := strings.Split(out, "\n")
-	var lastName string
-	for _, ln := range lines {
-		if n := extractJSONString(ln, "name"); n != "" {
-			lastName = n
-		}
-		if s := extractJSONNumber(ln, "sizeOnDisk"); s != "" && lastName != "" {
-			size, _ := strconv.ParseInt(s, 10, 64)
-			size /= 1048576
-			if lastName != "admin" && lastName != "local" && lastName != "config" {
-				entries = append(entries, DBCatalogEntry{Name: lastName, SizeMB: size})
-			}
-			lastName = ""
-		}
-	}
-	return entries, nil
-}
 
-func extractJSONString(line, key string) string {
-	idx := strings.Index(line, "\""+key+"\"")
-	if idx < 0 {
-		return ""
-	}
-	rest := line[idx+len(key)+2:]
-	colon := strings.Index(rest, ":")
-	if colon < 0 {
-		return ""
-	}
-	rest = strings.TrimSpace(rest[colon+1:])
-	if !strings.HasPrefix(rest, "\"") {
-		return ""
-	}
-	rest = rest[1:]
-	end := strings.Index(rest, "\"")
-	if end < 0 {
-		return ""
-	}
-	return rest[:end]
-}
 
-func extractJSONNumber(line, key string) string {
-	idx := strings.Index(line, "\""+key+"\"")
-	if idx < 0 {
-		return ""
-	}
-	rest := line[idx+len(key)+2:]
-	colon := strings.Index(rest, ":")
-	if colon < 0 {
-		return ""
-	}
-	rest = strings.TrimSpace(rest[colon+1:])
-	var num strings.Builder
-	for _, r := range rest {
-		if (r >= '0' && r <= '9') || r == '-' {
-			num.WriteRune(r)
-		} else {
-			break
-		}
-	}
-	return num.String()
-}

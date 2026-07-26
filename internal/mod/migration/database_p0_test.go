@@ -70,8 +70,8 @@ func TestMongoShellFallback(t *testing.T) {
 func TestMongoListDatabasesUsesMongosh(t *testing.T) {
 	m := newMockSSH()
 	m.execOutput["command -v mongosh"] = "/usr/bin/mongosh\n"
-	// parseMongoCatalog scans for name/sizeOnDisk; provide a plausible line.
-	m.execOutput["mongosh"] = "\t\"name\" : \"shop\",\n\t\"sizeOnDisk\" : 1048576,\n"
+	// The eval prints plain name<TAB>MiB lines (shell-agnostic).
+	m.execOutput["mongosh"] = "shop\t1\n"
 	_, err := (mongoMigrator{}).ListDatabases(context.Background(), m,
 		DBCredentials{Engine: "mongodb", Username: "u", Password: "p", Host: "127.0.0.1", Port: 27017})
 	if err != nil {

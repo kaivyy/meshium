@@ -158,18 +158,20 @@ func TestDatabaseCollectAllUserDBs(t *testing.T) {
 	}
 }
 
-// TestDockerWrap: commands run inside a container are prefixed with a
-// docker-exec, args shell-quoted; empty container is a pass-through so the
-// host-mode path is unchanged.
+// TestDockerWrap: commands run inside a container are wrapped in
+// `docker exec -i <c> sh -c '<cmd>'`; empty container is a pass-through so the
+// host-mode path is unchanged. The old `docker exec -i <c> -- cmd` form is
+// broken — docker exec treats `--` as the binary to run (verified live) — so
+// this test pins the sh -c form.
 func TestDockerWrap(t *testing.T) {
 	if got := dockerWrap("", "pg_dump -d x"); got != "pg_dump -d x" {
 		t.Errorf("empty container should pass through, got %q", got)
 	}
-	if got := dockerWrap("db-1", "pg_dump -d x"); got != "docker exec -i 'db-1' -- pg_dump -d x" {
-		t.Errorf("container should be prefixed, got %q", got)
+	if got := dockerWrap("db-1", "pg_dump -d x"); got != "docker exec -i 'db-1' sh -c 'pg_dump -d x'" {
+		t.Errorf("container should be sh -c wrapped, got %q", got)
 	}
 	// container names with spaces/specials must be quoted, not split
-	if got := dockerWrap("my db", "redis-cli"); got != "docker exec -i 'my db' -- redis-cli" {
+	if got := dockerWrap("my db", "redis-cli"); got != "docker exec -i 'my db' sh -c 'redis-cli'" {
 		t.Errorf("container name must be quoted, got %q", got)
 	}
 }
@@ -229,7 +231,10 @@ func TestContainerCommandPrefix(t *testing.T) {
 				t.Errorf("%s: container command not prefixed: %q", c.Engine, cmd)
 			}
 		case "compose":
-			if !strings.HasPrefix(cmd, "docker compose -f ") || !strings.Contains(cmd, "exec 'pg' -- ") {
+			// -T (no TTY, stdin stays a pipe) + sh -c: docker compose exec has
+			// the same no-shell semantics as docker exec, so env assignments
+			// only work inside an explicit shell.
+			if !strings.HasPrefix(cmd, "docker compose -f ") || !strings.Contains(cmd, "exec -T 'pg' sh -c ") {
 				t.Errorf("%s: compose command not prefixed: %q", c.Engine, cmd)
 			}
 		default:
