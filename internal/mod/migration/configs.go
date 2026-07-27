@@ -25,6 +25,14 @@ var configExclusions = []string{
 	"/etc/fstab",
 	"/etc/hostname",
 	"/etc/machine-id",
+	// SSH HOST IDENTITY. These are the machine's own host keys — copying them
+	// gives the target the source's identity, so the target starts presenting
+	// a key meshium (and every other client) knows belongs to a different
+	// machine. A live migration did exactly this: the target became
+	// unreachable with "host key mismatch — possible MITM attack", and two
+	// servers shared one identity, which is the situation host keys exist to
+	// make impossible. Per-machine identity is never migratable.
+	"/etc/ssh/ssh_host_",
 	"/etc/hosts",
 	"/etc/shadow",
 	"/etc/passwd",
@@ -54,7 +62,17 @@ const maxConfigFileSize = 1 << 20 // 1 MiB
 
 // isExcluded returns true if the given path matches any exclusion entry.
 // Matches both exact file paths and directory prefixes (ending with /).
+// hostIdentityPrefixes are per-machine identity files matched by PREFIX rather
+// than exact path, because they exist under several names and extensions
+// (ssh_host_rsa_key, ssh_host_ed25519_key.pub, …).
+var hostIdentityPrefixes = []string{"/etc/ssh/ssh_host_"}
+
 func isExcluded(path string) bool {
+	for _, prefix := range hostIdentityPrefixes {
+		if strings.HasPrefix(path, prefix) {
+			return true
+		}
+	}
 	for _, excl := range configExclusions {
 		if strings.HasSuffix(excl, "/") {
 			if strings.HasPrefix(path, excl) {

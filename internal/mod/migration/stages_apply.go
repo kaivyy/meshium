@@ -442,12 +442,13 @@ func (s *initialSyncStage) Execute(ctx context.Context, pc *PipelineContext) err
 			pc.OnProgress(msg)
 		})
 		if err != nil {
-			// Mark the apply-set items failed; persist all per-item rows.
+			// Record what ACTUALLY landed before deciding anything. An apply
+			// that aborts partway still changed the target — marking every
+			// item failed would make rollback believe there is nothing to undo
+			// while the machine has really changed (VPS-B19).
+			reconcileApplied(ctx, pc.TargetSSH, step.Category, itemResults, applySet, step.ID, err.Error())
+			applyBackupRefsTo(itemResults, applySet, pc.BackupRefs)
 			for i := range itemResults {
-				if applySet[itemResults[i].ItemKey] {
-					itemResults[i].ExecutionState = ExecFailed
-					itemResults[i].ExecutionNotes = "apply failed: " + err.Error()
-				}
 				if uerr := pc.JobRepo.UpsertItemResult(ctx, pc.MigrationID, itemResults[i]); uerr != nil {
 					log.Printf("warning: failed to persist item result for %s/%s: %v", step.Category, itemResults[i].ItemKey, uerr)
 				}
@@ -457,16 +458,12 @@ func (s *initialSyncStage) Execute(ctx context.Context, pc *PipelineContext) err
 			return fmt.Errorf("apply %s failed: %w", step.Category, err)
 		}
 
-		// Success: finalize apply-set rows to ExecApplied; persist all rows.
+		// Success is still reconciled against the target: an applier can report
+		// success for a set where an individual item did not land, and only
+		// evidence should decide what rollback will later try to undo.
+		reconcileApplied(ctx, pc.TargetSSH, step.Category, itemResults, applySet, step.ID, "")
+		applyBackupRefsTo(itemResults, applySet, pc.BackupRefs)
 		for i := range itemResults {
-			if applySet[itemResults[i].ItemKey] {
-				itemResults[i].ExecutionState = ExecApplied
-				itemResults[i].LastExecutionAt = time.Now().UTC().Format(time.RFC3339)
-				itemResults[i].StepRefs = []int{step.ID}
-				// Per-item restore point: without this, rollback can only reason
-				// per category ("something here was applied, restore all of it").
-				applyBackupRef(&itemResults[i], pc.BackupRefs)
-			}
 			if uerr := pc.JobRepo.UpsertItemResult(ctx, pc.MigrationID, itemResults[i]); uerr != nil {
 				log.Printf("warning: failed to persist item result for %s/%s: %v", step.Category, itemResults[i].ItemKey, uerr)
 			}

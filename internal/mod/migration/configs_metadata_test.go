@@ -151,3 +151,62 @@ func TestConfigsBackupCapturesMetadata(t *testing.T) {
 		t.Errorf("backup meta = %o %s:%s, want 600 root:root", m.Mode, m.Uname, m.Gname)
 	}
 }
+
+// A live full migration copied /etc/ssh/ssh_host_*_key from source to target.
+// Those are the target's SSH HOST IDENTITY — its private host keys — so after
+// the apply the target presented the source's identity. Two consequences, both
+// serious: meshium could no longer connect ("host key mismatch — possible MITM
+// attack", which is exactly what a host key check is for), and two machines on
+// the internet now shared one host identity, which is the condition host keys
+// exist to prevent.
+//
+// Host identity is per-machine and must never be migrated, exactly like
+// /etc/machine-id and /etc/hostname.
+func TestSSHHostKeysAreNeverCollectedOrApplied(t *testing.T) {
+	hostKeyPaths := []string{
+		"/etc/ssh/ssh_host_rsa_key",
+		"/etc/ssh/ssh_host_rsa_key.pub",
+		"/etc/ssh/ssh_host_ed25519_key",
+		"/etc/ssh/ssh_host_ecdsa_key",
+	}
+	for _, p := range hostKeyPaths {
+		if !isExcluded(p) {
+			t.Errorf("%s is not excluded — migrating it hands the target the source's SSH identity", p)
+		}
+	}
+
+	// The client-side config and moduli are shared settings, not identity, and
+	// should still migrate.
+	for _, p := range []string{"/etc/ssh/sshd_config", "/etc/ssh/ssh_config"} {
+		if isExcluded(p) {
+			t.Errorf("%s should still be migratable; it is configuration, not identity", p)
+		}
+	}
+}
+
+// Collect must drop them even when they are present in the archive.
+func TestConfigsCollectorDropsHostKeys(t *testing.T) {
+	ssh := newMockSSH()
+	ssh.addOutput("tar -czf", gzTarBase64(t, map[string]string{
+		"etc/ssh/ssh_host_rsa_key":     "PRIVATE HOST KEY",
+		"etc/ssh/ssh_host_rsa_key.pub": "ssh-rsa AAAA...",
+		"etc/ssh/sshd_config":          "PermitRootLogin no\n",
+	}))
+
+	data, err := (&ConfigsCollector{Paths: []string{"/etc/ssh/"}}).Collect(context.Background(), ssh)
+	if err != nil {
+		t.Fatalf("Collect: %v", err)
+	}
+	var cd ConfigsData
+	if err := json.Unmarshal(data.Data, &cd); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	for k := range cd.Files {
+		if strings.Contains(k, "ssh_host_") {
+			t.Errorf("collected SSH host identity file %s", k)
+		}
+	}
+	if _, ok := cd.Files["/etc/ssh/sshd_config"]; !ok {
+		t.Error("sshd_config should still be collected")
+	}
+}

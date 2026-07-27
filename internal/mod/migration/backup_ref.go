@@ -98,3 +98,18 @@ func (s RollbackScope) Summary() string {
 	return fmt.Sprintf("%d of %d applied item(s) can be restored; %d have no restore point and will NOT be undone",
 		len(s.Restorable), len(s.Restorable)+len(s.NoRestore), len(s.NoRestore))
 }
+
+// applyBackupRefsTo stamps the category's restore point onto every item that
+// actually ended up applied. Only applied items get one: a ref on an item that
+// was never written would tell rollback there is something to undo.
+func applyBackupRefsTo(items []ItemResult, applySet map[string]bool, refs map[string]string) {
+	for i := range items {
+		if !applySet[items[i].ItemKey] {
+			continue
+		}
+		if items[i].ExecutionState != ExecApplied {
+			continue
+		}
+		applyBackupRef(&items[i], refs)
+	}
+}

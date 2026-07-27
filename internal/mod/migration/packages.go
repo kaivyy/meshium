@@ -210,43 +210,45 @@ func (a *PackagesApplier) Apply(ctx context.Context, ssh SSHExecuter, data Categ
 		})
 	}
 
-	// Install in batches of 50
-	batchSize := 50
-	for i := 0; i < len(packagesToInstall); i += batchSize {
-		end := i + batchSize
-		if end > len(packagesToInstall) {
-			end = len(packagesToInstall)
-		}
-		batch := packagesToInstall[i:end]
-		cmd := adapter.InstallPackages(batch)
-		// Cap-free (bounded by ctx): a batch install downloads and configures
-		// dozens of packages, which easily outlasts the pooled connection's
-		// Command timeout — that cap is whatever profile the FIRST module to
-		// dial this server froze in (15s discovery / 30s default), and a
-		// mid-flight kill leaves dpkg/rpm in a broken half-configured state.
-		_, stderrRaw, exitCode, err := execLongOrContext(ctx, ssh, cmd)
-		stderr := shared.SanitizeString(stderrRaw)
-		if err != nil || exitCode != 0 {
-			if onProgress != nil {
-				onProgress(WSMessage{
-					Step:   "packages:apply",
-					Status: "error",
-					Error:  fmt.Sprintf("install failed (exit %d): %s", exitCode, stderr),
-				})
-			}
-			return fmt.Errorf("package install failed: %s", stderr)
-		}
+	// Install in batches, falling back to one-at-a-time when a batch aborts.
+	//
+	// `apt-get install a b c` is one transaction: a single package whose
+	// postinst fails takes the entire batch with it. On the live 20.04 → 22.04
+	// run that cost the other 899 packages — after four retries the whole
+	// migration rolled back because of one broken package. Retrying the
+	// members individually confines the damage to the package that is actually
+	// broken.
+	installedCount, failedPkgs := installPackages(ctx, ssh, adapter, packagesToInstall, onProgress)
+
+	for _, f := range failedPkgs {
 		if onProgress != nil {
 			onProgress(WSMessage{
 				Step:   "packages:apply",
-				Status: "progress",
-				Value:  fmt.Sprintf("Installed %d/%d", end, len(packagesToInstall)),
+				Status: "warning",
+				Value:  fmt.Sprintf("%s could not be installed on the target and was skipped: %s", f.name, f.reason),
 			})
 		}
 	}
 
+	// An individual package that will not install is NOT a category failure.
+	// It is recorded against its own item (reconcileApplied re-reads the target
+	// afterwards) and surfaced in the migration's final status as a manual gap.
+	//
+	// Returning an error here instead fails the stage, retries it, and
+	// eventually rolls back a migration whose other 839 packages installed
+	// perfectly — observed live once the only packages left were the handful
+	// that are genuinely broken on the target (nginx, golang, ntfs-3g …).
+	//
+	// Systemic failures — unreachable target, undetectable distro, unusable
+	// package manager — already return errors above, before anything is
+	// attempted, so they are not swallowed here.
+	_ = installedCount
+
 	if onProgress != nil {
-		summary := fmt.Sprintf("%d packages installed", len(packagesToInstall))
+		summary := fmt.Sprintf("%d packages installed", installedCount)
+		if len(failedPkgs) > 0 {
+			summary += fmt.Sprintf("; %d failed to install", len(failedPkgs))
+		}
 		if len(unavailable) > 0 {
 			summary += fmt.Sprintf("; %d unavailable on the target and left for manual follow-up", len(unavailable))
 		}
@@ -413,4 +415,78 @@ func distroFamilyFromPM(pm string) string {
 	default:
 		return "unknown"
 	}
+}
+
+// pkgFailure records one package that could not be installed, with the reason
+// the target gave.
+type pkgFailure struct {
+	name   string
+	reason string
+}
+
+// installPackages installs the given packages, tolerating individual failures.
+//
+// It first tries whole batches, which is fast and lets apt resolve
+// dependencies together. When a batch aborts — one member's postinst failing
+// takes the whole transaction down — its members are retried one at a time so
+// only the genuinely broken package is lost. Returns how many were installed
+// and which ones failed.
+func installPackages(ctx context.Context, ssh SSHExecuter, adapter DistroAdapter, pkgs []string, onProgress StepCallback) (installed int, failures []pkgFailure) {
+	const batchSize = 50
+	for i := 0; i < len(pkgs); i += batchSize {
+		end := i + batchSize
+		if end > len(pkgs) {
+			end = len(pkgs)
+		}
+		batch := pkgs[i:end]
+
+		// Cap-free (bounded by ctx): a batch install downloads and configures
+		// dozens of packages, well past the pooled connection's command cap,
+		// and killing dpkg mid-flight leaves the package database broken.
+		_, _, exit, err := execLongOrContext(ctx, ssh, adapter.InstallPackages(batch))
+		if err == nil && exit == 0 {
+			installed += len(batch)
+			if onProgress != nil {
+				onProgress(WSMessage{
+					Step:   "packages:apply",
+					Status: "progress",
+					Value:  fmt.Sprintf("Installed %d/%d", installed, len(pkgs)),
+				})
+			}
+			continue
+		}
+
+		// The batch aborted. Retry each member alone so one bad package does
+		// not cost the rest of the batch.
+		if onProgress != nil {
+			onProgress(WSMessage{
+				Step:   "packages:apply",
+				Status: "warning",
+				Value:  fmt.Sprintf("A batch of %d packages aborted; retrying them individually to isolate the failure", len(batch)),
+			})
+		}
+		for _, p := range batch {
+			if ctx.Err() != nil {
+				return installed, failures
+			}
+			_, stderrRaw, exit, err := execLongOrContext(ctx, ssh, adapter.InstallPackages([]string{p}))
+			if err == nil && exit == 0 {
+				installed++
+				continue
+			}
+			reason := shared.SanitizeString(strings.TrimSpace(firstLine(stderrRaw)))
+			if reason == "" {
+				reason = fmt.Sprintf("exit %d", exit)
+			}
+			failures = append(failures, pkgFailure{name: p, reason: reason})
+		}
+		if onProgress != nil {
+			onProgress(WSMessage{
+				Step:   "packages:apply",
+				Status: "progress",
+				Value:  fmt.Sprintf("Installed %d/%d", installed, len(pkgs)),
+			})
+		}
+	}
+	return installed, failures
 }

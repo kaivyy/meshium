@@ -38,10 +38,41 @@ type ItemVerdict struct {
 // Probes are batched into a single command per category so verification cost
 // does not scale with item count.
 func probeItems(ctx context.Context, ssh SSHExecuter, category string, items []ItemResult) map[string]ItemVerdict {
+	return probeItemsMode(ctx, ssh, category, items, probeVerify)
+}
+
+// probeMode distinguishes the two different questions the probes answer.
+//
+//	probePresence — "did the change reach the target?"  (reconciliation, run
+//	                right after apply, decides what rollback must undo)
+//	probeVerify   — "is the target's state correct?"    (verification, decides
+//	                whether the item can be called verified)
+//
+// They differ for configs: immediately after upload there is no recorded
+// expected hash, so a hash comparison reports every file as unverified. Using
+// the verify probe for reconciliation marked all 2051 uploaded config files
+// `failed` even though every one had landed — the record contradicted the
+// machine in the opposite direction to the bug reconciliation exists to fix.
+type probeMode int
+
+const (
+	probeVerify probeMode = iota
+	probePresence
+)
+
+// probeItemsPresence answers "did it land", for reconciliation after apply.
+func probeItemsPresence(ctx context.Context, ssh SSHExecuter, category string, items []ItemResult) map[string]ItemVerdict {
+	return probeItemsMode(ctx, ssh, category, items, probePresence)
+}
+
+func probeItemsMode(ctx context.Context, ssh SSHExecuter, category string, items []ItemResult, mode probeMode) map[string]ItemVerdict {
 	switch category {
 	case "packages":
 		return probePackages(ctx, ssh, items)
 	case "configs":
+		if mode == probePresence {
+			return probeConfigsPresence(ctx, ssh, items)
+		}
 		return probeConfigs(ctx, ssh, items)
 	case "services":
 		return probeServices(ctx, ssh, items)
@@ -163,6 +194,56 @@ func probeConfigs(ctx context.Context, ssh SSHExecuter, items []ItemResult) map[
 			out[r.ItemKey] = ItemVerdict{OK: true, Level: VerifyInfra, Detail: "sha256 matches source"}
 		default:
 			out[r.ItemKey] = ItemVerdict{OK: false, Detail: "content differs from source (sha256 mismatch)"}
+		}
+	}
+	return out
+}
+
+// probeConfigsPresence checks only that each file exists on the target.
+//
+// This is the reconciliation question — the file was just written, so there is
+// no recorded expected hash to compare against yet. Verification (probeConfigs)
+// is the one that must compare content; conflating the two marked every
+// successfully uploaded file as failed.
+func probeConfigsPresence(ctx context.Context, ssh SSHExecuter, items []ItemResult) map[string]ItemVerdict {
+	if len(items) == 0 {
+		return map[string]ItemVerdict{}
+	}
+	present := map[string]bool{}
+	const batch = 200
+	probed := false
+	for start := 0; start < len(items); start += batch {
+		end := start + batch
+		if end > len(items) {
+			end = len(items)
+		}
+		quoted := make([]string, 0, end-start)
+		for _, r := range items[start:end] {
+			quoted = append(quoted, shared.ShellQuote(itemName(r.ItemKey)))
+		}
+		// `ls -d` prints the paths that exist and errors on the rest; a
+		// non-zero exit is expected when any path is missing.
+		out, _, _, err := ssh.ExecContext(ctx, "ls -d "+strings.Join(quoted, " ")+" 2>/dev/null")
+		if err != nil {
+			continue
+		}
+		probed = true
+		for _, line := range strings.Split(strings.TrimSpace(out), "\n") {
+			if p := strings.TrimSpace(line); p != "" {
+				present[p] = true
+			}
+		}
+	}
+	if !probed {
+		return failAll(items, "could not list files on the target")
+	}
+
+	out := make(map[string]ItemVerdict, len(items))
+	for _, r := range items {
+		if present[itemName(r.ItemKey)] {
+			out[r.ItemKey] = ItemVerdict{OK: true, Level: VerifyInfra, Detail: "file present on target"}
+		} else {
+			out[r.ItemKey] = ItemVerdict{OK: false, Detail: "file missing on target after apply"}
 		}
 	}
 	return out
