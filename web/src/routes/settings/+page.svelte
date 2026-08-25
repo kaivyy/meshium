@@ -3,6 +3,7 @@
   import { ArrowLeft, Check, Copy, Lock } from 'lucide-svelte';
   import { api } from '$lib/api/client';
   import { lock } from '$lib/stores/auth';
+  import GDriveSyncCard from '$lib/components/GDriveSyncCard.svelte';
 
   let publicKey = '';
   let loading = true;
@@ -128,5 +129,9 @@
         </div>
       {/if}
     </section>
+
+    <div class="mt-4">
+      <GDriveSyncCard />
+    </div>
   </div>
 </div>

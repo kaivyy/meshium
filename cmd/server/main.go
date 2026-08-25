@@ -23,6 +23,7 @@ import (
 	"meshium/internal/mod/middleware"
 	"meshium/internal/mod/migration"
 	"meshium/internal/mod/monitoring"
+	"meshium/internal/mod/gsync"
 	"meshium/internal/mod/process"
 	"meshium/internal/mod/server"
 	"meshium/internal/mod/ssh"
@@ -204,6 +205,18 @@ func main() {
 	monitoringService := monitoring.NewService(serverRepo, sshPool, authSvc, knownHosts)
 	monitoringHandler := handler.NewMonitoringHandler(monitoringService, authSvc)
 
+	// Google Drive sync (rclone shell-out): token encrypted at rest, folder
+	// pairs synced on schedule or manually.
+	gsyncService := gsync.NewService(authRepo, authSvc.GetAESKey)
+	rclone := &gsync.BinaryRunner{}
+	if rclone.Available() {
+		gsyncService.SetBinaryRunner(rclone)
+	} else {
+		fmt.Printf("gsync: rclone binary not found; Google Drive sync disabled until installed\n")
+	}
+	gsyncHandler := gsync.NewHandler(gsyncService)
+	gsync.StartScheduler(ctx, gsyncService)
+
 	// Pipeline handler (zero-downtime migration pipeline)
 	pipelineRepo := migrationRepo.(migration.PipelineRepo)
 	pipeline, err := migration.NewPipeline(
@@ -306,6 +319,7 @@ func main() {
 	processHandler.RegisterRoutes(mux)
 	driftHandler.RegisterRoutes(mux)
 	monitoringHandler.RegisterRoutes(mux)
+	gsyncHandler.RegisterRoutes(mux)
 
 	mux.Handle("/", staticHandler())
 
