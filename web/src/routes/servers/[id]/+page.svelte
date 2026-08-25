@@ -265,8 +265,8 @@
       await deleteServer(id);
       toast.success('Server deleted');
       await goto('/');
-    } catch {
-      toast.error('Failed to delete server');
+    } catch (err) {
+      toast.error(err instanceof Error && err.message ? err.message : 'Failed to delete server');
     }
   }
 
