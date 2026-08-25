@@ -2,6 +2,7 @@ package server
 
 import (
 	"database/sql"
+	"errors"
 	"testing"
 
 	"meshium/internal/db"
@@ -193,5 +194,43 @@ func TestRecordConnectionPersistsHistory(t *testing.T) {
 	}
 	if !entries[0].Success || entries[0].DurationMs != 42 {
 		t.Errorf("unexpected entry %+v", entries[0])
+	}
+}
+
+func mustExec(t *testing.T, d *sql.DB, q string, args ...any) {
+	t.Helper()
+	if _, err := d.Exec(q, args...); err != nil {
+		t.Fatalf("exec %q: %v", q, err)
+	}
+}
+
+// Deleting a server that migrations/backups/health-history still reference
+// used to surface as a raw SQLite "FOREIGN KEY constraint failed" and a
+// generic 500. The repo must refuse up front with a typed error naming what
+// blocks it, and leave the server in place.
+func TestDeleteBlockedByReferencesReturnsTypedError(t *testing.T) {
+	d := setupTestDB(t)
+	defer d.Close()
+
+	repo := NewRepo(d)
+	id, _ := repo.Create(Server{Name: "Ref", Host: "10.0.0.1", Port: 22, Username: "root"})
+	mustExec(t, d, `INSERT INTO migrations (source_id, target_id, categories, status) VALUES (?, ?, '{}', 'planned')`, id, id)
+	mustExec(t, d, `INSERT INTO migration_backups (migration_id, server_id, category, backup_path, backup_type) VALUES (1, ?, 'configs', '/tmp/b', 'file')`, id)
+	mustExec(t, d, `INSERT INTO health_history (migration_id, server_id, check_type, status) VALUES (1, ?, 'ping', 'ok')`, id)
+
+	err := repo.Delete(id)
+	var ref *ReferencedError
+	if !errors.As(err, &ref) {
+		t.Fatalf("expected *ReferencedError, got %v", err)
+	}
+	if ref.Migrations != 1 || ref.Backups != 1 || ref.Health != 1 {
+		t.Errorf("unexpected counts %+v", ref)
+	}
+	want := "server is referenced by 1 migration(s), 1 backup record(s), 1 health check record(s)"
+	if ref.Error() != want {
+		t.Errorf("message:\n got %q\nwant %q", ref.Error(), want)
+	}
+	if _, getErr := repo.GetByID(id); getErr != nil {
+		t.Error("blocked delete must leave the server in place")
 	}
 }

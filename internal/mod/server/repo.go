@@ -3,7 +3,7 @@ package server
 import (
 	"database/sql"
 	"errors"
-
+	"fmt"
 	"strings"
 )
 
@@ -179,8 +179,51 @@ func (r *sqliteRepo) Update(id int, s Server) error {
 	return err
 }
 
+// ReferencedError reports the records that block a server delete. Returned by
+// Delete when migrations, backups, or health-history rows still point at the
+// server; the handler maps it to 409 CONFLICT.
+type ReferencedError struct {
+	Migrations int
+	Backups    int
+	Health     int
+}
+
+func (e *ReferencedError) Error() string {
+	var parts []string
+	if e.Migrations > 0 {
+		parts = append(parts, fmt.Sprintf("%d migration(s)", e.Migrations))
+	}
+	if e.Backups > 0 {
+		parts = append(parts, fmt.Sprintf("%d backup record(s)", e.Backups))
+	}
+	if e.Health > 0 {
+		parts = append(parts, fmt.Sprintf("%d health check record(s)", e.Health))
+	}
+	return "server is referenced by " + strings.Join(parts, ", ")
+}
+
 func (r *sqliteRepo) Delete(id int) error {
-	res, err := r.db.Exec("DELETE FROM servers WHERE id = ?", id)
+	tx, err := r.db.Begin()
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+
+	var mig, backups, health int
+	if err := tx.QueryRow(
+		`SELECT
+		   (SELECT COUNT(*) FROM migrations WHERE source_id = ? OR target_id = ?),
+		   (SELECT COUNT(*) FROM migration_backups WHERE server_id = ?),
+		   (SELECT COUNT(*) FROM health_history WHERE server_id = ?)`,
+		id, id, id, id,
+	).Scan(&mig, &backups, &health); err != nil {
+		return err
+	}
+	if mig+backups+health > 0 {
+		return &ReferencedError{Migrations: mig, Backups: backups, Health: health}
+	}
+
+	res, err := tx.Exec("DELETE FROM servers WHERE id = ?", id)
 	if err != nil {
 		return err
 	}
@@ -193,7 +236,7 @@ func (r *sqliteRepo) Delete(id int) error {
 		return errors.New("server not found")
 	}
 
-	return nil
+	return tx.Commit()
 }
 
 func (r *sqliteRepo) ToggleFavorite(id int) error {
