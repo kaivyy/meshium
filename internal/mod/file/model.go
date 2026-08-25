@@ -164,6 +164,17 @@ type StatResponse struct {
 	Exists bool `json:"exists"`
 }
 
+// GitStatus is the git working-tree state of a remote directory. A directory
+// that is not a repo yields IsRepo=false with all fields empty — not an error.
+type GitStatus struct {
+	IsRepo    bool   `json:"isRepo"`
+	Branch    string `json:"branch"`
+	Head      string `json:"head"`
+	Dirty     int    `json:"dirty"`     // all porcelain entries (staged + unstaged + untracked)
+	Staged    int    `json:"staged"`    // entries whose index column (X) is set
+	Untracked int    `json:"untracked"` // "??" entries
+}
+
 // Error responses
 var (
 	ErrFileNotFound      = "file not found"
