@@ -223,6 +223,18 @@ func (r *sqliteRepo) Delete(id int) error {
 		return &ReferencedError{Migrations: mig, Backups: backups, Health: health}
 	}
 
+	// No FK on these tables (and discovery_snapshots has none at all), so the
+	// server delete would otherwise strand their rows forever.
+	for _, stmt := range []string{
+		`DELETE FROM credential_audit WHERE server_id = ?`,
+		`DELETE FROM host_key_changes WHERE server_id = ?`,
+		`DELETE FROM discovery_snapshots WHERE server_id = ?`,
+	} {
+		if _, err := tx.Exec(stmt, id); err != nil {
+			return err
+		}
+	}
+
 	res, err := tx.Exec("DELETE FROM servers WHERE id = ?", id)
 	if err != nil {
 		return err

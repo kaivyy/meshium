@@ -234,3 +234,35 @@ func TestDeleteBlockedByReferencesReturnsTypedError(t *testing.T) {
 		t.Error("blocked delete must leave the server in place")
 	}
 }
+
+// Tables with no FK on servers(id) would otherwise strand their rows forever
+// after a delete: discovery snapshots, credential audit, host-key changes.
+// Delete must purge them in the same transaction; CASCADE handles the rest.
+func TestDeleteRemovesOrphanProneRows(t *testing.T) {
+	d := setupTestDB(t)
+	defer d.Close()
+
+	repo := NewRepo(d)
+	id, _ := repo.Create(Server{Name: "Orphan", Host: "10.0.0.1", Port: 22, Username: "root"})
+	mustExec(t, d, `INSERT INTO discovery_snapshots (server_id, snapshot, captured_at) VALUES (?, '{}', CURRENT_TIMESTAMP)`, id)
+	mustExec(t, d, `INSERT INTO credential_audit (server_id, action) VALUES (?, 'read')`, id)
+	mustExec(t, d, `INSERT INTO host_key_changes (host, port, server_id) VALUES ('10.0.0.1', 22, ?)`, id)
+	mustExec(t, d, `INSERT INTO server_info (server_id, hostname) VALUES (?, 'web-01')`, id)
+
+	if err := repo.Delete(id); err != nil {
+		t.Fatalf("Delete failed: %v", err)
+	}
+
+	for table, want := range map[string]int{
+		"discovery_snapshots": 0, "credential_audit": 0, "host_key_changes": 0,
+		"server_info": 0, "connection_history": 0,
+	} {
+		var n int
+		if err := d.QueryRow(`SELECT COUNT(*) FROM `+table).Scan(&n); err != nil {
+			t.Fatalf("%s: %v", table, err)
+		}
+		if n != want {
+			t.Errorf("%s: expected %d rows after delete, got %d", table, want, n)
+		}
+	}
+}

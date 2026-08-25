@@ -135,6 +135,18 @@ func Migrate(db *sql.DB) error {
 			created_at  DATETIME DEFAULT CURRENT_TIMESTAMP
 		);`,
 		`CREATE INDEX IF NOT EXISTS idx_connection_history_server_id ON connection_history(server_id)`,
+		// Mirror of discovery.SQLiteSnapshotStore.EnsureTable (that store also
+		// creates it at startup). Duplicated here so server deletes can purge a
+		// server's snapshots in the same transaction on any database that ran
+		// Migrate. ponytail: two definitions of one table — collapse into a
+		// single owner if the schemas ever diverge.
+		`CREATE TABLE IF NOT EXISTS discovery_snapshots (
+			id          INTEGER PRIMARY KEY AUTOINCREMENT,
+			server_id   INTEGER NOT NULL,
+			snapshot    TEXT NOT NULL,
+			captured_at DATETIME NOT NULL,
+			created_at  DATETIME DEFAULT CURRENT_TIMESTAMP
+		);`,
 		`CREATE TABLE IF NOT EXISTS host_key_changes (
 			id INTEGER PRIMARY KEY AUTOINCREMENT,
 			host TEXT NOT NULL,
