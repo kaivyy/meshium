@@ -169,3 +169,29 @@ func TestSaveAndGetServerInfo(t *testing.T) {
 		t.Errorf("expected hostname 'web-01', got %q", got.Hostname)
 	}
 }
+
+// connection_history's DDL was lost from Migrate() in the July 2026 merge
+// while repo.go kept INSERTing into it — fresh databases failed every recorded
+// connection with "no such table". This pins the table's existence.
+func TestRecordConnectionPersistsHistory(t *testing.T) {
+	d := setupTestDB(t)
+	defer d.Close()
+
+	repo := NewRepo(d)
+	id, _ := repo.Create(Server{Name: "Hist", Host: "10.0.0.1", Port: 22, Username: "root"})
+
+	if err := repo.RecordConnection(id, true, 42, "", "10.0.0.9", "SHA256:abc", "password"); err != nil {
+		t.Fatalf("RecordConnection failed: %v", err)
+	}
+
+	entries, err := repo.GetConnectionHistory(id, 10)
+	if err != nil {
+		t.Fatalf("GetConnectionHistory failed: %v", err)
+	}
+	if len(entries) != 1 {
+		t.Fatalf("expected 1 history entry, got %d", len(entries))
+	}
+	if !entries[0].Success || entries[0].DurationMs != 42 {
+		t.Errorf("unexpected entry %+v", entries[0])
+	}
+}

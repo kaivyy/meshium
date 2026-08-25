@@ -119,6 +119,22 @@ func Migrate(db *sql.DB) error {
 			auth_retry_order TEXT DEFAULT 'agent,ed25519,rsa,ecdsa,password',
 			updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
 		);`,
+		// connection_history records each SSH attempt for the history/metrics
+		// dashboards. Dropped from this slice during the July 2026 enterprise-auth
+		// merge while repo.go kept writing to it — fresh databases then failed
+		// every recorded connection with "no such table".
+		`CREATE TABLE IF NOT EXISTS connection_history (
+			id          INTEGER PRIMARY KEY AUTOINCREMENT,
+			server_id   INTEGER NOT NULL REFERENCES servers(id) ON DELETE CASCADE,
+			success     INTEGER NOT NULL,
+			duration_ms INTEGER,
+			reason      TEXT,
+			remote_ip   TEXT,
+			fingerprint TEXT,
+			auth_method TEXT,
+			created_at  DATETIME DEFAULT CURRENT_TIMESTAMP
+		);`,
+		`CREATE INDEX IF NOT EXISTS idx_connection_history_server_id ON connection_history(server_id)`,
 		`CREATE TABLE IF NOT EXISTS host_key_changes (
 			id INTEGER PRIMARY KEY AUTOINCREMENT,
 			host TEXT NOT NULL,
