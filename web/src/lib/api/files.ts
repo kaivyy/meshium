@@ -260,6 +260,68 @@ export async function getGitStatus(
   return api.get<GitStatus>(`/servers/${serverId}/files/git?${params.toString()}`);
 }
 
+// One file's change from `git status --porcelain`
+export interface GitChange {
+  path: string;
+  staged: boolean;
+  untracked: boolean;
+  added?: boolean;
+  deleted?: boolean;
+  renamed?: boolean;
+}
+
+// Diff output for one pathspec (empty content when untracked)
+export interface GitDiff {
+  content: string;
+  untracked?: boolean;
+}
+
+/**
+ * List working-tree changes of the repo at path
+ */
+export async function getGitChanges(
+  serverId: number,
+  path: string
+): Promise<GitChange[]> {
+  const params = new URLSearchParams({ path });
+  return api.get<GitChange[]>(`/servers/${serverId}/files/git/changes?${params.toString()}`);
+}
+
+/**
+ * Get diff HEAD output for one repo-relative file
+ */
+export async function getGitDiff(
+  serverId: number,
+  path: string,
+  file: string
+): Promise<GitDiff> {
+  const params = new URLSearchParams({ path, file });
+  return api.get<GitDiff>(`/servers/${serverId}/files/git/diff?${params.toString()}`);
+}
+
+/**
+ * Stage or unstage repo-relative files
+ */
+export async function gitStage(
+  serverId: number,
+  path: string,
+  files: string[],
+  unstage: boolean = false
+): Promise<void> {
+  await api.post(`/servers/${serverId}/files/git/stage`, { path, files, unstage });
+}
+
+/**
+ * Commit everything staged with a message; returns refreshed status
+ */
+export async function gitCommit(
+  serverId: number,
+  path: string,
+  message: string
+): Promise<GitStatus> {
+  return api.post<GitStatus>(`/servers/${serverId}/files/git/commit`, { path, message });
+}
+
 /**
  * Format file size for display
  */

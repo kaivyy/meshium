@@ -8,6 +8,7 @@
     ChevronUp, ChevronDown, MoreVertical, Copy, Move, Save
   } from 'lucide-svelte';
   import { Badge, Card, EmptyState, PageHeader, Skeleton, Spinner, Modal } from '$lib/components/ui';
+  import GitPanel from '$lib/components/GitPanel.svelte';
   import { toast } from '$lib/stores/toast';
   import { type Server } from '$lib/stores/servers';
   import { api } from '$lib/api/client';
@@ -45,6 +46,7 @@
   let uploading = $state(false);
   let actionTarget = $state<FileInfo | null>(null);
   let gitStatus = $state<GitStatus | null>(null);
+  let gitPanelOpen = $state(false);
 
   // Editor state
   let showEditModal = $state(false);
@@ -420,10 +422,16 @@
     <span>·</span>
     <span>{formatFileSize(stats.totalSize)} total</span>
     {#if gitStatus?.isRepo}
-      <Badge variant={gitStatus.dirty > 0 ? 'warning' : 'success'} size="sm">
-        ⎇ {gitStatus.branch || gitStatus.head || 'detached'}
-        {#if gitStatus.dirty > 0}&nbsp;· {gitStatus.dirty} changed{/if}
-      </Badge>
+      <button
+        onclick={() => (gitPanelOpen = true)}
+        class="cursor-pointer transition-opacity hover:opacity-80"
+        title="Open git panel"
+      >
+        <Badge variant={gitStatus.dirty > 0 ? 'warning' : 'success'} size="sm">
+          ⎇ {gitStatus.branch || gitStatus.head || 'detached'}
+          {#if gitStatus.dirty > 0}&nbsp;· {gitStatus.dirty} changed{/if}
+        </Badge>
+      </button>
     {/if}
   </div>
 
@@ -739,5 +747,19 @@
     {/if}
   </Modal>
 {/if}
+
+<GitPanel
+  serverId={serverId}
+  path={currentPath}
+  open={gitPanelOpen}
+  status={gitStatus}
+  onclose={() => (gitPanelOpen = false)}
+  onchanged={() => {
+    loadFiles();
+    getGitStatus(serverId, currentPath)
+      .then((s) => (gitStatus = s))
+      .catch(() => {});
+  }}
+/>
 
 {#snippet emptyIcon()}<Folder size={22} />{/snippet}
