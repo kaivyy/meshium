@@ -61,6 +61,9 @@ func (h *FileHandler) RegisterRoutes(mux *http.ServeMux) {
 	// Get file stats
 	mux.HandleFunc("GET /api/servers/{id}/files/stat", h.handleStat)
 
+	// Git working-tree status for a directory
+	mux.HandleFunc("GET /api/servers/{id}/files/git", h.handleGitStatus)
+
 	if h.cron != nil {
 		h.cron.RegisterRoutes(mux)
 	}
@@ -407,4 +410,32 @@ func (h *FileHandler) handleStat(w http.ResponseWriter, r *http.Request) {
 	}
 
 	shared.WriteJSON(w, http.StatusOK, info)
+}
+
+// handleGitStatus handles GET /api/servers/{id}/files/git?path=/dir
+// A directory that is not a git repo is a 200 with isRepo=false — the UI hides
+// the chip quietly rather than surfacing an error.
+func (h *FileHandler) handleGitStatus(w http.ResponseWriter, r *http.Request) {
+	serverID, err := strconv.Atoi(r.PathValue("id"))
+	if err != nil {
+		shared.WriteError(w, http.StatusBadRequest, "invalid server id", "BAD_REQUEST")
+		return
+	}
+
+	path := r.URL.Query().Get("path")
+	if path == "" {
+		path = "/"
+	}
+
+	status, err := h.service.GitStatus(r.Context(), serverID, path)
+	if err != nil {
+		if strings.Contains(err.Error(), "not found") {
+			shared.WriteError(w, http.StatusNotFound, err.Error(), "NOT_FOUND")
+			return
+		}
+		shared.WriteError(w, http.StatusInternalServerError, err.Error(), "INTERNAL_ERROR")
+		return
+	}
+
+	shared.WriteJSON(w, http.StatusOK, status)
 }

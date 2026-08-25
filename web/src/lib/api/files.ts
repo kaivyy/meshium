@@ -239,6 +239,27 @@ export async function statFile(
   return api.get<FileInfo>(`/servers/${serverId}/files/stat?${params.toString()}`);
 }
 
+// Git working-tree status for a directory (isRepo=false when not a repo)
+export interface GitStatus {
+  isRepo: boolean;
+  branch: string;
+  head: string;
+  dirty: number;
+  staged: number;
+  untracked: number;
+}
+
+/**
+ * Get git status for a directory on a remote server
+ */
+export async function getGitStatus(
+  serverId: number,
+  path: string
+): Promise<GitStatus> {
+  const params = new URLSearchParams({ path });
+  return api.get<GitStatus>(`/servers/${serverId}/files/git?${params.toString()}`);
+}
+
 /**
  * Format file size for display
  */

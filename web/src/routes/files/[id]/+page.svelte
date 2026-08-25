@@ -13,7 +13,8 @@
   import { api } from '$lib/api/client';
   import {
     listFiles, getFileContent, downloadFile, uploadFile, deleteFile, renameFile, mkdir, writeFile,
-    type FileInfo, type ReadFileResponse, formatFileSize, isPreviewable
+    getGitStatus,
+    type FileInfo, type ReadFileResponse, type GitStatus, formatFileSize, isPreviewable
   } from '$lib/api/files';
 
   // Route params
@@ -43,6 +44,7 @@
   let uploadOverwrite = $state(false);
   let uploading = $state(false);
   let actionTarget = $state<FileInfo | null>(null);
+  let gitStatus = $state<GitStatus | null>(null);
 
   // Editor state
   let showEditModal = $state(false);
@@ -129,6 +131,10 @@
     try {
       const resp = await listFiles(serverId, currentPath, showHidden);
       files = resp.files || [];
+      // Fire-and-forget: never delay or fail the listing because of the chip.
+      getGitStatus(serverId, currentPath)
+        .then((s) => (gitStatus = s))
+        .catch(() => (gitStatus = null));
     } catch (err: any) {
       if (err?.message?.includes('not found')) {
         toast.error('Directory not found');
@@ -413,6 +419,12 @@
     <span>{stats.filesCount} files</span>
     <span>·</span>
     <span>{formatFileSize(stats.totalSize)} total</span>
+    {#if gitStatus?.isRepo}
+      <Badge variant={gitStatus.dirty > 0 ? 'warning' : 'success'} size="sm">
+        ⎇ {gitStatus.branch || gitStatus.head || 'detached'}
+        {#if gitStatus.dirty > 0}&nbsp;· {gitStatus.dirty} changed{/if}
+      </Badge>
+    {/if}
   </div>
 
   <!-- File list -->
