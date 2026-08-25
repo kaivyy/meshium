@@ -2,9 +2,11 @@ package handler
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
+	"path/filepath"
 	"strconv"
 	"strings"
 
@@ -63,6 +65,12 @@ func (h *FileHandler) RegisterRoutes(mux *http.ServeMux) {
 
 	// Git working-tree status for a directory
 	mux.HandleFunc("GET /api/servers/{id}/files/git", h.handleGitStatus)
+
+	// Git panel operations (changes/diff/stage/commit)
+	mux.HandleFunc("GET /api/servers/{id}/files/git/changes", h.handleGitChanges)
+	mux.HandleFunc("GET /api/servers/{id}/files/git/diff", h.handleGitDiff)
+	mux.HandleFunc("POST /api/servers/{id}/files/git/stage", h.handleGitStage)
+	mux.HandleFunc("POST /api/servers/{id}/files/git/commit", h.handleGitCommit)
 
 	if h.cron != nil {
 		h.cron.RegisterRoutes(mux)
@@ -438,4 +446,138 @@ func (h *FileHandler) handleGitStatus(w http.ResponseWriter, r *http.Request) {
 	}
 
 	shared.WriteJSON(w, http.StatusOK, status)
+}
+
+// gitPath validates the repo path query/body value: absolute paths only —
+// `git -C` with a relative path would resolve against the SSH session's home
+// dir and silently operate on the wrong repo.
+func validGitPath(path string) bool {
+	return path != "" && filepath.IsAbs(path)
+}
+
+// notARepo maps the service's sentinel error; everything else keeps the usual
+// 404/500 split.
+func (h *FileHandler) writeGitError(w http.ResponseWriter, err error) {
+	if errors.Is(err, file.ErrNotARepo) {
+		shared.WriteError(w, http.StatusBadRequest, err.Error(), "NOT_A_REPO")
+		return
+	}
+	if strings.Contains(err.Error(), "not found") {
+		shared.WriteError(w, http.StatusNotFound, err.Error(), "NOT_FOUND")
+		return
+	}
+	shared.WriteError(w, http.StatusInternalServerError, err.Error(), "INTERNAL_ERROR")
+}
+
+// handleGitChanges handles GET /api/servers/{id}/files/git/changes?path=/dir
+func (h *FileHandler) handleGitChanges(w http.ResponseWriter, r *http.Request) {
+	serverID, err := strconv.Atoi(r.PathValue("id"))
+	if err != nil {
+		shared.WriteError(w, http.StatusBadRequest, "invalid server id", "BAD_REQUEST")
+		return
+	}
+	path := r.URL.Query().Get("path")
+	if !validGitPath(path) {
+		shared.WriteError(w, http.StatusBadRequest, "absolute path required", "BAD_REQUEST")
+		return
+	}
+	changes, err := h.service.GitChanges(r.Context(), serverID, path)
+	if err != nil {
+		h.writeGitError(w, err)
+		return
+	}
+	if changes == nil {
+		changes = []file.GitChange{}
+	}
+	shared.WriteJSON(w, http.StatusOK, changes)
+}
+
+// handleGitDiff handles GET /api/servers/{id}/files/git/diff?path=/dir&file=rel
+func (h *FileHandler) handleGitDiff(w http.ResponseWriter, r *http.Request) {
+	serverID, err := strconv.Atoi(r.PathValue("id"))
+	if err != nil {
+		shared.WriteError(w, http.StatusBadRequest, "invalid server id", "BAD_REQUEST")
+		return
+	}
+	path := r.URL.Query().Get("path")
+	fileRel := r.URL.Query().Get("file")
+	if !validGitPath(path) || fileRel == "" || filepath.IsAbs(fileRel) {
+		shared.WriteError(w, http.StatusBadRequest, "path (abs) and file (repo-relative) required", "BAD_REQUEST")
+		return
+	}
+	diff, err := h.service.GitDiff(r.Context(), serverID, path, fileRel)
+	if err != nil {
+		h.writeGitError(w, err)
+		return
+	}
+	shared.WriteJSON(w, http.StatusOK, diff)
+}
+
+type gitStageRequest struct {
+	Path    string   `json:"path"`
+	Files   []string `json:"files"`
+	Unstage bool     `json:"unstage"`
+}
+
+// handleGitStage handles POST /api/servers/{id}/files/git/stage
+func (h *FileHandler) handleGitStage(w http.ResponseWriter, r *http.Request) {
+	serverID, err := strconv.Atoi(r.PathValue("id"))
+	if err != nil {
+		shared.WriteError(w, http.StatusBadRequest, "invalid server id", "BAD_REQUEST")
+		return
+	}
+	var req gitStageRequest
+	if err := json.NewDecoder(io.LimitReader(r.Body, 1<<20)).Decode(&req); err != nil {
+		shared.WriteError(w, http.StatusBadRequest, "invalid request body", "BAD_REQUEST")
+		return
+	}
+	if !validGitPath(req.Path) || len(req.Files) == 0 {
+		shared.WriteError(w, http.StatusBadRequest, "path (abs) and files[] required", "BAD_REQUEST")
+		return
+	}
+	for _, f := range req.Files {
+		if f == "" || filepath.IsAbs(f) || strings.Contains(f, "..") {
+			shared.WriteError(w, http.StatusBadRequest, "files must be non-empty repo-relative paths", "BAD_REQUEST")
+			return
+		}
+	}
+	if err := h.service.GitStage(r.Context(), serverID, req.Path, req.Files, req.Unstage); err != nil {
+		h.writeGitError(w, err)
+		return
+	}
+	shared.WriteJSON(w, http.StatusOK, map[string]string{"message": "ok"})
+}
+
+type gitCommitRequest struct {
+	Path    string `json:"path"`
+	Message string `json:"message"`
+}
+
+// handleGitCommit handles POST /api/servers/{id}/files/git/commit
+func (h *FileHandler) handleGitCommit(w http.ResponseWriter, r *http.Request) {
+	serverID, err := strconv.Atoi(r.PathValue("id"))
+	if err != nil {
+		shared.WriteError(w, http.StatusBadRequest, "invalid server id", "BAD_REQUEST")
+		return
+	}
+	var req gitCommitRequest
+	if err := json.NewDecoder(io.LimitReader(r.Body, 1<<20)).Decode(&req); err != nil {
+		shared.WriteError(w, http.StatusBadRequest, "invalid request body", "BAD_REQUEST")
+		return
+	}
+	if !validGitPath(req.Path) {
+		shared.WriteError(w, http.StatusBadRequest, "absolute path required", "BAD_REQUEST")
+		return
+	}
+	req.Message = strings.TrimSpace(req.Message)
+	if req.Message == "" {
+		shared.WriteError(w, http.StatusBadRequest, "commit message required", "BAD_REQUEST")
+		return
+	}
+	st, err := h.service.GitCommit(r.Context(), serverID, req.Path, req.Message)
+	if err != nil {
+		h.writeGitError(w, err)
+		return
+	}
+	shared.WriteJSON(w, http.StatusOK, st)
 }
