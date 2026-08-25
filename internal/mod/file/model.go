@@ -1,6 +1,9 @@
 package file
 
-import "time"
+import (
+	"fmt"
+	"time"
+)
 
 // FileInfo represents metadata about a file or directory.
 type FileInfo struct {
@@ -174,6 +177,15 @@ type GitStatus struct {
 	Staged    int    `json:"staged"`    // entries whose index column (X) is set
 	Untracked int    `json:"untracked"` // "??" entries
 }
+
+// GitDiff is the `git diff HEAD` output for one pathspec.
+type GitDiff struct {
+	Content   string `json:"content"`
+	Untracked bool   `json:"untracked,omitempty"` // file untracked: no diff content
+}
+
+// ErrNotARepo marks git operations against a directory outside a work tree.
+var ErrNotARepo = fmt.Errorf("directory is not a git repository")
 
 // GitChange is one file's working-tree state from porcelain v1.
 type GitChange struct {
