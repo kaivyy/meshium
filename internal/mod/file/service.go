@@ -580,6 +580,37 @@ func (s *Service) DownloadFile(ctx context.Context, serverID int, path string) (
 	return content, filename, nil
 }
 
+// GitStatus reports the git working-tree state of path on the remote server in
+// a single SSH round-trip. Directories outside a git work tree (and hosts
+// without git) return IsRepo=false — callers treat that as "hide the chip",
+// not an error. ponytail: no caching; each browse issues one cheap exec.
+func (s *Service) GitStatus(ctx context.Context, serverID int, path string) (*GitStatus, error) {
+	srv, err := s.srvRepo.GetByID(serverID)
+	if err != nil {
+		return nil, fmt.Errorf("server not found: %w", err)
+	}
+
+	sshClient, err := s.getSSHClient(serverID, srv)
+	if err != nil {
+		return nil, fmt.Errorf("SSH connection failed: %w", err)
+	}
+
+	p := shellEscape(path)
+	gitCmd := fmt.Sprintf(
+		`git -C %s rev-parse --git-dir >/dev/null 2>&1 || { echo %s; exit 0; }; `+
+			`echo "BRANCH:$(git -C %s branch --show-current 2>/dev/null)"; `+
+			`echo "HEAD:$(git -C %s rev-parse --short HEAD 2>/dev/null)"; `+
+			`git -C %s status --porcelain=v1`,
+		p, gitNotARepo, p, p, p,
+	)
+	stdout, stderr, _, err := sshClient.ExecContext(ctx, gitCmd)
+	if err != nil {
+		return nil, fmt.Errorf("git status failed: %w (stderr: %s)", err, stderr)
+	}
+
+	return parseGitStatus(stdout), nil
+}
+
 // shellEscape escapes a path for safe shell usage.
 func shellEscape(s string) string {
 	return "'" + strings.ReplaceAll(s, "'", "'\\''") + "'"
