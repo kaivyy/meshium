@@ -175,6 +175,16 @@ type GitStatus struct {
 	Untracked int    `json:"untracked"` // "??" entries
 }
 
+// GitChange is one file's working-tree state from porcelain v1.
+type GitChange struct {
+	Path      string `json:"path"`
+	Staged    bool   `json:"staged"`          // X column set (index differs from HEAD)
+	Untracked bool   `json:"untracked"`       // "??"
+	Added     bool   `json:"added,omitempty"` // A in either column
+	Deleted   bool   `json:"deleted,omitempty"`
+	Renamed   bool   `json:"renamed,omitempty"` // R/C; Path is the NEW name
+}
+
 // Error responses
 var (
 	ErrFileNotFound      = "file not found"
