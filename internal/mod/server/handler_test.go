@@ -351,3 +351,34 @@ func TestHandleTrustHostAndFingerprint(t *testing.T) {
 		t.Fatalf("expected matching fingerprints, got %q and %q", trustResp["fingerprint"], fpResp["fingerprint"])
 	}
 }
+
+// A server still referenced by migrations must come back as 409 with the
+// blocking counts, not a generic 500 from the FK constraint.
+func TestHandleDeleteBlockedReturns409WithMessage(t *testing.T) {
+	h, d := setupHandlerTest(t)
+	defer d.Close()
+
+	body, _ := json.Marshal(CreateRequest{Name: "Blocked", Host: "192.168.1.9", Port: 22, Username: "root"})
+	req := httptest.NewRequest(http.MethodPost, "/api/servers", bytes.NewReader(body))
+	w := httptest.NewRecorder()
+	h.handleCreate(w, req)
+
+	if _, err := d.Exec(`INSERT INTO migrations (source_id, target_id, categories, status) VALUES (1, 1, '{}', 'planned')`); err != nil {
+		t.Fatalf("seed migration: %v", err)
+	}
+
+	req = httptest.NewRequest(http.MethodDelete, "/api/servers/1", nil)
+	w = httptest.NewRecorder()
+	h.handleServerByID(w, req)
+
+	if w.Code != http.StatusConflict {
+		t.Fatalf("expected 409, got %d", w.Code)
+	}
+	var apiErr shared.APIError
+	if err := json.NewDecoder(w.Body).Decode(&apiErr); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if apiErr.Code != "SERVER_REFERENCED" || !strings.Contains(apiErr.Error, "1 migration(s)") {
+		t.Errorf("unexpected error payload %+v", apiErr)
+	}
+}

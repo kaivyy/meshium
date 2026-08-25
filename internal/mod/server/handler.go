@@ -2,6 +2,7 @@ package server
 
 import (
 	"encoding/json"
+	"errors"
 	"net/http"
 	"strconv"
 	"strings"
@@ -222,6 +223,11 @@ func (h *Handler) handleUpdate(w http.ResponseWriter, r *http.Request, id int) {
 
 func (h *Handler) handleDelete(w http.ResponseWriter, r *http.Request, id int) {
 	if err := h.svc.Delete(id); err != nil {
+		var ref *ReferencedError
+		if errors.As(err, &ref) {
+			shared.WriteError(w, http.StatusConflict, ref.Error(), "SERVER_REFERENCED")
+			return
+		}
 		if isNotFoundError(err) {
 			shared.WriteError(w, http.StatusNotFound, "server not found", "NOT_FOUND")
 			return

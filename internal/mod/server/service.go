@@ -220,11 +220,14 @@ func (s *Service) Update(id int, req UpdateRequest) error {
 }
 
 func (s *Service) Delete(id int) error {
-	// Invalidate cached SSH connection before deleting the server
+	if err := s.repo.Delete(id); err != nil {
+		return err
+	}
+	// Invalidate cached SSH connections only once the server is really gone.
 	if s.pool != nil {
 		s.pool.Close(id)
 	}
-	return s.repo.Delete(id)
+	return nil
 }
 
 func (s *Service) ToggleFavorite(id int) error {
