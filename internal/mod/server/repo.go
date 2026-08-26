@@ -13,6 +13,7 @@ type Repo interface {
 	List(filter ListFilter) ([]Server, error)
 	Update(id int, s Server) error
 	Delete(id int) error
+	DeleteForce(id int, force bool) error
 	ToggleFavorite(id int) error
 	SaveServerInfo(serverID int, info ServerInfo, rawData string) error
 	GetServerInfo(serverID int) (*ServerInfo, error)
@@ -203,6 +204,13 @@ func (e *ReferencedError) Error() string {
 }
 
 func (r *sqliteRepo) Delete(id int) error {
+	return r.DeleteForce(id, false)
+}
+
+// DeleteForce removes the server; with force=true it also deletes the
+// migrations, backups, and health history that reference it instead of
+// refusing. Everything runs in one transaction — all or nothing.
+func (r *sqliteRepo) DeleteForce(id int, force bool) error {
 	tx, err := r.db.Begin()
 	if err != nil {
 		return err
@@ -219,8 +227,19 @@ func (r *sqliteRepo) Delete(id int) error {
 	).Scan(&mig, &backups, &health); err != nil {
 		return err
 	}
-	if mig+backups+health > 0 {
+	if mig+backups+health > 0 && !force {
 		return &ReferencedError{Migrations: mig, Backups: backups, Health: health}
+	}
+	if force {
+		for _, stmt := range []string{
+			`DELETE FROM migrations WHERE source_id = ? OR target_id = ?`,
+			`DELETE FROM migration_backups WHERE server_id = ?`,
+			`DELETE FROM health_history WHERE server_id = ?`,
+		} {
+			if _, err := tx.Exec(stmt, id, id, id); err != nil {
+				return err
+			}
+		}
 	}
 
 	// No FK on these tables (and discovery_snapshots has none at all), so the

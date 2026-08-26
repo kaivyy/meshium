@@ -157,8 +157,8 @@ export async function updateServer(
   await fetchServers();
 }
 
-export async function deleteServer(id: number) {
-  await api.delete(`/servers/${id}`);
+export async function deleteServer(id: number, force: boolean = false) {
+  await api.delete(`/servers/${id}${force ? '?force=true' : ''}`);
   await fetchServers();
 }
 

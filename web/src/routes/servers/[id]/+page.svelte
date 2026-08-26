@@ -3,7 +3,7 @@
   import { page } from '$app/state';
   import { onDestroy } from 'svelte';
   import { ArrowLeft, ArrowRightLeft, Clock, Cpu, HardDrive, Key, MemoryStick, MoreVertical, Network, Play, RefreshCw, Shield, ShieldCheck, ShieldAlert, Trash2 } from 'lucide-svelte';
-  import { api } from '$lib/api/client';
+  import { api, APIError } from '$lib/api/client';
   import { discoveryApi, type ServerSnapshot, type ServerConnectionInfo } from '$lib/api/discovery';
   import { wsConnect, type WSMessage } from '$lib/api/websocket';
   import { Badge, Card, DropdownMenu, EmptyState, Spinner } from '$lib/components/ui';
@@ -266,6 +266,21 @@
       toast.success('Server deleted');
       await goto('/');
     } catch (err) {
+      // Referenced by migrations/backups/health history — offer a forced delete
+      // that removes those records too.
+      if (err instanceof APIError && err.code === 'SERVER_REFERENCED') {
+        const msg = err.message || 'This server is referenced by other records';
+        if (confirm(`${msg}.\n\nForce delete will also permanently remove those records. Continue?`)) {
+          try {
+            await deleteServer(id, true);
+            toast.success('Server and its references deleted');
+            await goto('/');
+          } catch (err2) {
+            toast.error(err2 instanceof Error && err2.message ? err2.message : 'Failed to delete server');
+          }
+        }
+        return;
+      }
       toast.error(err instanceof Error && err.message ? err.message : 'Failed to delete server');
     }
   }

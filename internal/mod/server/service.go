@@ -220,7 +220,13 @@ func (s *Service) Update(id int, req UpdateRequest) error {
 }
 
 func (s *Service) Delete(id int) error {
-	if err := s.repo.Delete(id); err != nil {
+	return s.DeleteForce(id, false)
+}
+
+// DeleteForce removes a server; force=true also deletes referencing migrations,
+// backups, and health history.
+func (s *Service) DeleteForce(id int, force bool) error {
+	if err := s.repo.DeleteForce(id, force); err != nil {
 		return err
 	}
 	// Invalidate cached SSH connections only once the server is really gone.

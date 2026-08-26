@@ -222,7 +222,7 @@ func (h *Handler) handleUpdate(w http.ResponseWriter, r *http.Request, id int) {
 }
 
 func (h *Handler) handleDelete(w http.ResponseWriter, r *http.Request, id int) {
-	if err := h.svc.Delete(id); err != nil {
+	if err := h.svc.DeleteForce(id, r.URL.Query().Get("force") == "true"); err != nil {
 		var ref *ReferencedError
 		if errors.As(err, &ref) {
 			shared.WriteError(w, http.StatusConflict, ref.Error(), "SERVER_REFERENCED")
