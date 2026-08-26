@@ -171,6 +171,7 @@ type StatResponse struct {
 // that is not a repo yields IsRepo=false with all fields empty — not an error.
 type GitStatus struct {
 	IsRepo    bool   `json:"isRepo"`
+	Root      string `json:"root"` // work-tree top-level; lets the UI map porcelain paths (repo-relative) onto absolute file paths
 	Branch    string `json:"branch"`
 	Head      string `json:"head"`
 	Dirty     int    `json:"dirty"`     // all porcelain entries (staged + unstaged + untracked)

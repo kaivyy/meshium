@@ -14,8 +14,8 @@
   import { api } from '$lib/api/client';
   import {
     listFiles, getFileContent, downloadFile, uploadFile, deleteFile, renameFile, mkdir, writeFile,
-    getGitStatus,
-    type FileInfo, type ReadFileResponse, type GitStatus, formatFileSize, isPreviewable
+    getGitStatus, getGitChanges,
+    type FileInfo, type ReadFileResponse, type GitStatus, type GitChange, formatFileSize, isPreviewable
   } from '$lib/api/files';
 
   // Route params
@@ -46,7 +46,28 @@
   let uploading = $state(false);
   let actionTarget = $state<FileInfo | null>(null);
   let gitStatus = $state<GitStatus | null>(null);
+  let gitChanges = $state<GitChange[]>([]);
   let gitPanelOpen = $state(false);
+
+  // Git marker for a listed file: change code (M/A/D/??) when it has working-tree
+  // changes in the browsed repo, '' when clean. Porcelain paths are repo-relative.
+  function gitMark(file: FileInfo): string {
+    if (!gitStatus?.isRepo || !gitStatus.root) return '';
+    const abs = file.path.startsWith('/') ? file.path : `${gitStatus.root}/${file.path}`;
+    const ch = gitChanges.find((c) => `${gitStatus!.root}/${c.path}` === abs);
+    if (!ch) return '';
+    if (ch.untracked) return '??';
+    const x = ch.staged ? (ch.added ? 'A' : ch.deleted ? 'D' : ch.renamed ? 'R' : 'M') : '';
+    const y = !ch.staged && !ch.added && !ch.deleted ? 'M' : ch.added && !ch.staged ? 'A' : ch.deleted && !ch.staged ? 'D' : '';
+    return (x + y) || 'M';
+  }
+
+  function gitMarkClass(mark: string): string {
+    if (mark.includes('??')) return 'text-fg-subtle';
+    if (mark.includes('D')) return 'text-error';
+    if (mark.includes('A') || mark.includes('R')) return 'text-info';
+    return 'text-warning';
+  }
 
   // Editor state
   let showEditModal = $state(false);
@@ -135,8 +156,14 @@
       files = resp.files || [];
       // Fire-and-forget: never delay or fail the listing because of the chip.
       getGitStatus(serverId, currentPath)
-        .then((s) => (gitStatus = s))
-        .catch(() => (gitStatus = null));
+        .then(async (s) => {
+          gitStatus = s;
+          gitChanges = s.isRepo ? ((await getGitChanges(serverId, currentPath).catch(() => [])) || []) : [];
+        })
+        .catch(() => {
+          gitStatus = null;
+          gitChanges = [];
+        });
     } catch (err: any) {
       if (err?.message?.includes('not found')) {
         toast.error('Directory not found');
@@ -469,6 +496,10 @@
           <button type="button" onclick={() => openFile(file)} class="flex min-w-0 flex-1 items-center gap-2 text-left">
             <Icon size={18} class={file.isDir ? 'text-info' : 'text-fg-subtle'} />
             <span class="truncate text-sm font-medium text-fg">{file.name}</span>
+            {#if gitMark(file)}
+              {@const mark = gitMark(file)}
+              <span class="shrink-0 font-mono text-xs font-semibold {gitMarkClass(mark)}" title="git: {mark}">{mark}</span>
+            {/if}
             {#if file.isSymlink && file.linkTarget}
               <span class="text-xs text-fg-subtle">→ {file.linkTarget}</span>
             {/if}
@@ -757,7 +788,10 @@
   onchanged={() => {
     loadFiles();
     getGitStatus(serverId, currentPath)
-      .then((s) => (gitStatus = s))
+      .then(async (s) => {
+        gitStatus = s;
+        gitChanges = s.isRepo ? ((await getGitChanges(serverId, currentPath).catch(() => [])) || []) : [];
+      })
       .catch(() => {});
   }}
 />

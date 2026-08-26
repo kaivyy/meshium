@@ -242,6 +242,7 @@ export async function statFile(
 // Git working-tree status for a directory (isRepo=false when not a repo)
 export interface GitStatus {
   isRepo: boolean;
+  root: string; // repo top-level; porcelain paths are relative to this
   branch: string;
   head: string;
   dirty: number;

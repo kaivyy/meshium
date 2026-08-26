@@ -598,10 +598,11 @@ func (s *Service) GitStatus(ctx context.Context, serverID int, path string) (*Gi
 	p := shellEscape(path)
 	gitCmd := fmt.Sprintf(
 		`git -C %s rev-parse --git-dir >/dev/null 2>&1 || { echo %s; exit 0; }; `+
+			`echo "ROOT:$(git -C %s rev-parse --show-toplevel 2>/dev/null)"; `+
 			`echo "BRANCH:$(git -C %s branch --show-current 2>/dev/null)"; `+
 			`echo "HEAD:$(git -C %s rev-parse --short HEAD 2>/dev/null)"; `+
 			`git -C %s status --porcelain=v1`,
-		p, gitNotARepo, p, p, p,
+		p, gitNotARepo, p, p, p, p,
 	)
 	stdout, stderr, _, err := sshClient.ExecContext(ctx, gitCmd)
 	if err != nil {

@@ -21,6 +21,8 @@ func parseGitStatus(out string) *GitStatus {
 		case strings.TrimSpace(line) == "":
 		case line == gitNotARepo:
 			return &GitStatus{IsRepo: false}
+		case strings.HasPrefix(line, "ROOT:"):
+			st.Root = strings.TrimSpace(strings.TrimPrefix(line, "ROOT:"))
 		case strings.HasPrefix(line, "BRANCH:"):
 			st.IsRepo = true
 			st.Branch = strings.TrimSpace(strings.TrimPrefix(line, "BRANCH:"))
