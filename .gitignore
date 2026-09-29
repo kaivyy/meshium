@@ -35,6 +35,10 @@ AUDIT.md
 # Runtime logs
 *.log
 
+# Dependencies
+node_modules/
+
 # Local agent config
 .claude/
 backup/meshium-smoke
+
