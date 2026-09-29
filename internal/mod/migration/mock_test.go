@@ -5,11 +5,13 @@ import (
 	"context"
 	"io"
 	"strings"
+	"sync"
 )
 
 // mockSSH is a configurable SSHExecuter for testing.
 // It supports per-command output mapping and upload/download capture.
 type mockSSH struct {
+	mu           sync.Mutex
 	execOutput   map[string]string // cmd -> stdout
 	execOutputSeq map[string][]string // cmd -> ordered outputs, consumed per call
 	execExit     map[string]int    // cmd prefix -> nonzero exit code
@@ -34,6 +36,8 @@ func newMockSSH() *mockSSH {
 }
 
 func (m *mockSSH) Exec(cmd string) (string, string, int, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
 	m.commands = append(m.commands, cmd)
 	// Ordered outputs (e.g. a probe that must return two different values across
 	// calls) take precedence when available; they are consumed one per call.
@@ -101,6 +105,8 @@ func (m *mockSSH) resultFor(key string) (string, string, int, error) {
 // match). Useful for probes like "pgrep -x postgres" whose exact command is
 // awkward to key by prefix.
 func (m *mockSSH) addOutput(substr, out string) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
 	m.execOutput[substr] = out
 }
 
@@ -127,11 +133,15 @@ func (m *mockSSH) IsAlive() bool { return m.alive }
 func (m *mockSSH) Upload(src io.Reader, remotePath string) error {
 	buf := new(bytes.Buffer)
 	io.Copy(buf, src)
+	m.mu.Lock()
+	defer m.mu.Unlock()
 	m.uploadData[remotePath] = buf.Bytes()
 	return nil
 }
 
 func (m *mockSSH) Download(remotePath string, dst io.Writer) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
 	m.downloadCalls++
 	if data, ok := m.downloadData[remotePath]; ok {
 		dst.Write(data)
