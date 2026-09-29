@@ -121,6 +121,7 @@ func (m *mockServerRepo) GetByID(id int) (*server.Server, error) {
 func (m *mockServerRepo) Create(s server.Server) (int, error)  { return s.ID, nil }
 func (m *mockServerRepo) Update(id int, s server.Server) error { return nil }
 func (m *mockServerRepo) Delete(id int) error                  { return nil }
+func (m *mockServerRepo) DeleteForce(id int, force bool) error { return nil }
 func (m *mockServerRepo) ToggleFavorite(id int) error          { return nil }
 func (m *mockServerRepo) List(filter server.ListFilter) ([]server.Server, error) {
 	return nil, nil

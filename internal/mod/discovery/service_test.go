@@ -82,6 +82,7 @@ func (f *fakeServerRepo) List(filter server.ListFilter) ([]server.Server, error)
 
 func (f *fakeServerRepo) Update(id int, s server.Server) error { return errors.New("not implemented") }
 func (f *fakeServerRepo) Delete(id int) error                  { return errors.New("not implemented") }
+func (f *fakeServerRepo) DeleteForce(id int, force bool) error { return errors.New("not implemented") }
 func (f *fakeServerRepo) ToggleFavorite(id int) error          { return errors.New("not implemented") }
 
 func (f *fakeServerRepo) SaveServerInfo(serverID int, info server.ServerInfo, rawData string) error {
