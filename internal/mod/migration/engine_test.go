@@ -229,22 +229,22 @@ func (m *mockServerRepo) GetAuthDashboard() (*server.AuthDashboard, error) {
 // --- Mock Connection Pool ---
 
 type mockPool struct {
-	ssh mockSSH
+	ssh *mockSSH
 }
 
 func newMockPool() *mockPool {
 	ssh := newMockSSH()
 	ssh.execOutput["cat /etc/os-release"] = "ID=debian\nVERSION_ID=\"12\"\n"
 	ssh.execOutput["cat /etc/os-release 2>/dev/null || cat /etc/redhat-release 2>/dev/null || uname -s"] = "ID=debian\nVERSION_ID=\"12\"\n"
-	return &mockPool{ssh: *ssh}
+	return &mockPool{ssh: ssh}
 }
 
 func (p *mockPool) Get(serverID int, config modssh.ServerConfig, callback xssh.HostKeyCallback) (SSHExecuter, error) {
-	return &p.ssh, nil
+	return p.ssh, nil
 }
 
 func (p *mockPool) GetContext(ctx context.Context, serverID int, config modssh.ServerConfig, callback xssh.HostKeyCallback) (SSHExecuter, error) {
-	return &p.ssh, nil
+	return p.ssh, nil
 }
 
 func (p *mockPool) Close() error { return nil }
